@@ -1,0 +1,171 @@
+# Shared Windows PowerShell 5.1 / PowerShell 7 helpers. No global policy changes.
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$script:ProjectRoot = Split-Path $PSScriptRoot -Parent
+function Write-JsonFile($Value, [string]$Path) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $Path -Parent) | Out-Null
+    [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 40), (New-Object Text.UTF8Encoding($false)))
+}
+function Resolve-ProjectPath([string]$Path) {
+    if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
+    return [IO.Path]::GetFullPath((Join-Path $script:ProjectRoot $Path))
+}
+function Get-DotNet {
+    $local = Join-Path $script:ProjectRoot '.tools\dotnet\dotnet.exe'
+    if (Test-Path -LiteralPath $local) { $tool = $local } else { $tool = (Get-Command dotnet -ErrorAction Stop).Source }
+    $env:DOTNET_ROOT = Split-Path $tool -Parent
+    $env:DOTNET_CLI_HOME = Join-Path $script:ProjectRoot '.tools\cli-home'
+    $env:NUGET_PACKAGES = Join-Path $script:ProjectRoot '.nuget\packages'
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+    return $tool
+}
+function Get-ScriptShell {
+    # Keep nested scripts on the host whose module paths are inherited by child
+    # processes. Mixing pwsh's environment with Windows PowerShell breaks cmdlets.
+    $name=if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'}
+    return Join-Path $PSHOME $name
+}
+function Get-VisualStudioRoots {
+    if($env:FOLDERLENS_VS_ROOT){
+        if(-not(Test-Path -LiteralPath $env:FOLDERLENS_VS_ROOT -PathType Container)){throw 'FOLDERLENS_VS_ROOT does not exist.'}
+        [IO.Path]::GetFullPath($env:FOLDERLENS_VS_ROOT)
+    }
+    $locator=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if(Test-Path -LiteralPath $locator){
+        $found=@(& $locator -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+        if($LASTEXITCODE -ne 0){throw 'Visual Studio discovery failed.'}
+        $found | Where-Object {$_ -and (Test-Path -LiteralPath $_ -PathType Container)}
+    }
+}
+function Get-CMake {
+    if($env:FOLDERLENS_CMAKE){
+        if(-not(Test-Path -LiteralPath $env:FOLDERLENS_CMAKE -PathType Leaf)){throw 'FOLDERLENS_CMAKE does not name an existing executable.'}
+        return [IO.Path]::GetFullPath($env:FOLDERLENS_CMAKE)
+    }
+    $command=Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if($command){return $command.Source}
+    foreach($root in @(Get-VisualStudioRoots)){
+        $candidate=Join-Path $root 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+        if(Test-Path -LiteralPath $candidate -PathType Leaf){return $candidate}
+    }
+    throw 'CMake was not found on PATH or in Visual Studio. Set FOLDERLENS_CMAKE to its executable.'
+}
+function Get-CrtDirectory($Component) {
+    $candidates=@()
+    if($env:FOLDERLENS_CRT_DIR){$candidates=@($env:FOLDERLENS_CRT_DIR)}
+    else {
+        foreach($root in @(Get-VisualStudioRoots)){$candidates+=Join-Path $root ("VC\Redist\MSVC\"+$Component.version+'\x64\Microsoft.VC143.CRT')}
+        if($Component.PSObject.Properties['redistributableDirectory']){$candidates+=$Component.redistributableDirectory}
+    }
+    foreach($candidate in $candidates | Select-Object -Unique){
+        if(-not(Test-Path -LiteralPath $candidate -PathType Container)){continue}
+        foreach($file in $Component.files){
+            $inputFile=Join-Path $candidate $file.file
+            if(-not(Test-Path -LiteralPath $inputFile -PathType Leaf)){throw "Locked CRT input is missing: $inputFile"}
+            if((Get-FileHash -LiteralPath $inputFile -Algorithm SHA256).Hash -ne $file.sha256){throw "Locked CRT hash mismatch: $($file.file)"}
+        }
+        return [IO.Path]::GetFullPath($candidate)
+    }
+    throw "VC runtime $($Component.version) was not found. Set FOLDERLENS_CRT_DIR to the directory containing the hash-locked DLLs."
+}
+function ConvertTo-NativeArgument([string]$Value) {
+    if ($Value.IndexOf([char]0) -ge 0) { throw 'NUL is not valid in a process argument.' }
+    # CRT quoting, including backslashes before quotes and at the end. No shell.
+    return '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+}
+function Invoke-LoggedProcess {
+    param([string]$FilePath, [string[]]$Arguments = @(), [string]$LogBase,
+          [string]$WorkingDirectory = $script:ProjectRoot, [switch]$AllowFailure)
+    if (-not $LogBase) { throw 'A persistent log path is required.' }
+    $LogBase = Resolve-ProjectPath $LogBase
+    New-Item -ItemType Directory -Force -Path (Split-Path $LogBase -Parent) | Out-Null
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $FilePath
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.EnvironmentVariables.Clear()
+    foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        $start.EnvironmentVariables[$entry.Key.ToUpperInvariant()] = $entry.Value
+    }
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    $began = [DateTime]::UtcNow
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $outFile = [IO.File]::Create($LogBase + '.stdout.log')
+    $errFile = [IO.File]::Create($LogBase + '.stderr.log')
+    try {
+        if (-not $process.Start()) { throw "Could not start $FilePath" }
+        $stdout = $process.StandardOutput.BaseStream.CopyToAsync($outFile)
+        $stderr = $process.StandardError.BaseStream.CopyToAsync($errFile)
+        $process.WaitForExit()
+        [void]$stdout.GetAwaiter().GetResult()
+        [void]$stderr.GetAwaiter().GetResult()
+        $code = $process.ExitCode
+        $peak = $process.PeakWorkingSet64
+    } finally { $outFile.Dispose(); $errFile.Dispose(); $process.Dispose() }
+    $watch.Stop()
+    $result = [ordered]@{ executable=$FilePath; arguments=$Arguments; workingDirectory=$WorkingDirectory;
+        startedUtc=$began.ToString('o'); elapsedMs=$watch.Elapsed.TotalMilliseconds; exitCode=$code;
+        processPeakWorkingSetBytes=$peak; stdout=$LogBase+'.stdout.log'; stderr=$LogBase+'.stderr.log' }
+    Write-JsonFile $result ($LogBase + '.command.json')
+    Write-Host ("{0}: exit {1}; logs {2}.*" -f [IO.Path]::GetFileName($FilePath),$code,$LogBase)
+    if ($code -ne 0 -and -not $AllowFailure) {
+        Get-Content -LiteralPath ($LogBase+'.stderr.log') -Tail 30 | Write-Host
+        Get-Content -LiteralPath ($LogBase+'.stdout.log') -Tail 30 | Write-Host
+        throw "Process failed with exit code ${code}: $FilePath. Original logs: $LogBase.*"
+    }
+    return [pscustomobject]$result
+}
+function Get-BuildInputs {
+    $files = @()
+    foreach ($folder in @('src','tests','scripts','installer','contracts','native','assets')) {
+        $path = Join-Path $script:ProjectRoot $folder
+        if (Test-Path -LiteralPath $path) {
+            $files += Get-ChildItem -LiteralPath $path -Recurse -File | Where-Object {
+                $_.FullName -notmatch '[\\/](bin|obj)[\\/]' -and $_.Name -notin @('AGENTS.md','AGENTS.override.md','PACKAGING_EVIDENCE.md')
+            }
+        }
+    }
+    $files += Get-ChildItem -LiteralPath $script:ProjectRoot -File | Where-Object { $_.Name -match '^(global\.json|Directory\..*\.props|NuGet\.Config|FolderLens\.slnx|build-release\.cmd)$' }
+    $records = @($files | Sort-Object FullName | ForEach-Object {
+        [pscustomobject]@{ path=$_.FullName.Substring($script:ProjectRoot.Length+1).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    })
+    $bytes = [Text.Encoding]::UTF8.GetBytes((($records | ForEach-Object { $_.path+' '+$_.sha256 }) -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','') } finally { $sha.Dispose() }
+    $gitHead = & git -C $script:ProjectRoot rev-parse HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) { $gitHead='UNCOMMITTED' }
+    return [pscustomobject]@{ sha256=$digest; gitHead=[string]$gitHead; files=$records }
+}
+function Copy-VerifiedTree([string]$Source, [string]$Destination) {
+    $Source=[IO.Path]::GetFullPath($Source).TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "Missing input directory: $Source" }
+    foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File) {
+        if ($file.Extension -eq '.pdb') { continue }
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refusing linked release input: $($file.FullName)" }
+        $target=Join-Path $Destination $file.FullName.Substring($Source.Length+1)
+        if (Test-Path -LiteralPath $target) {
+            if ((Get-FileHash -LiteralPath $target).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) { throw "Conflicting publish files: $target" }
+        } else {
+            New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $target
+        }
+    }
+}
+function Get-ReleaseFiles([string]$Directory) {
+    $Directory=[IO.Path]::GetFullPath($Directory).TrimEnd('\')
+    return @(Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object FullName | ForEach-Object {
+        [pscustomobject]@{ path=$_.FullName.Substring($Directory.Length+1).Replace('\','/'); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    })
+}
+function Test-PrivateReleasePath([string]$Path) {
+    $normalized=$Path.Replace('\','/')
+    $name=($normalized -split '/')[-1]
+    return ($normalized -match '(^|/)(data|fixtures|\.git|\.nuget|obj|bin)/' -or
+        $name -match '\.(pdb|user)$|\.(sqlite|sqlite3|db)(-(wal|shm|journal))?$')
+}

@@ -1,0 +1,23 @@
+**/bin/
+**/obj/
+.tools/
+.nuget/
+.venv/
+artifacts/
+fixtures/private/
+fixtures/public/
+DEVELOPMENT_LOG.md
+AGENTS.md
+AGENTS.override.md
+CODEX_START_PROMPT.md
+implementation/HANDOFF.md
+*.user
+*.pdb
+native/ffmpeg/*.exe
+implementation/*HANDOFF.md
+# Local development/audit history and operator templates are not product source.
+implementation/
+evidence/
+templates/HANDOFF.md
+templates/PROGRESS.md
+SHA256SUMS.txt

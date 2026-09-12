@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "architecture": "x64",
+  "status": "LOCAL_CANDIDATE_NOT_DISTRIBUTION_CLEARED",
+  "bootstrap": [
+    {
+      "presence": ".tools/dotnet/dotnet.exe",
+      "id": "dotnet-sdk",
+      "format": "zip",
+      "archive": ".tools/dotnet-sdk.zip",
+      "version": "10.0.401",
+      "destination": ".tools/dotnet",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-win-x64.zip",
+      "sha256": "C1B96DEA223E1AB2AF8A51187E0CC96338D14C68834BE1656136BE18953CEA09"
+    },
+    {
+      "presence": ".tools/libraw/LibRaw-0.22.2/lib/libraw.lib",
+      "id": "libraw",
+      "format": "zip",
+      "archive": ".tools/LibRaw-0.22.2-Win64.zip",
+      "version": "0.22.2",
+      "destination": ".tools/libraw",
+      "url": "https://www.libraw.org/data/LibRaw-0.22.2-Win64.zip",
+      "sha256": "AC64FA12BB00A7581332D4C6AB918C0533FB3F119D6B668D47A6875410DCA948"
+    },
+    {
+      "presence": ".tools/webview2-fixed/Microsoft.WebView2.FixedVersionRuntime.153.0.4234.32.x64/msedgewebview2.exe",
+      "id": "webview2-fixed",
+      "format": "cab",
+      "archive": ".tools/webview2-fixed.cab",
+      "version": "153.0.4234.32",
+      "destination": ".tools/webview2-fixed",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/c3d95bc1-a0a7-4ca6-aaa1-fa0ac3dd1a37/Microsoft.WebView2.FixedVersionRuntime.153.0.4234.32.x64.cab",
+      "sha256": "2CB653A74426F0AA802C2396775C6BC674FD662D5396BD677F47BFA6E12EBA9C"
+    }
+  ],
+  "components": [
+    {
+      "binary": ".tools/libraw/LibRaw-0.22.2/bin/libraw.dll",
+      "buildConfiguration": "Upstream Windows x64 SDK; exact native compiler switches not reconstructed",
+      "id": "LibRaw",
+      "sha256": "6A459C22039ABF0EAC4D263673337C8ED5F223ACBD372FCF77610DEBF80AC8CD",
+      "source": "https://www.libraw.org/data/LibRaw-0.22.2.tar.gz",
+      "version": "0.22.2",
+      "notices": [
+        "COPYRIGHT",
+        "LICENSE.LGPL",
+        "LICENSE.CDDL"
+      ],
+      "sourceBundledInSdk": true,
+      "sourceObligation": "Corresponding source in original verified Windows SDK; redistribution/license selection review pending",
+      "license": "LGPL-2.1-only OR CDDL-1.0"
+    },
+    {
+      "sourceObligation": "BLOCKED: exact Gyan build archive, linked-codec source revisions and complete corresponding source not yet captured",
+      "buildConfiguration": "native/ffmpeg/buildconf.txt",
+      "id": "FFmpeg",
+      "acquisition": "Copied from existing Gyan WinGet installation on development host",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+      "files": [
+        {
+          "file": "ffmpeg.exe",
+          "Hash": "74DB6C184A03DBA2BDFE23E1A1F41CF5A8385BC1DE6A7A1B26DB1DC541ABEF93"
+        },
+        {
+          "file": "ffprobe.exe",
+          "Hash": "55BB6C6289367AE2383EFA86B26BF2596F8ADB72AC747360EB13DF162354161C"
+        }
+      ],
+      "version": "8.0.1-full_build-www.gyan.dev",
+      "notices": [
+        "native/ffmpeg/LICENSE.txt"
+      ],
+      "archiveSha256": null,
+      "archiveUrl": null,
+      "upstream": "https://www.gyan.dev/ffmpeg/builds/",
+      "license": "GPL-3.0-or-later (actual --enable-gpl --enable-version3 build)"
+    },
+    {
+      "binarySha256": "49B97CE18FD644C0B629DE4478E220D8C1A65AE3CB92BDD1C79A789038C741F0",
+      "id": "Microsoft.WebView2.FixedVersionRuntime",
+      "sha256": "2CB653A74426F0AA802C2396775C6BC674FD662D5396BD677F47BFA6E12EBA9C",
+      "source": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/c3d95bc1-a0a7-4ca6-aaa1-fa0ac3dd1a37/Microsoft.WebView2.FixedVersionRuntime.153.0.4234.32.x64.cab",
+      "version": "153.0.4234.32",
+      "notices": "Full fixed-runtime tree preserved",
+      "binary": ".tools/webview2-fixed/Microsoft.WebView2.FixedVersionRuntime.153.0.4234.32.x64/msedgewebview2.exe",
+      "sourceObligation": "Microsoft runtime terms and complete third-party credits need redistribution review",
+      "license": "Microsoft WebView2 Runtime terms plus included third-party licenses"
+    },
+    {
+      "signature": "Valid",
+      "role": "Build tool plus generated installer engine",
+      "id": "InnoSetup",
+      "sha256": "D06EBD38F38E3CEE60A3C50CC45BD449D77E0BC6A5CABC607EA9886808E4DE1A",
+      "source": "https://github.com/jrsoftware/issrc/tree/is-7_1_0",
+      "binary": ".tools/inno/ISCC.exe",
+      "version": "7.1.0",
+      "notices": [
+        ".tools/inno/license.txt"
+      ],
+      "archiveSha256": "0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F",
+      "archiveUrl": "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe",
+      "publisher": "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL",
+      "license": "Inno Setup License"
+    },
+    {
+      "files": [
+        {
+          "sha256": "2405355F0A58067B258F8DF33C327E3A3D716EAAC5A3A5AEBB757842D85BD376",
+          "file": "concrt140.dll"
+        },
+        {
+          "sha256": "BFAD5AEF4C63A669E3C140655CDFDF395B6C979B400A447BD5DCB65ED8826C3D",
+          "file": "msvcp140_1.dll"
+        },
+        {
+          "sha256": "3EA06F0EE098B4823CB79599DF3780E7F23CCE52C19AAC31D2A0D47EFE33A5E9",
+          "file": "msvcp140_2.dll"
+        },
+        {
+          "sha256": "640B2AEFCED484D0368EEA5BDD06ADDD0658A3A70A49256E560D6923B404A479",
+          "file": "msvcp140_atomic_wait.dll"
+        },
+        {
+          "sha256": "F2069A52880EC885EE7F0511186100EB7FADA0411A2B4948FAFEA7735B878A18",
+          "file": "msvcp140_codecvt_ids.dll"
+        },
+        {
+          "sha256": "0F885B509A685D2BBFA652FED26B5FB31D88FBDAB0A978C641D1C7B8AA460AA9",
+          "file": "msvcp140.dll"
+        },
+        {
+          "sha256": "19839407C3FDBC824E5BCE189BF68DDF8097F12EC28B757797FFA0415C144DDD",
+          "file": "vccorlib140.dll"
+        },
+        {
+          "sha256": "1F2D41C4AA5DB0BC33EBF7B66D72943A817D7CE6CBE880502A9403823633093F",
+          "file": "vcruntime140_1.dll"
+        },
+        {
+          "sha256": "219915CF20822F34D5E7C1FDD4E21AE7F3396881096C51036225FB8F84B47AFA",
+          "file": "vcruntime140_threads.dll"
+        },
+        {
+          "sha256": "D5E4D9A3E835FA679450145D6A7D94E36573A509317111904D9B3712C30D9066",
+          "file": "vcruntime140.dll"
+        }
+      ],
+      "version": "14.44.35112",
+      "acquisition": "Installed Visual Studio 2022 Community official VC Redist directory",
+      "redistributableDirectory": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Redist\\MSVC\\14.44.35112\\x64\\Microsoft.VC143.CRT",
+      "id": "Microsoft.VC143.CRT",
+      "license": "Microsoft Visual Studio redistributable terms",
+      "sourceObligation": "Official redistributable directory only; no arbitrary system DLL copying"
+    }
+  ],
+  "managedLock": "Directory.Packages.props plus per-project packages.lock.json",
+  "distributionBlockers": [
+    "Application redistribution license has not been selected by owner.",
+    "Exact FFmpeg linked-codec corresponding source/provenance incomplete.",
+    "Native static codecs and runtime redistribution terms require final source/license obligation review."
+  ],
+  "runtimeLayout": {
+    "mediaWorker": "app/workers",
+    "scanWorker": "app/FolderLens.Scan.Worker",
+    "app": "app",
+    "contentWorker": "app/content-worker",
+    "ffmpeg": "app/native/ffmpeg",
+    "webview2": "app/runtime/webview2"
+  }
+}

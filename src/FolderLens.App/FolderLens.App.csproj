@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup>
+  <OutputType>WinExe</OutputType><UseWinUI>true</UseWinUI><WindowsPackageType>None</WindowsPackageType>
+  <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained><SelfContained>true</SelfContained><RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  <PublishTrimmed>false</PublishTrimmed><PublishSingleFile>false</PublishSingleFile>
+  <ApplicationManifest>app.manifest</ApplicationManifest>
+  <ApplicationIcon>Assets\FolderLens.ico</ApplicationIcon>
+ </PropertyGroup>
+ <ItemGroup><ProjectReference Include="../FolderLens.Infrastructure/FolderLens.Infrastructure.csproj"/><PackageReference Include="Microsoft.WindowsAppSDK"/><PackageReference Include="Microsoft.Graphics.Win2D"/><PackageReference Include="CommunityToolkit.Mvvm"/></ItemGroup>
+ <ItemGroup><Content Include="Assets\FolderLens.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/></ItemGroup>
+</Project>

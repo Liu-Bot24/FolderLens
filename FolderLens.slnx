@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FolderLens.App/FolderLens.App.csproj" />
+    <Project Path="src/FolderLens.Content.Worker/FolderLens.Content.Worker.csproj" />
+    <Project Path="src/FolderLens.Contracts/FolderLens.Contracts.csproj" />
+    <Project Path="src/FolderLens.Core/FolderLens.Core.csproj" />
+    <Project Path="src/FolderLens.Diagnostics/FolderLens.Diagnostics.csproj" />
+    <Project Path="src/FolderLens.Infrastructure/FolderLens.Infrastructure.csproj" />
+    <Project Path="src/FolderLens.Media.Worker/FolderLens.Media.Worker.csproj" />
+    <Project Path="src/FolderLens.Scan.Worker/FolderLens.Scan.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FolderLens.UnitTests/FolderLens.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,108 @@
+using FolderLens.Core;
+
+namespace FolderLens.Infrastructure;
+
+public sealed record FilterQuery(string StateExpression, string OrderBy, IReadOnlyDictionary<string, object> Parameters)
+{
+    public string CandidateExpression { get; init; } = "1";
+    public string MatchExpression { get; init; } = "1";
+}
+
+public static class FilterSql
+{
+    public static readonly IReadOnlyDictionary<string, string> Columns = new Dictionary<string, string>
+    {
+        ["name"]="f.name_sort_key",["path"]="f.path_sort_key",["logicalBytes"]="f.logical_bytes",["allocatedBytes"]="f.allocated_bytes",
+        ["modified"]="f.mtime_utc_ticks",["created"]="f.ctime_utc_ticks",["captured"]="f.capture_utc_ticks",["width"]="f.display_width",["height"]="f.display_height",
+        ["longEdge"]="f.long_edge",["shortEdge"]="f.short_edge",["pixelCount"]="f.pixel_count",["aspectRatio"]="(1.0*f.display_width/f.display_height)",
+        ["durationMs"]="f.duration_ms",["frameRate"]="(1.0*f.fps_num/f.fps_den)",["format"]="f.format_id"
+    };
+    public static FilterQuery Build(FilterSpec filter)
+    {
+        filter.Validate();
+        if (!Columns.TryGetValue(filter.Sort.Field, out string? sort)) throw new ArgumentException("未知排序字段。");
+        var parameters = new Dictionary<string, object>();
+        var predicates = new List<string>();
+        var candidates = new List<string>();
+        var missing = new List<(string expression, string group)>();
+        string Param(object value) { string key = "$p" + parameters.Count; parameters.Add(key, value); return key; }
+        void Known(string expression) { predicates.Add(expression); candidates.Add(expression); }
+        void Nullable(string column, string condition, string group)
+        {
+            predicates.Add(condition);
+            missing.Add(($"({column} IS NULL)", group));
+        }
+        void Set(string column, string[] values, string? group = null)
+        {
+            if (values.Length == 0) return;
+            string condition = $"{column} IN ({string.Join(',', values.Select(v => Param(v)))})";
+            if (group is null) Known(condition); else Nullable(column, condition, group);
+        }
+        Known($"f.root_id={Param(filter.RootId)} AND f.entry_state='present'");
+        string directory=filter.DirectoryScope.Replace('/','\\');
+        string? directoryPrefix=directory.Length==0?null:Param(directory+"\\");
+        if(directoryPrefix is not null)Known($"substr(f.relative_path,1,length({directoryPrefix}))={directoryPrefix}");
+        if (!filter.Recursive||filter.ScopeDirectFiles) Known(directoryPrefix is null?"instr(f.relative_path,'\\')=0":$"instr(substr(f.relative_path,length({directoryPrefix})+1),'\\')=0");
+        if (!filter.ShowHidden) Known("(f.file_attributes & 2)=0");
+        Set("f.kind",filter.Kinds);
+        Set("f.format_id",filter.Formats,"identity");
+        if (filter.Raw == "only") { Known("f.kind='image'"); Nullable("f.is_raw","f.is_raw=1","identity"); }
+        if (filter.Raw == "exclude") Nullable("f.is_raw","(f.kind<>'image' OR f.is_raw=0)","identity");
+        if (filter.Animation != "any") { Known("f.kind='image'"); Nullable("f.is_animated",$"f.is_animated={(filter.Animation == "animated" ? 1 : 0)}","animation"); }
+        foreach(var range in filter.Ranges)
+        {
+            string col = Columns[range.Key], group = range.Key == "allocatedBytes" ? "allocation" : range.Key == "durationMs" ? "media" : "imageGeometry";
+            if (range.Key is "width" or "height" or "longEdge" or "shortEdge" or "pixelCount") Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            if (range.Key == "durationMs") Known("f.kind IN ('video','audio')");
+            if (range.Value.Min is { } min) Nullable(col,$"{col}>={Param(min)}",group);
+            if (range.Value.Max is { } max) Nullable(col,$"{col}<={Param(max)}",group);
+        }
+        void Geometry(NumberRange? range)
+        {
+            if (range is null) return;
+            Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            if (range.Min is { } min) Nullable(Columns["aspectRatio"],$"{Columns["aspectRatio"]}>={Param(min)}","imageGeometry");
+            if (range.Max is { } max) Nullable(Columns["aspectRatio"],$"{Columns["aspectRatio"]}<={Param(max)}","imageGeometry");
+        }
+        Geometry(filter.AspectRatio);
+        if (filter.Orientation != "any")
+        {
+            Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            string col=Columns["aspectRatio"];
+            Nullable(col,filter.Orientation switch { "landscape"=>$"{col}>1.02", "portrait"=>$"{col}<0.98", _=>$"{col} BETWEEN 0.98 AND 1.02" },"imageGeometry");
+        }
+        if (filter.VideoCodecs.Length>0) {Known("f.kind='video'");Set("f.video_codec",filter.VideoCodecs,"media");}
+        if (filter.AudioCodecs.Length>0) {Known("f.kind IN ('audio','video')");Set("f.audio_codec",filter.AudioCodecs,"media");}
+        if (filter.FrameRate is { } fps)
+        {
+            Known("f.kind='video'");
+            if(fps.Min is { } min)Nullable(Columns["frameRate"],$"{Columns["frameRate"]}>={Param(min)}","media");
+            if(fps.Max is { } max)Nullable(Columns["frameRate"],$"{Columns["frameRate"]}<={Param(max)}","media");
+        }
+        foreach(var date in filter.Dates)
+        {
+            string col = date.Clock=="captureWall" ? "f.capture_wall_ticks" : Columns[date.Field];
+            Nullable(col,$"{col}>={Param(FilterSpec.DateTicks(date.StartInclusive,date.Clock))} AND {col}<{Param(FilterSpec.DateTicks(date.EndExclusive,date.Clock))}",date.Field == "captured" ? "captureTime" : "");
+        }
+        foreach (string word in FilterSpec.Words(filter.NamePathQuery)) Known($"instr(lens_fold({(filter.SearchScope=="name" ? "f.name" : "f.relative_path")}),{Param(word.ToUpperInvariant())})>0");
+        foreach (var rule in filter.Exclusions)
+        {
+            string dir=rule.RelativePath.Replace('/','\\');
+            string exact=Param(dir),prefix=Param(dir+"\\");
+            Known($"NOT(f.relative_path={exact} OR substr(f.relative_path,1,length({prefix}))={prefix})");
+        }
+        string falses=string.Join(" OR ",predicates.Select(p=>$"(({p}) IS FALSE)"));
+        string unknown=string.Join(" OR ",predicates.Select(p=>$"(({p}) IS NULL)"));
+        var unresolved=missing.Where(m=>m.group.Length>0).ToArray();
+        string failed=unresolved.Length==0 ? "0" : string.Join(" OR ",unresolved.Select(m=>$"({m.expression} AND EXISTS(SELECT 1 FROM FieldStates fs WHERE fs.entry_id=f.entry_id AND fs.field_group='{m.group}' AND fs.source_version=f.file_version AND fs.state IN ('failed','unsupported')))"));
+        string state=$"CASE WHEN {falses} THEN 'NoMatch' WHEN {unknown} THEN CASE WHEN {failed} THEN 'Unresolvable' ELSE 'Pending' END ELSE 'Match' END";
+        // Non-null columns need no null discriminator: it would force SQLite to sort the
+        // entire catalog instead of streaming the existing compound index.
+        string nullOrder=filter.Sort.Field is "name" or "path" or "logicalBytes" or "modified" ? "" : $"({sort} IS NULL),";
+        return new(state,$"{nullOrder}{sort} {filter.Sort.Direction.ToUpperInvariant()},f.path_sort_key,f.entry_id",parameters)
+        {
+            CandidateExpression=string.Join(" AND ",candidates.Select(p=>$"({p})")),
+            MatchExpression=string.Join(" AND ",predicates.Select(p=>$"({p})"))
+        };
+    }
+}

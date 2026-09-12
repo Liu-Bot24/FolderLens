@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "locale": "zh-CN",
+  "theme": "system",
+  "root": {
+    "recursive": true,
+    "defaultKinds": [
+      "image"
+    ],
+    "cloudPolicy": "localOnly",
+    "showHidden": false,
+    "scanSystemDirectories": false,
+    "followDirectoryLinks": false
+  },
+  "view": {
+    "mode": "grid",
+    "thumbnailSizeDip": 180,
+    "showRelativePath": true,
+    "previewPaneEnabled": true,
+    "fitUpscaleSmallImages": false,
+    "autoPlayGridMedia": false,
+    "slideSecondsAfterReady": 5
+  },
+  "query": {
+    "pageSize": 256,
+    "memoryPages": 16,
+    "sessionHistoryCount": 2,
+    "sessionSoftTimeoutMs": 15000,
+    "sessionHardTimeoutMs": 30000,
+    "walGuardBytes": 268435456
+  },
+  "budgets": {
+    "referencePhysicalMemoryBytes": 68719476736,
+    "processTreeSoftBytes": 6442450944,
+    "processTreeProtectBytes": 8589934592,
+    "gpuCacheSoftBytes": 1073741824,
+    "thumbnailDiskBytes": 10737418240,
+    "imageTempBytes": 8589934592,
+    "sessionDiskBytes": 1073741824,
+    "textMemoryBytes": 201326592,
+    "animationMemoryBytes": 268435456
+  },
+  "workers": {
+    "imageForeground": 1,
+    "imageBackgroundMax": 2,
+    "videoCoverMax": 1,
+    "databaseReadersMax": 4,
+    "databaseWriters": 1
+  },
+  "limits": {
+    "controlMessageBytes": 1048576,
+    "thumbnailQueuedMax": 1024,
+    "metadataQueuedMax": 2048,
+    "nativeCancelGraceMs": 250,
+    "maxAutoDecodePixels": 300000000,
+    "markdownInputBytes": 8388608,
+    "markdownLines": 50000,
+    "markdownAstNodes": 100000,
+    "markdownParseTimeoutMs": 3000,
+    "markdownHtmlBytes": 16777216,
+    "textPageBytes": 1048576,
+    "textSearchHitsMax": 10000,
+    "clipboardFileCountMax": 10000,
+    "playlistFileCountMax": 10000
+  },
+  "privacy": {
+    "telemetry": false,
+    "autoUpdateCheck": false,
+    "crashMemoryDumps": false,
+    "absolutePathLogging": false
+  },
+  "externalVideoPlayer": {
+    "mode": "systemDefault",
+    "executablePath": null,
+    "adapter": "none"
+  },
+  "notes": "Reference starting values only. Derive effective budgets from physical/available RAM, GPU budget, device type and free disk per docs/08. Never allocate these numbers unconditionally on low-memory devices."
+}

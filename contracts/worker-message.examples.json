@@ -1,0 +1,92 @@
+[
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "workerInstanceId": "worker-example-1",
+    "type": "hello",
+    "messageId": "m1",
+    "buildId": "example-build-not-a-real-build",
+    "nonce": "0123456789abcdef0123456789abcdef"
+  },
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "workerInstanceId": "worker-example-1",
+    "type": "request",
+    "messageId": "m2",
+    "requestId": "req-1",
+    "operation": "fit",
+    "context": {
+      "rootId": "root-1",
+      "rootEpoch": 1,
+      "queryGeneration": 2,
+      "selectionGeneration": 7,
+      "fileVersion": 3,
+      "pathRevision": 1,
+      "resultSessionId": "session-2"
+    },
+    "fileRef": {
+      "entryId": "entry-1",
+      "inputToken": "approved-input-1"
+    },
+    "deadlineUtc": "2026-09-12T01:00:00Z",
+    "resourceBudget": {
+      "memoryBytes": 536870912,
+      "tempBytes": 1073741824,
+      "cpuThreads": 4,
+      "maxPixels": 300000000,
+      "maxOutputBytes": 268435456
+    },
+    "parameters": {
+      "targetWidth": 1920,
+      "targetHeight": 1080,
+      "frameIndex": 0
+    }
+  },
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "workerInstanceId": "worker-example-1",
+    "type": "response",
+    "messageId": "m3",
+    "requestId": "req-1",
+    "context": {
+      "rootId": "root-1",
+      "rootEpoch": 1,
+      "queryGeneration": 2,
+      "selectionGeneration": 7,
+      "fileVersion": 3,
+      "pathRevision": 1,
+      "resultSessionId": "session-2"
+    },
+    "status": "ok",
+    "quality": "fit",
+    "surface": {
+      "leaseId": "lease-1",
+      "mappingToken": "host-approved-mapping-1",
+      "width": 1920,
+      "height": 1080,
+      "stride": 7680,
+      "pixelFormat": "BGRA8",
+      "byteLength": 8294400,
+      "colorSpace": "sRGB",
+      "alphaMode": "premultiplied"
+    }
+  },
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "workerInstanceId": "worker-example-1",
+    "type": "cancel",
+    "messageId": "m4",
+    "requestId": "req-1"
+  },
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "workerInstanceId": "worker-example-1",
+    "type": "releaseLease",
+    "messageId": "m5",
+    "leaseId": "lease-1"
+  }
+]

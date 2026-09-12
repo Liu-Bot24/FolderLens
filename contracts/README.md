@@ -1,0 +1,27 @@
+# 契约文件说明
+
+本目录是可解析的v1基线，不是已经实现的数据层或IPC库。SQL使用SQLite STRICT表；M0确认Microsoft.Data.Sqlite实际绑定引擎能力并做迁移，不能向用户已有数据库盲目重跑CREATE。表结构保持可演进，新增字段/索引必须带迁移与测试，不可破坏本文语义。
+
+catalog-v1.sql和sessions-v1.sql必须在两个独立本地数据库执行。主库Files是按目录项一行，媒体字段扁平存储为常用查询索引；FieldStates按字段组区分未知/失败。文件变化时同事务清空受影响旧字段或更新版本，CAS写入新结果。source_metadata_version不等于每组成功版本；可靠判定使用FieldStates.source_version和当前file_version。
+
+SQL约束能阻止负数、非法状态、部分几何派生和基本跨根引用；不能单独证明目录无循环、来源版本合法、scan属于相同根、所有代次一致和统计总和正确。应用层必须补校验、事务不变量和测试。Directories/Files不物理删除在线丢失项，先missing；清理带引用的历史记录需单独策略。
+
+ResultDirectories保存快照时目录树，避免随后重命名改变“当前结果容量”的层级。ResultSessions.Ready切换必须检查已写行无缺号、计数吻合、源查询完成；SQL不能仅靠一行CHECK替你验证另一个表。流式首屏临时结果与正式session不能混用同一序号而不说明状态。
+
+## FilterSpec
+
+Schema采用JSON Schema 2020-12，验证结构/类型后还必须做语义验证：min≤max、宽高/像素下限合理、比率有限、日期严格ISO解析、区间非空、同一日期字段不重复、modified/created只能UTC，captureWall只能captured。UTC字段要求Z或明确offset再转UTC；墙钟字段不得伪造时区。相对排除路径不允许绝对盘符、UNC、空段、.或..，规范化后必须位于root内，目录段边界比较。
+
+formats为运行时能力表中的规范formatId，不把任意JSON合法字符串当已支持格式。未知formatId可以保留预设并提示缺少当前引擎，不悄悄替换为全部格式。jpg/jpeg映射jpeg；tif/tiff映射tiff；apng可由PNG内容探测确定；动画状态独立。候选扩展名必须保留，但尚未验证的字段查询结果是pending而不是已确认。
+
+kinds/formats空数组代表无限制；各组内OR，跨组AND；metadata状态四值规则见docs/01。raw=exclude不会把非图片排除，只有确认RAW才排除；raw=only仅保留RAW图片，动画约束仅适用于图片，混合类型的“不适用”处理参照明确字段域。排序总是null最后、稳定路径键和entryId补充。examples展示有效请求，不包含用户真实路径。
+
+## Worker信封
+
+worker-message.schema.json只约束公共信封；parameters/metadata由operation专用DTO继续严格验证，绝不能原样转传任意Provider选项。未为每个operation定义DTO和测试时，该operation不允许调度。hello/取消/释放租约不得带输入执行副作用；未知字段或无关载荷需协议验证器拒绝，不单靠允许超集的公共schema。
+
+所有task context字段用于取消/旧结果判定；非选中任务仍分配独立任务代次，不复用UI活动值绕过验证。text/scan可以用受批准的虚拟entryId表示任务资源，其fileVersion为该句柄观察版本/scan代次，并由operation DTO明确区分，不假装目录是图像文件。
+
+Surface仅支持列出的线性sRGB/scRGB像素表示；native源ICC须在worker转换到约定工作空间，或后续新协议明确ICC资产描述，不得误标色彩。App到显示器变换只做一次。stride≥width×bytesPerPixel，byteLength≥stride×height，全部checked运算；映射实际容量、任务预算、实例和lease所有权也核验。无法只靠JSON Schema验证这些跨字段关系。
+
+共享内存由宿主分配/批准的token描述，worker不能指定任意文件路径或命名对象。lease释放幂等，但不能释放其他请求的资源。JSON长度和嵌套深度在反序列化前限制。失败响应不得携带可显示surface，status=ok也不代表省略版本校验。例子的截止时间是格式示例，不用于实际运行。
