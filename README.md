@@ -1,0 +1,81 @@
+<p align="center"><img src="src/FolderLens.App/Assets/FolderLens.png" width="144" alt="FolderLens logo"></p>
+
+# FolderLens
+
+Windows 原生文件夹透视查看器。选择顶层文件夹，跨子目录浏览图片和视频，保留原来的文件结构。
+
+当前为开发中的源码版本。图片和文件浏览是本轮重点；完整一期验收尚未完成，不提供“已完成全部一期功能”的保证。实际检查与剩余验证范围见 [验证记录](docs/verification.md)。
+
+## 浏览功能
+
+- 递归穿透目录；缩略图网格、详细列表、相对路径、目录树、返回/前进和上一级。
+- 按媒体类型、格式、尺寸、体积等筛选；显示正在生效的高级筛选。
+- 按文件夹分组，支持全部层级或仅下一级；分别设置文件夹与组内文件排序。
+- 图片适屏、实际像素、缩放、平移、只读旋转、全屏和连续切换。
+- 按住左键默认临时放大至 **250%**；大视图默认放大全图，小预览默认局部放大；倍率与模式可设置。
+- 相邻图片预取；可见缩略图按需加载；扫描结果增量进入列表，保留未变化的容器和缩略图。
+- 视频显示封面和元数据，通过本地播放器打开；可按当前浏览顺序生成播放列表。
+
+应用不提供删除、移动、改名或写入式图片编辑。索引、缓存和设置存放于本机应用数据目录，源文件按只读方式访问。
+
+## 开发与运行
+
+目标：Windows x64。开发基线为 .NET SDK 10.0.401、WinUI 3 / Windows App SDK、Win2D、SQLite。NuGet 版本由 `Directory.Packages.props` 和各项目的 `packages.lock.json` 固定。
+
+1. 安装带 C++ 桌面开发工具和 Windows SDK 的 Visual Studio Build Tools，以及 CMake。
+2. 按 [native/dependency-lock.json](native/dependency-lock.json) 准备对应的 .NET、LibRaw 和 WebView2 归档。该文件列出来源、版本、目标位置和 SHA-256；将归档放到其中 `archive` 指定的项目内路径。
+3. 准备同一文件记录的 FFmpeg / FFprobe、VC 运行库输入。第三方二进制不随本源码仓库上传；版本和分发限制见依赖记录及 `native/ffmpeg/LICENSE.txt`。
+4. 在仓库根目录使用 PowerShell 运行：
+
+```powershell
+.\scripts\Bootstrap.ps1
+.\scripts\Build.ps1 -Configuration Release
+```
+
+`Bootstrap.ps1` 验证并解压已准备的本地归档，不会自动安装系统软件。构建缺少依赖时会报出具体路径；请根据依赖记录补齐。
+
+CMake 优先从 `PATH` 查找，其次从 Visual Studio 安装位置查找，不要求 Community 版固定路径。非默认安装可在当前 PowerShell 会话设置 `$env:FOLDERLENS_CMAKE`（cmake.exe 路径）、`$env:FOLDERLENS_VS_ROOT`（Visual Studio 根目录）或 `$env:FOLDERLENS_CRT_DIR`（VC 运行库 DLL 所在目录）。运行库仍须与依赖锁定文件的版本和全部 SHA-256 一致；指定其他路径不会跳过校验。
+
+完成构建后运行：
+
+```powershell
+.\src\FolderLens.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\FolderLens.App.exe
+```
+
+程序可接受 `--root <目录>` 或 `--open <文件>`。默认应用数据位于 `%LOCALAPPDATA%\FolderLens`；`--data-dir <本地目录>` 可用于隔离验证数据。
+
+## 验证
+
+```powershell
+. .\scripts\Common.ps1
+$dotnet = Get-DotNet
+& $dotnet test tests\FolderLens.UnitTests\FolderLens.UnitTests.csproj -c Release --no-restore
+```
+
+部分测试需要已构建的工作进程、FFmpeg 或实际样本；未准备环境时不应把失败或未运行当作通过。
+
+扫描刷新原生回归验证使用真实 WinUI 控件，在屏幕外创建独立验证窗口，仅写入指定验证目录：
+
+```powershell
+.\src\FolderLens.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\FolderLens.App.exe --verify-refresh --data-dir .\artifacts\native-refresh-check
+```
+
+结果保存在该目录的 `native-refresh.json`。使用一个新的验证目录运行，避免把旧测试数据当作新一轮输入。这项检查覆盖列表刷新与容器稳定性，不代替真实大目录滚动、鼠标手感、多屏和离线场景验收。
+
+外部源码审计和修复记录：[首轮](docs/audit-2026-09-13.md)、[第二轮](docs/audit-second-2026-09-13.md)、[第三轮及剩余限制](docs/audit-third-2026-09-13.md)。
+
+## 源码结构
+
+| 目录 | 职责 |
+|---|---|
+| `src/FolderLens.App` | WinUI 窗口、虚拟列表、图片交互 |
+| `src/FolderLens.Core` | 筛选、排序、导航与调度模型 |
+| `src/FolderLens.Infrastructure` | SQLite 索引、目录扫描、缓存、媒体接口 |
+| `src/FolderLens.Media.Worker` | 隔离的图片解码工作进程 |
+| `src/FolderLens.Scan.Worker` | 隔离的文件系统读取 |
+| `src/FolderLens.Content.Worker` | 文本和 Markdown 工作进程 |
+| `contracts` | 数据库和进程通信契约 |
+| `tests` | 回归测试 |
+| `docs`、`planning` | 产品规范和验收基线 |
+
+Logo 原始图形通过图像生成工具制作，应用图标由 `scripts/Build-AppIcon.ps1` 从 PNG 生成多尺寸 ICO。第三方组件的许可证各自适用；当前仓库未另行授予项目整体的开源许可证。

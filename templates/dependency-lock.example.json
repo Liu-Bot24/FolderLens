@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "status": "NOT_LOCKED",
+  "dependencies": [
+    {
+      "id": "example-only",
+      "version": null,
+      "sourceUrl": null,
+      "sha256": null,
+      "architecture": "win-x64",
+      "buildOptions": [],
+      "licenseIdentifier": null,
+      "licenseFile": null,
+      "sourceOfferOrSourceLocation": null,
+      "requiredNativeFiles": [],
+      "verifiedCapabilities": [],
+      "evidence": null
+    }
+  ],
+  "notes": "仅结构模板，不是包名/版本推荐；M0用实际依赖替换。"
+}

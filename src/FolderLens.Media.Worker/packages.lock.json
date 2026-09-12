@@ -1,0 +1,67 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0-windows10.0.26100": {
+      "Magick.NET-Q16-AnyCPU": {
+        "type": "Direct",
+        "requested": "[14.17.1, )",
+        "resolved": "14.17.1",
+        "contentHash": "m7NksccmpXQiQoSsDyBpXkOFC3XV9/cM3chZp2bHPdi1QPTzSicljNwrKmGZiQnQUyOBznvzv+A3ROT3/eIqUg==",
+        "dependencies": {
+          "Magick.NET.Core": "14.17.1"
+        }
+      },
+      "MetadataExtractor": {
+        "type": "Direct",
+        "requested": "[2.9.3, )",
+        "resolved": "2.9.3",
+        "contentHash": "7dBcqlPC2Zc/bsZtXnv8nCWe5h5WsLHszzHtxnpcsVy4MwlD3KQ3wVNoiYBm0a3rzt5hRwAosPvLPhlXrV5lyg==",
+        "dependencies": {
+          "XmpCore": "6.1.10.1"
+        }
+      },
+      "NetVips": {
+        "type": "Direct",
+        "requested": "[3.2.0, )",
+        "resolved": "3.2.0",
+        "contentHash": "ixVatHjsFBBvtKXYwH8jz8nF6OQIhl2e/P0N8ByGaZrlPu9VvcVQxX9zBQ13L8fUpMzKv1WXUybqW8wXZdFsCg=="
+      },
+      "NetVips.Native.win-x64": {
+        "type": "Direct",
+        "requested": "[8.18.6, )",
+        "resolved": "8.18.6",
+        "contentHash": "izOIx9qkOqBLXbfr9jCgu0lzYPp3S+EP1TyUlK26akefr2Xpr7IgZZCho7CTlmtG483jocyZmVM3rvwd5o9H2Q=="
+      },
+      "Magick.NET.Core": {
+        "type": "Transitive",
+        "resolved": "14.17.1",
+        "contentHash": "4BBbU5l5DmdT9isSNGrIE/0VwAh29SoKMSDMiIvFBDqz6vQfG6EYBFJQOemdCH3xkMfesSzImOVPjnyMf/PIqA=="
+      },
+      "XmpCore": {
+        "type": "Transitive",
+        "resolved": "6.1.10.1",
+        "contentHash": "/Tp2/e39e7z8hLtS4TXt0FNNZHbf5yNFfHS0/59soXlgOzZlyRZivvzWpvujyaWkTWWgecp/1nHxkuc5vntn7A=="
+      },
+      "folderlens.contracts": {
+        "type": "Project"
+      }
+    },
+    "net10.0-windows10.0.26100/win-x64": {
+      "Magick.NET-Q16-AnyCPU": {
+        "type": "Direct",
+        "requested": "[14.17.1, )",
+        "resolved": "14.17.1",
+        "contentHash": "m7NksccmpXQiQoSsDyBpXkOFC3XV9/cM3chZp2bHPdi1QPTzSicljNwrKmGZiQnQUyOBznvzv+A3ROT3/eIqUg==",
+        "dependencies": {
+          "Magick.NET.Core": "14.17.1"
+        }
+      },
+      "NetVips.Native.win-x64": {
+        "type": "Direct",
+        "requested": "[8.18.6, )",
+        "resolved": "8.18.6",
+        "contentHash": "izOIx9qkOqBLXbfr9jCgu0lzYPp3S+EP1TyUlK26akefr2Xpr7IgZZCho7CTlmtG483jocyZmVM3rvwd5o9H2Q=="
+      }
+    }
+  }
+}

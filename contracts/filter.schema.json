@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:folderlens:filter:v1",
+  "title": "FolderLens FilterSpec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "rootId",
+    "recursive",
+    "kinds",
+    "formats",
+    "raw",
+    "animation",
+    "sort"
+  ],
+  "properties": {
+    "grouping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "levels": { "enum": ["all", "first"], "default": "all" },
+        "field": { "enum": ["name", "logicalBytes", "matchCount"], "default": "logicalBytes" },
+        "direction": { "enum": ["asc", "desc"], "default": "desc" },
+        "capacityScope": { "enum": ["all", "matches"], "default": "all" }
+      }
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "rootId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "recursive": {
+      "type": "boolean"
+    },
+    "directoryScope": {
+      "type": "string", "maxLength": 32767, "default": "",
+      "description": "Relative directory within rootId; empty means the scan root. Runtime validation rejects absolute paths, traversal, empty segments and invalid filename characters."
+    },
+    "scopeDirectFiles": {
+      "type": "boolean", "default": false,
+      "description": "Show only files directly in directoryScope without changing the recursive scan setting."
+    },
+    "kinds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "image",
+          "video",
+          "audio",
+          "text",
+          "markdown",
+          "other"
+        ]
+      }
+    },
+    "formats": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._+-]{0,31}$"
+      }
+    },
+    "raw": {
+      "enum": [
+        "any",
+        "only",
+        "exclude"
+      ]
+    },
+    "animation": {
+      "enum": [
+        "any",
+        "static",
+        "animated"
+      ]
+    },
+    "showHidden": {
+      "type": "boolean",
+      "default": false
+    },
+    "includePending": {
+      "type": "boolean",
+      "default": false
+    },
+    "namePathQuery": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "ranges": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logicalBytes": {
+          "$ref": "#/$defs/intRange"
+        },
+        "allocatedBytes": {
+          "$ref": "#/$defs/intRange"
+        },
+        "width": {
+          "$ref": "#/$defs/intRange"
+        },
+        "height": {
+          "$ref": "#/$defs/intRange"
+        },
+        "longEdge": {
+          "$ref": "#/$defs/intRange"
+        },
+        "shortEdge": {
+          "$ref": "#/$defs/intRange"
+        },
+        "pixelCount": {
+          "$ref": "#/$defs/intRange"
+        },
+        "durationMs": {
+          "$ref": "#/$defs/intRange"
+        }
+      }
+    },
+    "aspectRatio": {
+      "$ref": "#/$defs/numberRange"
+    },
+    "orientation": {
+      "enum": [
+        "any",
+        "landscape",
+        "portrait",
+        "square"
+      ]
+    },
+    "videoCodecs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "audioCodecs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "frameRate": {
+      "$ref": "#/$defs/numberRange"
+    },
+    "dates": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "clock",
+          "startInclusive",
+          "endExclusive"
+        ],
+        "properties": {
+          "field": {
+            "enum": [
+              "modified",
+              "created",
+              "captured"
+            ]
+          },
+          "clock": {
+            "enum": [
+              "utc",
+              "captureWall"
+            ]
+          },
+          "startInclusive": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 40
+          },
+          "endExclusive": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 40
+          }
+        }
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relativePath",
+          "mode"
+        ],
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32767
+          },
+          "mode": {
+            "enum": [
+              "hideView",
+              "skipScan"
+            ]
+          }
+        }
+      }
+    },
+    "sort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "direction"
+      ],
+      "properties": {
+        "field": {
+          "enum": [
+            "name",
+            "path",
+            "logicalBytes",
+            "allocatedBytes",
+            "modified",
+            "created",
+            "captured",
+            "width",
+            "height",
+            "longEdge",
+            "shortEdge",
+            "pixelCount",
+            "aspectRatio",
+            "durationMs",
+            "frameRate",
+            "format"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        },
+        "nulls": {
+          "const": "last",
+          "default": "last"
+        },
+        "naturalKeyVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "searchScope": {
+      "enum": [
+        "name",
+        "nameAndPath"
+      ],
+      "default": "name"
+    }
+  },
+  "$defs": {
+    "intRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "minProperties": 1
+    },
+    "numberRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "minProperties": 1
+    }
+  }
+}

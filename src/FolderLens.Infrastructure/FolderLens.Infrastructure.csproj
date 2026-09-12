@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <ItemGroup><InternalsVisibleTo Include="FolderLens.UnitTests"/></ItemGroup>
+ <ItemGroup><ProjectReference Include="../FolderLens.Core/FolderLens.Core.csproj"/><ProjectReference Include="../FolderLens.Contracts/FolderLens.Contracts.csproj"/><PackageReference Include="Microsoft.Data.Sqlite"/></ItemGroup>
+ <ItemGroup><EmbeddedResource Include="../../contracts/catalog-v1.sql" Link="Schemas/catalog.sql"/><EmbeddedResource Include="../../contracts/sessions-v1.sql" Link="Schemas/sessions.sql"/></ItemGroup>
+</Project>

@@ -1,0 +1,420 @@
+<Window x:Class="FolderLens.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:FolderLens.App" xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml" Title="FolderLens">
+  <Grid x:Name="Shell" Language="zh-CN" KeyboardAcceleratorPlacementMode="Hidden" RequestedTheme="Default" Background="{ThemeResource BrowserChromeBrush}" KeyDown="ViewerKeyDown" AllowDrop="True" DragOver="FilesDragOver" Drop="FilesDrop">
+    <Grid.Resources>
+      <ResourceDictionary>
+      <Style x:Key="ViewerPanelStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource BrowserSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource BrowserLineBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+      </Style>
+
+      <Style x:Key="NavigationButtonStyle" TargetType="Button">
+        <Setter Property="MinWidth" Value="32" /><Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="7" /><Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
+      </Style>
+      <DataTemplate x:Key="Card" x:DataType="local:FileRow">
+        <StackPanel Width="{x:Bind CardWidth, Mode=OneWay}" Spacing="4" Padding="4,4,4,6">
+          <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="6">
+            <Grid>
+              <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+              <StackPanel Visibility="{x:Bind ThumbnailErrorVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" ToolTipService.ToolTip="{x:Bind ThumbnailError, Mode=OneWay}" AutomationProperties.Name="{x:Bind ThumbnailError, Mode=OneWay}">
+                <FontIcon Glyph="&#xE783;" FontSize="22" Foreground="{ThemeResource BrowserWarningBrush}" />
+                <TextBlock Text="{x:Bind ThumbnailErrorLabel, Mode=OneWay}" FontSize="11" />
+              </StackPanel>
+              <Border Visibility="{x:Bind VideoBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4" Padding="6,3" CornerRadius="4" Background="{ThemeResource MediaBadgeBackgroundBrush}" ToolTipService.ToolTip="{x:Bind VideoDescription, Mode=OneWay}" AutomationProperties.Name="{x:Bind VideoDescription, Mode=OneWay}">
+                <Grid ColumnSpacing="5"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                  <FontIcon Glyph="&#xE768;" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
+                  <TextBlock x:Name="VideoDurationLabel" Grid.Column="1" Text="{x:Bind VideoDurationText, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" TextTrimming="CharacterEllipsis" />
+                </Grid>
+              </Border>
+            </Grid>
+          </Border>
+          <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind RelativePath, Mode=OneWay}" Visibility="{x:Bind PathVisibility, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+      </DataTemplate>
+      <DataTemplate x:Key="DetailRow" x:DataType="local:FileRow">
+        <Grid Padding="8,5" Loaded="DetailRowLoaded" HorizontalAlignment="Left">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="210" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="65" />
+            <ColumnDefinition Width="110" />
+            <ColumnDefinition Width="85" />
+            <ColumnDefinition Width="85" />
+            <ColumnDefinition Width="130" />
+            <ColumnDefinition Width="90" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="1" Text="{x:Bind RelativePath, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="2" Text="{x:Bind FormatText, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="3" Text="{x:Bind Resolution, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="4" Text="{x:Bind SizeText, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="5" Text="{x:Bind AllocatedText, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="6" Text="{x:Bind ModifiedText, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="7" Text="{x:Bind DurationText, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
+        </Grid>
+      </DataTemplate>
+      <Style x:Key="ColumnResizeGrip" TargetType="Thumb">
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Width="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" HorizontalAlignment="Center" /></Grid></ControlTemplate></Setter.Value></Setter>
+      </Style>
+      <Style x:Key="PreviewActionButtonStyle" TargetType="Button" BasedOn="{StaticResource NavigationButtonStyle}">
+        <Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="2" /><Setter Property="FontSize" Value="11" />
+      </Style>
+      <Style TargetType="Button">
+        <Setter Property="ToolTipService.ToolTip" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="CornerRadius" Value="6" />
+      </Style>
+      <Style TargetType="ToggleButton">
+        <Setter Property="ToolTipService.ToolTip" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="FontSize" Value="12" />
+      </Style>
+      <Style TargetType="ComboBox">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="9,4,0,4" />
+        <Setter Property="FontSize" Value="12" />
+      </Style>
+      <Style TargetType="TextBox">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="FontSize" Value="12" />
+      </Style>
+      <Style TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="{ThemeResource ContentControlThemeFontFamily}" />
+      </Style>
+      </ResourceDictionary>
+    </Grid.Resources>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <MenuBar Padding="0" x:Name="MainMenu">
+      <MenuBarItem Title="文件">
+        <MenuFlyoutItem Text="打开文件夹…" Click="PickRoot" />
+        <MenuFlyoutItem Text="刷新目录" Click="RefreshRoot" />
+        <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="复制完整路径  Ctrl+Shift+C" Click="CopyPath" />
+        <MenuFlyoutItem Text="复制文件引用" Click="CopyFileReference" />
+        <MenuFlyoutItem Text="定位原文件" Click="Reveal" />
+        <MenuFlyoutItem Text="外部打开" Click="ExternalOpen" />
+        <MenuFlyoutItem Text="文件属性…" Click="ShowProperties" />
+      </MenuBarItem>
+      <MenuBarItem Title="查看">
+        <MenuFlyoutItem Text="窗口查看 / 返回列表" Click="TogglePreview" />
+        <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Click="ToggleFullScreen" />
+        <MenuFlyoutItem Text="幻灯片  Ctrl+Space" Click="ToggleSlideshow" />
+        <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="适合窗口" Click="Fit" />
+        <MenuFlyoutItem Text="原图 100%" Click="Actual" />
+        <MenuFlyoutItem Text="顺时针旋转  R" Click="Rotate" />
+        <MenuFlyoutItem Text="逆时针旋转  Shift+R" Click="RotateCounterclockwise" />
+      </MenuBarItem>
+      <MenuBarItem Title="筛选">
+        <MenuFlyoutItem Text="更多条件与目录排除…" Click="AdvancedFilters" />
+        <MenuFlyoutItem Text="补充筛选信息" Click="FillMetadata" />
+        <MenuFlyoutItem Text="清除筛选" Click="ResetFilters" />
+      </MenuBarItem>
+      <MenuBarItem Title="收藏">
+        <MenuFlyoutItem Text="保存当前视图…" Click="SaveView" />
+        <MenuFlyoutItem Text="恢复保存的视图…" Click="RestoreView" />
+      </MenuBarItem>
+      <MenuBarItem Title="工具">
+        <MenuFlyoutItem Text="目录容量…" Click="ShowCapacity" />
+        <MenuFlyoutItem Text="播放器设置…" Click="ConfigurePlayer" />
+        <MenuFlyoutItem Text="图片查看设置…" Click="ConfigureImageViewing" />
+        <MenuFlyoutItem x:Name="PlaylistMenu" Text="播放筛选结果…" Click="PlayResultVideos" IsEnabled="False" ToolTipService.ToolTip="在播放器设置中选择支持 M3U8 的播放器后使用" />
+        <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="缓存与诊断…" Click="ShowDiagnostics" />
+      </MenuBarItem>
+      <MenuBarItem Title="帮助"><MenuFlyoutItem Text="使用帮助与快捷键  F1" Click="OpenLocalHelp" /></MenuBarItem>
+    </MenuBar>
+    <Grid Grid.Row="1" Padding="10,4,10,10" ColumnSpacing="6" x:Name="AddressToolbar">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <Button Style="{StaticResource NavigationButtonStyle}" x:Name="BackButton" Click="BackFolder" IsEnabled="False" ToolTipService.ToolTip="返回上一浏览位置（Alt+←）" AutomationProperties.Name="返回" AutomationProperties.AutomationId="NavigateBack"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
+      <Button Style="{StaticResource NavigationButtonStyle}" x:Name="ForwardButton" Grid.Column="1" Click="ForwardFolder" IsEnabled="False" ToolTipService.ToolTip="前进到下一浏览位置（Alt+→）" AutomationProperties.Name="前进" AutomationProperties.AutomationId="NavigateForward"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
+      <Button Style="{StaticResource NavigationButtonStyle}" Grid.Column="2" Click="ParentRoot" ToolTipService.ToolTip="上一级文件夹（Alt+↑）" AutomationProperties.Name="上一级文件夹"><FontIcon Glyph="&#xE74A;" FontSize="16" /></Button>
+      <Button Style="{StaticResource NavigationButtonStyle}" Grid.Column="3" Click="RefreshRoot" ToolTipService.ToolTip="刷新当前文件夹（F5）" AutomationProperties.Name="刷新" AutomationProperties.AutomationId="Refresh"><FontIcon Glyph="&#xE72C;" FontSize="16" /></Button>
+      <Button Style="{StaticResource NavigationButtonStyle}" Grid.Column="4" Click="CancelScan" ToolTipService.ToolTip="停止扫描，保留已发现的文件" AutomationProperties.Name="停止扫描" AutomationProperties.AutomationId="CancelScan"><FontIcon Glyph="&#xE71A;" FontSize="16" /></Button>
+      <Button Grid.Column="5" Content="打开文件夹" Click="PickRoot" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" AutomationProperties.AutomationId="OpenFolder" />
+      <TextBox x:Name="RootPath" Grid.Column="6" PlaceholderText="选择一个文件夹，透视所有子目录" KeyDown="RootPathKeyDown" ToolTipService.ToolTip="当前文件夹；输入路径后按 Enter 打开（Ctrl+L）" AutomationProperties.AutomationId="RootPath" />
+      <Button Grid.Column="7" Content="目录容量" Click="ShowCapacity" ToolTipService.ToolTip="查看子文件夹大小、占比和排名" AutomationProperties.AutomationId="ShowCapacity" />
+    </Grid>
+    <Grid x:Name="BodyGrid" Grid.Row="2">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="3*" />
+        <RowDefinition Height="2*" />
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition x:Name="PreviewColumn" Width="300" MinWidth="220" />
+        <ColumnDefinition Width="6" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <Grid x:Name="TreePane" Background="{ThemeResource BrowserChromeBrush}">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="文件夹" Padding="12,10,8,6" FontSize="13" FontWeight="SemiBold" />
+        <TreeView x:Name="FolderTree" Grid.Row="1" Expanding="ExpandFolder" ItemInvoked="InvokeFolder" SelectionMode="Single" AutomationProperties.AutomationId="FolderTree" />
+      </Grid>
+      <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="2" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
+        <Border Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
+      </local:ResizeDivider>
+      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="2" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="8" Margin="2,0,8,0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="BrowserToolbar" Padding="10,10" ColumnSpacing="7" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,0,0,1">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <ComboBox x:Name="Category" SelectedIndex="0" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="Category" Width="142" SelectionChanged="QuickFilterChanged">
+            <ComboBoxItem Content="图片" Tag="image" />
+            <ComboBoxItem Content="图片 + 视频" Tag="media" />
+            <ComboBoxItem Content="视频" Tag="video" />
+            <ComboBoxItem Content="音频" Tag="audio" />
+            <ComboBoxItem Content="文本与 Markdown" Tag="text" />
+            <ComboBoxItem Content="全部文件" Tag="all" />
+          </ComboBox>
+          <ComboBox x:Name="SortField" SelectedIndex="0" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="SortField" Grid.Column="1" Width="132" SelectionChanged="QuickFilterChanged">
+            <ComboBoxItem Content="自然文件名" Tag="name" />
+            <ComboBoxItem Content="路径" Tag="path" />
+            <ComboBoxItem Content="格式" Tag="format" />
+            <ComboBoxItem Content="磁盘占用" Tag="allocatedBytes" />
+            <ComboBoxItem Content="文件体积" Tag="logicalBytes" />
+            <ComboBoxItem Content="修改时间" Tag="modified" />
+            <ComboBoxItem Content="宽度" Tag="width" />
+            <ComboBoxItem Content="高度" Tag="height" />
+            <ComboBoxItem Content="像素数" Tag="pixelCount" />
+            <ComboBoxItem Content="时长" Tag="durationMs" />
+          </ComboBox>
+          <StackPanel x:Name="SortGroupingToolbar" Grid.Column="2" Orientation="Horizontal" Spacing="5">
+            <Button x:Name="Descending" Click="ChangeSortDirection" ToolTipService.ToolTip="当前升序；点击改为降序" AutomationProperties.Name="升序排列"><FontIcon x:Name="SortDirectionIcon" Glyph="&#xE74A;" FontSize="16" /></Button>
+            <Button x:Name="GroupingButton" Content="按文件夹分组 ▾" Click="ConfigureGrouping" ToolTipService.ToolTip="按文件夹分组，分别设置文件夹顺序和组内文件顺序" />
+          </StackPanel>
+          <TextBox x:Name="Search" PlaceholderText="搜索文件名…" AutomationProperties.AutomationId="FileSearch" Grid.Column="3" TextChanged="SearchChanged" KeyDown="SearchKeyDown" />
+          <Button x:Name="QuickFiltersButton" Grid.Column="4" ToolTipService.ToolTip="按格式、尺寸、体积等条件筛选文件" AutomationProperties.Name="筛选">
+            <Button.Content><StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE71C;" FontSize="14" /><TextBlock Text="筛选" VerticalAlignment="Center" /></StackPanel></Button.Content>
+            <Button.Flyout>
+              <Flyout x:Name="FilterFlyout">
+                <ScrollViewer MaxHeight="560" Width="280">
+                  <StackPanel Spacing="8">
+                    <CheckBox x:Name="SearchPath" Content="同时搜索相对路径" />
+                    <TextBox x:Name="Formats" Header="格式" PlaceholderText="jpeg,png,arw" />
+                    <ComboBox x:Name="RawMode" Header="RAW" SelectedIndex="0" HorizontalAlignment="Stretch">
+                      <ComboBoxItem Content="包含 RAW" Tag="any" />
+                      <ComboBoxItem Content="仅 RAW" Tag="only" />
+                      <ComboBoxItem Content="排除 RAW" Tag="exclude" />
+                    </ComboBox>
+                    <ComboBox x:Name="AnimationMode" Header="动静态" SelectedIndex="0" HorizontalAlignment="Stretch">
+                      <ComboBoxItem Content="不限" Tag="any" />
+                      <ComboBoxItem Content="仅静态图片" Tag="static" />
+                      <ComboBoxItem Content="仅动图" Tag="animated" />
+                    </ComboBox>
+                    <NumberBox x:Name="MinSize" Header="最小体积 · MiB" Minimum="0" SmallChange="1" />
+                    <NumberBox x:Name="MaxSize" Header="最大体积 · MiB" Minimum="0" SmallChange="1" />
+                    <NumberBox x:Name="MinWidth" Header="最小宽度 · px" Minimum="0" />
+                    <NumberBox x:Name="MinHeight" Header="最小高度 · px" Minimum="0" />
+                    <CheckBox x:Name="ShowHidden" Content="显示隐藏文件" />
+                    <CheckBox x:Name="Recursive" Content="包含子文件夹" IsChecked="True" />
+                    <CheckBox x:Name="PendingView" Content="查看待判断文件" />
+                    <Button Content="应用筛选" Click="ApplyFilters" AutomationProperties.AutomationId="ApplyFilters" />
+                    <Button Content="更多条件与目录排除…" Click="AdvancedFilters" />
+                    <Button Content="清除筛选" Click="ResetFilters" />
+                  </StackPanel>
+                </ScrollViewer>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
+          <ToggleButton Grid.Column="5" x:Name="DetailsMode" Content="详情" Click="ToggleView" ToolTipService.ToolTip="切换缩略图网格 / 文件详情列表" />
+          <Button x:Name="LargePreviewButton" Grid.Column="6" Content="放大预览" Click="TogglePreview" ToolTipService.ToolTip="在窗口内放大查看所选文件；Esc 返回列表" />
+        </Grid>
+        <StackPanel Grid.Row="1">
+        <Grid x:Name="DirectoryScopePanel" Padding="8,4" ColumnSpacing="10" Background="{ThemeResource ScopeFillBrush}" Visibility="Collapsed">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="DirectoryScopeLabel" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <Button Grid.Column="1" Content="显示整个根目录" Click="ClearDirectoryScope" ToolTipService.ToolTip="清除目录浏览范围，保留类型、格式及其他筛选；可用返回恢复" />
+        </Grid>
+        <TextBlock x:Name="ActiveFilterSummary" Margin="8,4" Foreground="{ThemeResource BrowserWarningBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
+        </StackPanel>
+        <GridView x:Name="FilesGrid" Grid.Row="2" SelectionMode="Extended" ItemTemplate="{StaticResource Card}" SelectionChanged="SelectFile" IsItemClickEnabled="True" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" AutomationProperties.AutomationId="FileGrid" Padding="5">
+          <GridView.GroupStyle><GroupStyle HidesIfEmpty="True"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,3,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></GridView.GroupStyle>
+          <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate></GridView.ItemsPanel>
+          <GridView.ItemContainerStyle><Style TargetType="GridViewItem"><Setter Property="Margin" Value="2" /><Setter Property="Padding" Value="0" /><Setter Property="MinWidth" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></GridView.ItemContainerStyle>
+        </GridView>
+        <Grid x:Name="DetailsPane" Grid.Row="2" Visibility="Collapsed">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+          <ScrollViewer x:Name="DetailsHeaderScroll" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled" Padding="0" IsTabStop="False">
+            <Grid x:Name="DetailsHeader" Padding="8,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" HorizontalAlignment="Left" />
+          </ScrollViewer>
+          <ListView x:Name="FilesList" Grid.Row="1" SelectionMode="Extended" ItemTemplate="{StaticResource DetailRow}" SelectionChanged="SelectFile" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollMode="Enabled" AutomationProperties.AutomationId="FileList">
+            <ListView.GroupStyle><GroupStyle HidesIfEmpty="True"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,3,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListView.GroupStyle>
+            <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="0" /><Setter Property="MinHeight" Value="32" /></Style></ListView.ItemContainerStyle>
+          </ListView>
+        </Grid>
+        <ScrollViewer x:Name="BrowserEmptyState" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center" AutomationProperties.AutomationId="BrowserEmptyState">
+          <StackPanel MaxWidth="460" Margin="28" Spacing="12" HorizontalAlignment="Center">
+            <FontIcon x:Name="BrowserEmptyIcon" Glyph="&#xE8B7;" FontSize="40" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,8" />
+            <TextBlock x:Name="BrowserEmptyTitle" FontSize="22" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock x:Name="BrowserEmptyDescription" FontSize="14" TextAlignment="Center" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="BrowserEmptyDetail" FontSize="12" TextAlignment="Center" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Button x:Name="BrowserEmptyOpen" Content="打开文件夹" Click="PickRoot" HorizontalAlignment="Center" Margin="0,8,0,0" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" />
+          </StackPanel>
+        </ScrollViewer>
+        <Grid Grid.Row="3" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="120" />
+          </Grid.ColumnDefinitions>
+          <TextBlock x:Name="ResultSummary" Text="尚未打开目录" VerticalAlignment="Center" FontSize="11" TextTrimming="CharacterEllipsis" />
+          <CheckBox x:Name="ShowPaths" Grid.Column="1" Content="相对路径" Click="PresentationChanged" FontSize="11" MinHeight="28" />
+          <Slider x:Name="ThumbnailSize" Grid.Column="2" Minimum="100" Maximum="240" Value="144" StepFrequency="8" ValueChanged="ThumbnailSizeChanged" ToolTipService.ToolTip="缩略图大小" />
+        </Grid>
+      </Grid>
+      <Grid x:Name="PreviewPane" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource BrowserChromeBrush}" Grid.Row="1">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel Spacing="2" x:Name="PreviewHeader">
+          <TextBlock x:Name="FileTitle" Text="预览" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="QualityLabel" Text="单击文件即可查看" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="2" Margin="0,5,0,6" x:Name="PreviewActions">
+          <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource PreviewActionButtonStyle}" /></StackPanel.Resources>
+          <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
+          <Button Click="Next" ToolTipService.ToolTip="下一个文件（PageDown）" AutomationProperties.Name="下一个文件"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
+          <Button x:Name="PreviewFit" Content="适屏" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
+          <Button x:Name="PreviewActual" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
+          <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
+          <Button x:Name="PreviewExternalPlayer" Content="播放" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用本地播放器打开当前视频" />
+          <Button Click="ToggleFullScreen" ToolTipService.ToolTip="全屏 / 窗口查看（F11）；Esc 返回列表" AutomationProperties.Name="全屏查看"><FontIcon Glyph="&#xE740;" FontSize="16" /></Button>
+        </StackPanel>
+        <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="#20242B">
+          <canvas:CanvasControl x:Name="ImageCanvas" Draw="DrawImage" IsHitTestVisible="False" AutomationProperties.AutomationId="ImageCanvas" xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml" />
+          <local:CursorInputSurface x:Name="ImageInput" Background="Transparent" Visibility="{Binding Visibility, ElementName=ImageCanvas}" PointerWheelChanged="ViewerWheel" PointerPressed="ViewerPointerDown" PointerMoved="ViewerPointerMove" PointerReleased="ViewerPointerUp" AutomationProperties.Name="图片浏览区域" />
+          <ScrollViewer x:Name="TextScroll" Visibility="Collapsed" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" HorizontalScrollBarVisibility="Auto">
+            <TextBox x:Name="TextContent" IsReadOnly="True" AcceptsReturn="True" FontFamily="Cascadia Mono" FontSize="13" TextWrapping="NoWrap" BorderThickness="0" AutomationProperties.AutomationId="TextPreview" PreviewKeyDown="TextPreviewKeyDown" SelectionChanged="TextSelectionChanged">
+              <TextBox.ContextFlyout><MenuFlyout>
+                <MenuFlyoutItem Text="复制所选文字  Ctrl+C" Click="CopyTextSelection" />
+                <MenuFlyoutItem Text="全选整个文档  Ctrl+A" Click="SelectWholeText" />
+              </MenuFlyout></TextBox.ContextFlyout>
+            </TextBox>
+          </ScrollViewer>
+          <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        </local:ViewerSurface>
+        <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
+          <StackPanel x:Name="FrameTools" Visibility="Collapsed" Orientation="Horizontal" Spacing="6">
+            <Button x:Name="AnimationButton" Visibility="Collapsed" Content="暂停动图" Click="ToggleAnimation" />
+            <Button x:Name="ReplayAnimationButton" Visibility="Collapsed" Content="从头重播" Click="ReplayAnimation" />
+            <Button x:Name="PreviousPageButton" Content="上一页图" Click="PreviousImagePage" />
+            <TextBlock x:Name="ImagePageLabel" VerticalAlignment="Center" />
+            <Button x:Name="NextPageButton" Content="下一页图" Click="NextImagePage" />
+          </StackPanel>
+          <StackPanel x:Name="AudioTools" Visibility="Collapsed" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="AudioPlayButton" Content="播放" Click="PlayAudio" ToolTipService.ToolTip="播放或暂停当前音频" />
+              <ComboBox x:Name="PlaybackRate" SelectedIndex="1" SelectionChanged="ChangeAudioRate">
+                <ComboBoxItem Content="0.5×" Tag="0.5" />
+                <ComboBoxItem Content="1×" Tag="1" />
+                <ComboBoxItem Content="1.25×" Tag="1.25" />
+                <ComboBoxItem Content="1.5×" Tag="1.5" />
+                <ComboBoxItem Content="2×" Tag="2" />
+              </ComboBox>
+              <TextBlock x:Name="AudioTime" VerticalAlignment="Center" />
+            </StackPanel>
+            <Slider x:Name="AudioPosition" Minimum="0" Maximum="1" IsEnabled="False" ValueChanged="SeekAudio" AutomationProperties.Name="音频播放位置" />
+            <Slider x:Name="AudioVolume" Header="音量" Minimum="0" Maximum="1" Value="0.5" ValueChanged="ChangeAudioVolume" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <ToggleButton x:Name="AudioMute" Content="静音" Click="ToggleAudioMute" ToolTipService.ToolTip="静音或恢复音量" />
+              <Button Content="外部播放器打开" Click="ExternalOpen" ToolTipService.ToolTip="使用指定播放器或系统关联打开当前音频" />
+            </StackPanel>
+            <TextBlock x:Name="AudioState" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel x:Name="TextTools" Visibility="Collapsed" Spacing="3">
+            <TextBlock x:Name="TextSelectionStatus" TextWrapping="Wrap" />
+            <Button Content="阅读工具 ▾">
+              <Button.Flyout>
+                <Flyout x:Name="TextToolsFlyout">
+                  <ScrollViewer MaxHeight="570">
+                  <StackPanel Width="480" Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Button Content="上一页" Click="TextPrevious" />
+                      <Button Content="下一页" Click="TextNext" />
+                      <NumberBox x:Name="TextOffset" Width="180" Minimum="0" PlaceholderText="字节位置" />
+                      <Button Content="跳转" Click="TextJump" />
+                    </StackPanel>
+                    <ComboBox x:Name="TextEncoding" SelectedIndex="0" SelectionChanged="ChangeTextEncoding">
+                      <ComboBoxItem Content="自动编码" Tag="auto" />
+                      <ComboBoxItem Content="UTF-8" Tag="utf-8" />
+                      <ComboBoxItem Content="UTF-16 LE" Tag="utf-16" />
+                      <ComboBoxItem Content="UTF-16 BE" Tag="utf-16BE" />
+                      <ComboBoxItem Content="GB18030" Tag="gb18030" />
+                      <ComboBoxItem Content="GBK" Tag="gb2312" />
+                    </ComboBox>
+                    <Button Content="原文 / Markdown 排版" Click="ToggleMarkdown" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Button Content="全选文档" Click="SelectWholeText" />
+                      <Button Content="复制所选" Click="CopyTextSelection" />
+                      <Button Content="停止复制" Click="CancelTextCopy" />
+                    </StackPanel>
+                    <TextBox x:Name="TextQuery" PlaceholderText="在整个文档中搜索" KeyDown="TextQueryKeyDown" TextChanged="InvalidateTextQuery" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Button Content="查找下一处" Click="TextSearch" />
+                      <Button Content="查找全部" Click="SearchAllText" />
+                      <Button Content="停止查找" Click="CancelTextSearch" />
+                    </StackPanel>
+                    <TextBlock x:Name="TextSearchSummary" TextWrapping="Wrap" />
+                    <ListView x:Name="TextSearchResults" MaxHeight="220" DisplayMemberPath="Label" IsItemClickEnabled="True" ItemClick="OpenTextSearchResult" AutomationProperties.Name="全文搜索结果" />
+                    <StackPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Spacing="6">
+                      <NumberBox x:Name="TextLineInput" Header="跳转到行" Minimum="1" Value="1" />
+                      <Button Content="按行跳转" Click="TextJumpLine" />
+                      <TextBlock x:Name="TextLineStatus" Text="行索引准备中…" TextWrapping="Wrap" />
+                      <ToggleButton x:Name="TextWrapToggle" Content="自动换行" Click="WrapText" />
+                      <CheckBox x:Name="TextMatchCase" Content="区分大小写" IsChecked="True" Checked="InvalidateTextQuery" Unchecked="InvalidateTextQuery" />
+                    </StackPanel>
+                  </StackPanel>
+                  </ScrollViewer>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+        </StackPanel>
+      </Grid>
+    </Grid>
+    <TextBlock x:Name="Status" Grid.Row="3" Text="打开文件夹，透视其中的图片、视频和文档。" Padding="10,6" FontSize="11" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="Status" />
+  </Grid>
+</Window>

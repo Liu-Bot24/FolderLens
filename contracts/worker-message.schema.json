@@ -1,0 +1,421 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:folderlens:worker-message:v1",
+  "title": "FolderLens worker control envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolMajor",
+    "protocolMinor",
+    "type",
+    "messageId",
+    "workerInstanceId"
+  ],
+  "properties": {
+    "protocolMajor": {
+      "const": 1
+    },
+    "protocolMinor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "type": {
+      "enum": [
+        "hello",
+        "request",
+        "response",
+        "cancel",
+        "releaseLease",
+        "ackLease"
+      ]
+    },
+    "messageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "workerInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "buildId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 256
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "rootEpoch",
+        "queryGeneration",
+        "selectionGeneration",
+        "fileVersion",
+        "pathRevision"
+      ],
+      "properties": {
+        "rootEpoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "queryGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "selectionGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fileVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pathRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rootId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resultSessionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "operation": {
+      "enum": [
+        "capabilities",
+        "probe",
+        "thumbnail",
+        "fit",
+        "fullTile",
+        "rawEmbedded",
+        "rawDevelop",
+        "animationOpen",
+        "animationFrame",
+        "animationClose",
+        "page",
+        "videoProbe",
+        "videoCover",
+        "markdownRender",
+        "scanDirectory",
+        "textRead",
+        "textSearch"
+      ]
+    },
+    "fileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "inputToken"
+      ],
+      "properties": {
+        "entryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputToken": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "deadlineUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resourceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memoryBytes",
+        "tempBytes",
+        "cpuThreads",
+        "maxPixels",
+        "maxOutputBytes"
+      ],
+      "properties": {
+        "memoryBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "tempBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "cpuThreads": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "maxPixels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "maxProperties": 32,
+      "description": "Validated by operation-specific DTO; unknown fields rejected by implementation."
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "cancelled",
+        "timeout",
+        "failed",
+        "unsupported",
+        "stale",
+        "resourceLimit"
+      ]
+    },
+    "errorCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "quality": {
+      "enum": [
+        "thumbnail",
+        "fit",
+        "full",
+        "rawEmbedded",
+        "rawDeveloped"
+      ]
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leaseId",
+        "mappingToken",
+        "width",
+        "height",
+        "stride",
+        "pixelFormat",
+        "byteLength",
+        "colorSpace",
+        "alphaMode"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mappingToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "stride": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "pixelFormat": {
+          "enum": [
+            "BGRA8",
+            "RGBA8",
+            "RGBA16F"
+          ]
+        },
+        "colorSpace": {
+          "enum": [
+            "sRGB",
+            "linearSRGB",
+            "scRGB"
+          ]
+        },
+        "alphaMode": {
+          "enum": [
+            "opaque",
+            "premultiplied",
+            "straight"
+          ]
+        }
+      }
+    },
+    "assetToken": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "metadata": {
+      "type": "object",
+      "maxProperties": 128
+    },
+    "leaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "hello"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "buildId",
+          "nonce"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "requestId",
+          "operation",
+          "context",
+          "deadlineUtc",
+          "resourceBudget",
+          "parameters"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "response"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "requestId",
+          "context",
+          "status"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cancel"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "requestId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "releaseLease"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "leaseId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ackLease"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "leaseId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "const": "capabilities"
+          },
+          "type": {
+            "const": "request"
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "type": {
+              "const": "request"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "fileRef"
+          ]
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "fileRef"
+          ]
+        }
+      }
+    }
+  ]
+}

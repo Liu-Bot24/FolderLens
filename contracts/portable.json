@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "portableMode": true,
+  "dataDirectory": "data",
+  "requireLocalWritableDirectory": true
+}

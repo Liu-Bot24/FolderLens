@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>true</SelfContained></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../FolderLens.Infrastructure/FolderLens.Infrastructure.csproj"/></ItemGroup>
+</Project>

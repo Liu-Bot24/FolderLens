@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "NOT_RUN",
+  "buildId": null,
+  "sourceCommit": null,
+  "scenarioId": null,
+  "fixtureManifestHash": null,
+  "environmentReport": null,
+  "cacheDefinition": null,
+  "sampleCount": 0,
+  "rawSamplesFile": null,
+  "p50Ms": null,
+  "p95Ms": null,
+  "p99Ms": null,
+  "maxMs": null,
+  "processTreePeakBytes": null,
+  "gpuPeakBytes": null,
+  "targetMs": null,
+  "hardGateMs": null,
+  "observedIssues": [],
+  "notes": "null=未测；0样本不是零延迟。"
+}

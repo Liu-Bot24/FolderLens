@@ -1,0 +1,87 @@
+[
+  {
+    "schemaVersion": 1,
+    "rootId": "example-root",
+    "recursive": true,
+    "kinds": [
+      "image"
+    ],
+    "formats": [
+      "jpeg",
+      "png"
+    ],
+    "raw": "exclude",
+    "animation": "static",
+    "showHidden": false,
+    "includePending": false,
+    "ranges": {
+      "longEdge": {
+        "min": 3840
+      },
+      "logicalBytes": {
+        "min": 2097152
+      }
+    },
+    "exclusions": [
+      {
+        "relativePath": "缓存",
+        "mode": "skipScan"
+      }
+    ],
+    "sort": {
+      "field": "name",
+      "direction": "asc",
+      "nulls": "last",
+      "naturalKeyVersion": 1
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "rootId": "example-root",
+    "recursive": true,
+    "kinds": [
+      "image"
+    ],
+    "formats": [],
+    "raw": "only",
+    "animation": "any",
+    "sort": {
+      "field": "logicalBytes",
+      "direction": "desc"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "rootId": "example-root",
+    "recursive": true,
+    "kinds": [
+      "video"
+    ],
+    "formats": [],
+    "raw": "any",
+    "animation": "any",
+    "ranges": {
+      "durationMs": {
+        "min": 60000,
+        "max": 3600000
+      }
+    },
+    "sort": {
+      "field": "durationMs",
+      "direction": "desc"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "rootId": "example-root",
+    "recursive": true,
+    "kinds": [],
+    "formats": [],
+    "raw": "any",
+    "animation": "any",
+    "sort": {
+      "field": "name",
+      "direction": "asc"
+    }
+  }
+]

@@ -1,0 +1,1097 @@
+{
+  "schemaVersion": 1,
+  "product": "FolderLens",
+  "phase": 1,
+  "status_values": [
+    "NOT_STARTED",
+    "IN_PROGRESS",
+    "IMPLEMENTED_NOT_VERIFIED",
+    "BLOCKED",
+    "DONE"
+  ],
+  "tasks": [
+    {
+      "task_id": "T001",
+      "milestone": "M0",
+      "title": "读取规范、环境检查和执行账本",
+      "depends_on": [],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R001",
+        "R060"
+      ],
+      "deliverable": "环境报告、适用规则清单、PROGRESS/HANDOFF",
+      "acceptance_ids": [
+        "A001a",
+        "A001b",
+        "A060a",
+        "A060b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T002",
+      "milestone": "M0",
+      "title": "WinUI/Win2D/native自包含启动验证",
+      "depends_on": [
+        "T001"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R002"
+      ],
+      "deliverable": "实际Release启动证据和依赖候选锁",
+      "acceptance_ids": [
+        "A002a",
+        "A002b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T003",
+      "milestone": "M0",
+      "title": "RAW/现代格式/动画高风险接口验证",
+      "depends_on": [
+        "T002"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [],
+      "deliverable": "实际Provider烟测、RawBridge ABI方案",
+      "acceptance_ids": [],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "implementation/INTEGRATION_REVIEW.md",
+        "artifacts/tests/animation-original-before.trx",
+        "artifacts/tests/animation-original-fixed.trx",
+        "artifacts/tests/integration-followup.trx",
+        "implementation/ANIMATION_SESSION_EVIDENCE.md",
+        "artifacts/tests/animation-timing.trx",
+        "artifacts/tests/animation-timing-regression.trx",
+        "implementation/RUNTIME_CAPABILITIES_EVIDENCE.md",
+        "artifacts/m0/capabilities/capabilities.json",
+        "artifacts/tests/capabilities-regression.trx",
+        "implementation/RAW_FAMILY_EVIDENCE.md",
+        "artifacts/m0/raw-family/complete-paths/raw-family-results.json",
+        "artifacts/logs/raw-family-wrong-hash.command.json"
+      ],
+      "blockers": [],
+      "notes": "运行时能力报告和RAW家族真实样本已补齐基础证据：8新增家族6操作48PASS；Sony61MP既有证据独立保留。完整静态变体、ICC/方向金样及UI仍未全闭合，继续IN_PROGRESS。"
+    },
+    {
+      "task_id": "T004",
+      "milestone": "M0",
+      "title": "百万SQLite查询与会话原型",
+      "depends_on": [
+        "T001"
+      ],
+      "status": "IMPLEMENTED_NOT_VERIFIED",
+      "requirements": [],
+      "deliverable": "固定快照与深位置页基准，WAL观察",
+      "acceptance_ids": [],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "artifacts/m0/million-catalog/query-20260912-084659-427/result.json",
+        "artifacts/logs/m0-concurrent-query.command.json"
+      ],
+      "blockers": [],
+      "notes": "M0 百万条目并发原型已验证：快照 7266.8443 ms、深页 P95 0.3306 ms、36 批并发写入、WAL峰值 4474352 bytes；A017a PASS。完整故障分支与参考机性能门禁不由此推导通过。"
+    },
+    {
+      "task_id": "T005",
+      "milestone": "M0",
+      "title": "5GiB文本与离线WebView风险原型",
+      "depends_on": [
+        "T002"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [],
+      "deliverable": "页读取原型和Fixed Runtime实际启动",
+      "acceptance_ids": [],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T006",
+      "milestone": "M1",
+      "title": "核心状态契约、IPC和进程生命周期",
+      "depends_on": [
+        "T002",
+        "T003",
+        "T004",
+        "T005"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R031"
+      ],
+      "deliverable": "版本化DTO、租约、取消及崩溃测试",
+      "acceptance_ids": [
+        "A031a",
+        "A031b"
+      ],
+      "evidence": [
+        "implementation/WORKER_SOURCE_VERSION_EVIDENCE.md",
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T007",
+      "milestone": "M1",
+      "title": "目录扫描、身份和批量索引",
+      "depends_on": [
+        "T006"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R003",
+        "R004",
+        "R005"
+      ],
+      "deliverable": "实际目录增量入库和CAS实现",
+      "acceptance_ids": [
+        "A003a",
+        "A003b",
+        "A004a",
+        "A004b",
+        "A005a",
+        "A005b"
+      ],
+      "evidence": [
+        "implementation/WORKER_SOURCE_VERSION_EVIDENCE.md",
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T008",
+      "milestone": "M1",
+      "title": "watcher、重扫、恢复与协调",
+      "depends_on": [
+        "T007"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R006",
+        "R064"
+      ],
+      "deliverable": "脏范围重扫、offline/partial处理",
+      "acceptance_ids": [
+        "A006a",
+        "A006b",
+        "A064a",
+        "A064b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T009",
+      "milestone": "M1",
+      "title": "UNC/链接/云占位/权限边界",
+      "depends_on": [
+        "T007"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R007",
+        "R009"
+      ],
+      "deliverable": "可终止远端扫描与特殊路径夹具",
+      "acceptance_ids": [
+        "A007a",
+        "A007b",
+        "A009a",
+        "A009b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T010",
+      "milestone": "M1",
+      "title": "真实根目录到JPEG预览纵向切片",
+      "depends_on": [
+        "T007",
+        "T006"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [],
+      "deliverable": "原生界面真实文件闭环，不是Mock",
+      "acceptance_ids": [],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T011",
+      "milestone": "M2",
+      "title": "完整FilterSpec、排序和排除",
+      "depends_on": [
+        "T010",
+        "T008",
+        "T009"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R008",
+        "R011",
+        "R012",
+        "R013",
+        "R014",
+        "R015"
+      ],
+      "deliverable": "SQL与参考实现对拍，字段状态",
+      "acceptance_ids": [
+        "A008a",
+        "A008b",
+        "A011a",
+        "A011b",
+        "A012a",
+        "A012b",
+        "A013a",
+        "A013b",
+        "A014a",
+        "A014b",
+        "A015a",
+        "A015b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T012",
+      "milestone": "M2",
+      "title": "稳定结果会话和任意位置分页",
+      "depends_on": [
+        "T011",
+        "T004"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R016",
+        "R017"
+      ],
+      "deliverable": "sessions库、ordinal页、快照容量基础",
+      "acceptance_ids": [
+        "A016a",
+        "A016b",
+        "A017a",
+        "A017b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T013",
+      "milestone": "M2",
+      "title": "三栏网格详情和虚拟化交互",
+      "depends_on": [
+        "T012"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R010"
+      ],
+      "deliverable": "虚拟数据源、滚动选择、路径控件",
+      "acceptance_ids": [
+        "A010a",
+        "A010b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T014",
+      "milestone": "M2",
+      "title": "筛选预设和浏览位置保存",
+      "depends_on": [
+        "T011",
+        "T013"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R018"
+      ],
+      "deliverable": "原子预设存储、恢复策略",
+      "acceptance_ids": [
+        "A018a",
+        "A018b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T015",
+      "milestone": "M3",
+      "title": "图片Provider和真正原图通路",
+      "depends_on": [
+        "T003",
+        "T010"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R020",
+        "R022",
+        "R023"
+      ],
+      "deliverable": "能力矩阵、Fit/Full、常用现代格式",
+      "acceptance_ids": [
+        "A020a",
+        "A020b",
+        "A022a",
+        "A022b",
+        "A023a",
+        "A023b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T016",
+      "milestone": "M3",
+      "title": "RAW与颜色方向透明精度",
+      "depends_on": [
+        "T015"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R021",
+        "R026"
+      ],
+      "deliverable": "真实ARW开发与色彩测试",
+      "acceptance_ids": [
+        "A021a",
+        "A021b",
+        "A026a",
+        "A026b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T017",
+      "milestone": "M3",
+      "title": "动画合成和多页导航",
+      "depends_on": [
+        "T015"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R024",
+        "R025"
+      ],
+      "deliverable": "GIF/APNG/WebP及TIFF验证",
+      "acceptance_ids": [
+        "A024a",
+        "A024b",
+        "A025a",
+        "A025b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T018",
+      "milestone": "M3",
+      "title": "分级缓存、瓦片与图形预算",
+      "depends_on": [
+        "T015",
+        "T016"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R019",
+        "R027"
+      ],
+      "deliverable": "磁盘/CPU/GPU租约缓存及损坏恢复",
+      "acceptance_ids": [
+        "A019a",
+        "A019b",
+        "A027a",
+        "A027b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T019",
+      "milestone": "M3",
+      "title": "预取切图、全屏和查看交互",
+      "depends_on": [
+        "T013",
+        "T017",
+        "T018"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R028",
+        "R029"
+      ],
+      "deliverable": "顺序稳定、无旧图覆盖、快捷键",
+      "acceptance_ids": [
+        "A028a",
+        "A028b",
+        "A029a",
+        "A029b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T020",
+      "milestone": "M4",
+      "title": "视频音频探测和懒封面",
+      "depends_on": [
+        "T010",
+        "T006"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R032",
+        "R061",
+        "R062"
+      ],
+      "deliverable": "FFprobe/FFmpeg监督与格式夹具",
+      "acceptance_ids": [
+        "A032a",
+        "A032b",
+        "A061a",
+        "A061b",
+        "A062a",
+        "A062b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "implementation/MEDIA_LIFECYCLE_EVIDENCE.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。 2026-09-12：封面首帧回退/软件并发1与FFprobe调度、新播放列表24小时过期清理已实现，7项定向/119项工程检查及独立App构建通过；仍缺真实播放器与完整媒体验收。"
+    },
+    {
+      "task_id": "T021",
+      "milestone": "M4",
+      "title": "外部播放器和结果播放列表",
+      "depends_on": [
+        "T020",
+        "T012"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R033",
+        "R034"
+      ],
+      "deliverable": "实际PotPlayer/默认播放器证据",
+      "acceptance_ids": [
+        "A033a",
+        "A033b",
+        "A034a",
+        "A034b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "implementation/SNAPSHOT_KIND_EVIDENCE.md",
+        "implementation/MEDIA_LIFECYCLE_EVIDENCE.md"
+      ],
+      "blockers": [],
+      "notes": "当前/全部/分段播放列表及固定类型已实现；9项定向与115项工程检查通过，见SNAPSHOT_KIND_EVIDENCE。真实播放器、多选与列表过期清理仍未闭合，保持IN_PROGRESS。 2026-09-12：封面首帧回退/软件并发1与FFprobe调度、新播放列表24小时过期清理已实现，7项定向/119项工程检查及独立App构建通过；仍缺真实播放器与完整媒体验收。"
+    },
+    {
+      "task_id": "T022",
+      "milestone": "M4",
+      "title": "原生音频单项试听",
+      "depends_on": [
+        "T020"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R035"
+      ],
+      "deliverable": "播放/seek/倍速/停止和回退",
+      "acceptance_ids": [
+        "A035a",
+        "A035b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T023",
+      "milestone": "M5",
+      "title": "大文本页读取、编码与行索引",
+      "depends_on": [
+        "T005",
+        "T010"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R036",
+        "R037"
+      ],
+      "deliverable": "真实5GiB和长单行有界查看",
+      "acceptance_ids": [
+        "A036a",
+        "A036b",
+        "A037a",
+        "A037b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T024",
+      "milestone": "M5",
+      "title": "文本搜索定位和有界复制",
+      "depends_on": [
+        "T023"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R038"
+      ],
+      "deliverable": "跨块/取消/命中上限测试",
+      "acceptance_ids": [
+        "A038a",
+        "A038b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "artifacts/m0",
+        "artifacts/tests/core.trx",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "搜索已接隔离进程，文档级 Ctrl+A/有界复制等尚未完整；不标完成。"
+    },
+    {
+      "task_id": "T025",
+      "milestone": "M5",
+      "title": "Markdown安全渲染与原文回退",
+      "depends_on": [
+        "T023",
+        "T005"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R039",
+        "R040"
+      ],
+      "deliverable": "小文档富文本、CSP与资源代理",
+      "acceptance_ids": [
+        "A039a",
+        "A039b",
+        "A040a",
+        "A040b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T026",
+      "milestone": "M6",
+      "title": "目录聚合和容量视图",
+      "depends_on": [
+        "T012",
+        "T008"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R041",
+        "R044"
+      ],
+      "deliverable": "直接/递归统计、增量和排名",
+      "acceptance_ids": [
+        "A041a",
+        "A041b",
+        "A044a",
+        "A044b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "implementation/CAPACITY_DASHBOARD_EVIDENCE.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T027",
+      "milestone": "M6",
+      "title": "容量范围、分配大小和特殊文件",
+      "depends_on": [
+        "T026",
+        "T009"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R042",
+        "R043"
+      ],
+      "deliverable": "快照同源、硬链接/未知/部分语义",
+      "acceptance_ids": [
+        "A042a",
+        "A042b",
+        "A043a",
+        "A043b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "implementation/CAPACITY_DASHBOARD_EVIDENCE.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T028",
+      "milestone": "M6",
+      "title": "设置恢复和只读基础操作",
+      "depends_on": [
+        "T014",
+        "T019",
+        "T021",
+        "T022",
+        "T024",
+        "T025",
+        "T027"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R045",
+        "R046"
+      ],
+      "deliverable": "日常使用闭环和缓存设置",
+      "acceptance_ids": [
+        "A045a",
+        "A045b",
+        "A046a",
+        "A046b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T029",
+      "milestone": "M6",
+      "title": "错误态、数据库迁移和崩溃恢复",
+      "depends_on": [
+        "T028"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R047",
+        "R048"
+      ],
+      "deliverable": "完整状态机及诊断，不丢用户预设",
+      "acceptance_ids": [
+        "A047a",
+        "A047b",
+        "A048a",
+        "A048b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T030",
+      "milestone": "M7",
+      "title": "全局调度和资源预算整合",
+      "depends_on": [
+        "T006",
+        "T019",
+        "T020",
+        "T023"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R030",
+        "R050"
+      ],
+      "deliverable": "进程树内存/线程/IO/磁盘预算",
+      "acceptance_ids": [
+        "A030a",
+        "A030b",
+        "A050a",
+        "A050b"
+      ],
+      "evidence": [
+        "implementation/WORKER_ADMISSION_EVIDENCE.md",
+        "implementation/WORKER_SOURCE_VERSION_EVIDENCE.md",
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md",
+        "artifacts/logs/consolidation-final-build.command.json",
+        "artifacts/tests/consolidation-suite.trx"
+      ],
+      "blockers": [],
+      "notes": "worker 准入与进程树内存初版已接；跨实例磁盘/GPU/低核抢占/硬限额边界尚未全部闭合。"
+    },
+    {
+      "task_id": "T031",
+      "milestone": "M7",
+      "title": "攻击面限制与源文件只读审计",
+      "depends_on": [
+        "T025",
+        "T027",
+        "T029",
+        "T030"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R051",
+        "R052"
+      ],
+      "deliverable": "安全夹具、泄漏/写入观察",
+      "acceptance_ids": [
+        "A051a",
+        "A051b",
+        "A052a",
+        "A052b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T032",
+      "milestone": "M7",
+      "title": "键盘无障碍、高DPI与设备恢复",
+      "depends_on": [
+        "T029",
+        "T019"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R049",
+        "R063"
+      ],
+      "deliverable": "UIA和实屏验收记录",
+      "acceptance_ids": [
+        "A049a",
+        "A049b",
+        "A063a",
+        "A063b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T033",
+      "milestone": "M7",
+      "title": "参考性能基准与优化",
+      "depends_on": [
+        "T030",
+        "T031",
+        "T032"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R053"
+      ],
+      "deliverable": "逐次数据、分位数、硬门禁结果",
+      "acceptance_ids": [
+        "A053a",
+        "A053b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T034",
+      "milestone": "M7",
+      "title": "长稳与故障注入回归",
+      "depends_on": [
+        "T033"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R054"
+      ],
+      "deliverable": "10000切图/30分钟/崩溃断网证据",
+      "acceptance_ids": [
+        "A054a",
+        "A054b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T035",
+      "milestone": "M8",
+      "title": "二进制能力、许可和供应链审计",
+      "depends_on": [
+        "T003",
+        "T020",
+        "T025"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R058"
+      ],
+      "deliverable": "完整dependency-lock、NOTICE、SBOM",
+      "acceptance_ids": [
+        "A058a",
+        "A058b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T036",
+      "milestone": "M8",
+      "title": "构建测试发布脚本完善",
+      "depends_on": [
+        "T006"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R055"
+      ],
+      "deliverable": "完整脚本入口和失败传播测试",
+      "acceptance_ids": [
+        "A055a",
+        "A055b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T037",
+      "milestone": "M8",
+      "title": "自包含目录和完整离线便携包",
+      "depends_on": [
+        "T035",
+        "T036",
+        "T034"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R056"
+      ],
+      "deliverable": "实际运行的portable ZIP和清单",
+      "acceptance_ids": [
+        "A056a",
+        "A056b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T038",
+      "milestone": "M8",
+      "title": "每用户安装升级卸载",
+      "depends_on": [
+        "T037"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R057"
+      ],
+      "deliverable": "真实setup EXE和升级回滚",
+      "acceptance_ids": [
+        "A057a",
+        "A057b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T039",
+      "milestone": "M8",
+      "title": "清洁Windows安装与离线验收",
+      "depends_on": [
+        "T038"
+      ],
+      "status": "BLOCKED",
+      "requirements": [],
+      "deliverable": "无SDK/无全局WebView实机结果",
+      "acceptance_ids": [],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [
+        "尚无干净离线Windows执行证据；其他开发与打包继续。"
+      ],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    },
+    {
+      "task_id": "T040",
+      "milestone": "M8",
+      "title": "全部需求对账与最终发布报告",
+      "depends_on": [
+        "T039"
+      ],
+      "status": "IN_PROGRESS",
+      "requirements": [
+        "R059"
+      ],
+      "deliverable": "GO/NO-GO、证据/源码/包/哈希",
+      "acceptance_ids": [
+        "A059a",
+        "A059b"
+      ],
+      "evidence": [
+        "implementation/PROGRESS.md",
+        "implementation/P1_GAPS.md"
+      ],
+      "blockers": [],
+      "notes": "已有实现与本批整合证据见 implementation/PROGRESS.md；按 M0–M8 顺序闭合 implementation/P1_GAPS.md，完整门禁未过不标 DONE。"
+    }
+  ]
+}

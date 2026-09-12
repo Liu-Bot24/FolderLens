@@ -1,0 +1,72 @@
+[
+  {
+    "file": "sample.apng",
+    "bytes": 1830,
+    "sha256": "90CA61A4847E6DBFE1A8EBFFCDCF361768B2FD858894A8F788C72CBB0FC7E38D",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.avif",
+    "bytes": 747,
+    "sha256": "F37986290097A848458612A03131B20E4E4C60C5F6B3B35295D17A9018E3651B",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.bmp",
+    "bytes": 2442,
+    "sha256": "26F0B008675D7C43519CE25D6A60721DF159C9A1BA326A00FFA6497646C834E6",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.gif",
+    "bytes": 2300,
+    "sha256": "32AA180B25B8C25DD6D9ACCCD77CA2E538B1BDE7C97AD7E3AF3556C42CD6A934",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.ico",
+    "bytes": 3230,
+    "sha256": "6543F541C5C67ACFF4E79D1E396C5F9C168C30D2DB1FDBD1B3C24386575DFCBC",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.jpeg",
+    "bytes": 1711,
+    "sha256": "0EB983DD3487A82A11EF2C7816D1B0B0A5BE0AC2240174A281B11AAE2B908DD4",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.jxl",
+    "bytes": 1006,
+    "sha256": "FDFD1145893E2F0ED3889A92AB0B8C5F1CD6C4C4FB61277E9DB64E8D0802B1F2",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.png",
+    "bytes": 1941,
+    "sha256": "9498ADF281CA286225728C148A9A6BE79EDE013C7BDCD3C8AAB41C6F4D5C45AD",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.tiff",
+    "bytes": 2660,
+    "sha256": "6D3DD3797638200F4F845DE7EF9D24083768718B1AD08076E59503F959D0974A",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  },
+  {
+    "file": "sample.webp",
+    "bytes": 1768,
+    "sha256": "022C9DF8B491E1E61C1E0F0DF59BB26483EA2023747CEF1274F45B3AB2746857",
+    "origin": "FolderLens synthetic diagnostic pattern",
+    "scope": "Basic runtime decode; not full variant acceptance"
+  }
+]

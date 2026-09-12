@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://raw.pixls.us/",
+  "retrievedUtc": "2026-09-12T09:51:08.7969609Z",
+  "fixtures": [
+    {
+      "fixtureId": "rawpixls-830",
+      "repositoryId": 830,
+      "family": "dng",
+      "make": "Pentax",
+      "model": "K-x",
+      "mode": "12bit (3:2)",
+      "megapixels": 12.48,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/830/nice/Pentax - K-x - 12bit (3:2).DNG",
+      "sha256": "7a594b66b54f99bb5aba4627c78abfc41213d6911ea54e4f5d2dd6c8505f6968",
+      "relativePath": "raw-family/rawpixls-830.dng"
+    },
+    {
+      "fixtureId": "rawpixls-1294",
+      "repositoryId": 1294,
+      "family": "cr2",
+      "make": "Canon",
+      "model": "EOS 80D",
+      "mode": "RAW (3:2)",
+      "megapixels": 25.5,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/1294/nice/Canon - EOS 80D - RAW (3:2).CR2",
+      "sha256": "8f28465cee09844ffad95dbd3ec91923717a329c5ec4f3f405f5b4fce83aaea3",
+      "relativePath": "raw-family/rawpixls-1294.cr2"
+    },
+    {
+      "fixtureId": "rawpixls-4672",
+      "repositoryId": 4672,
+      "family": "cr3",
+      "make": "Canon",
+      "model": "EOS RP",
+      "mode": "3:2",
+      "megapixels": 25.96,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/4672/nice/Canon - EOS RP - 3:2.CR3",
+      "sha256": "bd3270610593d37ff8a399908bb9406a4e32f9151d55bf19ac1cf8f10d787b46",
+      "relativePath": "raw-family/rawpixls-4672.cr3"
+    },
+    {
+      "fixtureId": "rawpixls-898",
+      "repositoryId": 898,
+      "family": "nef",
+      "make": "Nikon",
+      "model": "D750",
+      "mode": "14bit 14bit compressed (Lossless) (3:2)",
+      "megapixels": 24.32,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/898/nice/Nikon - D750 - 14bit 14bit compressed (Lossless) (3:2).NEF",
+      "sha256": "f90deb2819863f5a6ca9913c255fdd83a94963f4284eb88df9d389da7a6c7665",
+      "relativePath": "raw-family/rawpixls-898.nef"
+    },
+    {
+      "fixtureId": "rawpixls-1192",
+      "repositoryId": 1192,
+      "family": "raf",
+      "make": "Fujifilm",
+      "model": "X-T10",
+      "mode": "14bit 14bit uncompressed (3:2)",
+      "megapixels": 16.45,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/1192/nice/Fujifilm - X-T10 - 14bit 14bit uncompressed (3:2).RAF",
+      "sha256": "4c09401975cc6f95b1284693aac39fef85498f70b55e35bf458a133c6e61885d",
+      "relativePath": "raw-family/rawpixls-1192.raf"
+    },
+    {
+      "fixtureId": "rawpixls-1569",
+      "repositoryId": 1569,
+      "family": "rw2",
+      "make": "Panasonic",
+      "model": "DMC-GX80",
+      "mode": "4:3",
+      "megapixels": 15.9,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/1569/nice/Panasonic - DMC-GX80 - 4:3.RW2",
+      "sha256": "6e9a419c70c2124630912b2934027c635d3871e3d22dd91fed0655d58cfb5382",
+      "relativePath": "raw-family/rawpixls-1569.rw2"
+    },
+    {
+      "fixtureId": "rawpixls-1787",
+      "repositoryId": 1787,
+      "family": "orf",
+      "make": "Olympus",
+      "model": "E-M10 Mark III",
+      "mode": "16bit (4:3)",
+      "megapixels": 16.11,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/1787/nice/Olympus - E-M10 Mark III - 16bit (4:3).ORF",
+      "sha256": "11d90cbb564ad2c660c7a8d5d81d99c2c018aa27fdec45ed6c461fa5d24f942b",
+      "relativePath": "raw-family/rawpixls-1787.orf"
+    },
+    {
+      "fixtureId": "rawpixls-1075",
+      "repositoryId": 1075,
+      "family": "pef",
+      "make": "Pentax",
+      "model": "K-3",
+      "mode": "14bit (3:2)",
+      "megapixels": 24.51,
+      "license": "CC0-1.0",
+      "source": "https://raw.pixls.us/getfile.php/1075/nice/Pentax - K-3 - 14bit (3:2).PEF",
+      "sha256": "abfb3907b53734b5f353e8de0c6173470c7aad07f9cecc10f723d222a49dec9a",
+      "relativePath": "raw-family/rawpixls-1075.pef"
+    }
+  ]
+}
