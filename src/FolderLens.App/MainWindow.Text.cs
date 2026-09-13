@@ -17,6 +17,30 @@ public sealed partial class MainWindow
     private bool textSearchRunning;
     private bool restoringTextEncoding;
     private TextWindow? displayedText;
+    private void OpenReaderSearch(object sender,RoutedEventArgs e){viewerFindPending=true;TextToolsFlyout.ShowAt(TextTools);}
+    private async void DecreaseReaderFont(object sender,RoutedEventArgs e)=>await ResizeReaderFont(-2);
+    private async void IncreaseReaderFont(object sender,RoutedEventArgs e)=>await ResizeReaderFont(2);
+    private async Task ResizeReaderFont(double change)
+    {
+        TextContent.FontSize=Math.Clamp(TextContent.FontSize+change,12,32);
+        try{await ApplyMarkdownTextSize();}
+        catch(Exception ex){if(!closing)QualityLabel.Text="无法调整排版字号："+ex.Message;}
+    }
+    private async Task ApplyMarkdownTextSize()
+    {
+        // Only this host-owned numeric style is executed; document scripts remain disabled.
+        if(markdown?.CoreWebView2 is {} core)
+            await core.ExecuteScriptAsync("document.body.style.zoom="+(TextContent.FontSize/16).ToString(System.Globalization.CultureInfo.InvariantCulture)+";");
+    }
+    private void UpdateReaderControls()
+    {
+        bool rendered=MarkdownHost.Visibility==Visibility.Visible;
+        ReaderRenderMode.Visibility=selected?.Kind=="markdown"?Visibility.Visible:Visibility.Collapsed;
+        ReaderRenderMode.Content=rendered?"查看原文":"阅读排版";
+        ReaderPreviousPage.Visibility=ReaderNextPage.Visibility=rendered?Visibility.Collapsed:Visibility.Visible;
+        ReaderPreviousPage.IsEnabled=displayedText is not null&&textStart>0;
+        ReaderNextPage.IsEnabled=displayedText is {} page&&page.Next<page.Length;
+    }
     private Task ResetTextSession()
     {
         textSessionStop.Cancel();textSessionStop.Dispose();textSessionStop=CancellationTokenSource.CreateLinkedTokenSource(selectionStop.Token,lifetime.Token);textSessionGeneration++;

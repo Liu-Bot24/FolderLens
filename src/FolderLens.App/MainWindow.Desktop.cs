@@ -120,6 +120,7 @@ public sealed partial class MainWindow
             bool details=categoryDetailViews.TryGetValue(category,out bool preferred)?preferred:category is not ("image" or "video" or "media");
             if((DetailsMode.IsChecked==true)!=details){DetailsMode.IsChecked=details;ToggleView(this,new());}
             UpdateSortOptions();
+            ApplyDetailColumns();
         }
         await RefreshQuery();
     }

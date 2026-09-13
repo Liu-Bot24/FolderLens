@@ -422,7 +422,7 @@ public sealed partial class MainWindow : Window
     {
         string path=Path.Combine(root,row.RelativePath),kind=row.Kind;
         var bookmark=TakePreviewBookmark(row);
-        TextScroll.Visibility=kind is "text" or "markdown"?Visibility.Visible:Visibility.Collapsed;TextTools.Visibility=TextScroll.Visibility;ImageCanvas.Visibility=kind=="image"?Visibility.Visible:Visibility.Collapsed;
+        TextScroll.Visibility=kind is "text" or "markdown"?Visibility.Visible:Visibility.Collapsed;TextTools.Visibility=TextScroll.Visibility;UpdateReaderControls();ImageCanvas.Visibility=kind=="image"?Visibility.Visible:Visibility.Collapsed;
         if(kind=="image")
         {
             try{await LoadImage(row,current,token);}catch(Exception ex) when(IsSourceUnavailable(ex)){if(!await ShowOfflineThumbnail(row,current,token))throw;}
@@ -794,7 +794,7 @@ public sealed partial class MainWindow : Window
         if(selected is null)return;string path=Path.Combine(root,selected.RelativePath),encoding=textEncoding!;long sessionVersion=textSessionGeneration,windowVersion=++textWindowGeneration;
         textWindowStop.Cancel();textWindowStop.Dispose();textWindowStop=CancellationTokenSource.CreateLinkedTokenSource(cancellation,textSessionStop.Token);var token=textWindowStop.Token;
         var page=await CurrentTextClient().ReadWindow(offset,32*1024,token);
-        if(current!=selection||sessionVersion!=textSessionGeneration||windowVersion!=textWindowGeneration||token.IsCancellationRequested)return;previousSearch=null;displayedText=page;textStart=page.Start;textNext=page.Next;TextContent.Text=page.Text;TextOffset.Value=page.Start;TextScroll.ChangeView(0,0,null,true);QualityLabel.Text=$"{page.Encoding} · 字节 {page.Start:N0}–{page.Next:N0} / {page.Length:N0}";
+        if(current!=selection||sessionVersion!=textSessionGeneration||windowVersion!=textWindowGeneration||token.IsCancellationRequested)return;previousSearch=null;displayedText=page;textStart=page.Start;textNext=page.Next;TextContent.Text=page.Text;TextOffset.Value=page.Start;TextScroll.ChangeView(0,0,null,true);QualityLabel.Text=$"{page.Encoding} · 字节 {page.Start:N0}–{page.Next:N0} / {page.Length:N0}";UpdateReaderControls();
     }
     private async void TextNext(object sender,RoutedEventArgs e){try{await LoadText(textNext,selection,selectionStop.Token);}catch(Exception ex){ShowPreviewError(ex);}}
     private async void TextPrevious(object sender,RoutedEventArgs e){try{await LoadText(Math.Max(0,textStart-32*1024),selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}}
@@ -811,7 +811,7 @@ public sealed partial class MainWindow : Window
         try{await ResetTextSession();await LoadText(offset,current,selectionStop.Token);if(current!=selection)return;await StartTextIndex(current,selectionStop.Token);if(rendered)await LoadMarkdown(current,selectionStop.Token);}
         catch(OperationCanceledException){}catch(Exception ex){if(current==selection)ShowPreviewError(ex);}
     }
-    private async void ToggleMarkdown(object sender,RoutedEventArgs e){if(MarkdownHost.Visibility==Visibility.Visible){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;}else if(selected is not null&&selected.Kind=="markdown")await LoadMarkdown(selection,selectionStop.Token);}
+    private async void ToggleMarkdown(object sender,RoutedEventArgs e){if(MarkdownHost.Visibility==Visibility.Visible){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;}else if(selected is not null&&selected.Kind=="markdown")await LoadMarkdown(selection,selectionStop.Token);UpdateReaderControls();}
     private async Task LoadMarkdown(long current,CancellationToken token)
     {
         if(selected?.Item is null||contentWorker is null)return;string document=Path.Combine(root,selected.RelativePath);
@@ -864,11 +864,11 @@ public sealed partial class MainWindow : Window
                 };
                 initializing=false;
             }
-            if(current!=selection)return;markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection)QualityLabel.Text="Markdown 排版 · 远程资源已阻止";
+            if(current!=selection)return;markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 远程资源已阻止";}
         }
         catch(OperationCanceledException){if(entered&&initializing)ReleaseMarkdownView();}
         catch(Exception ex){if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"已切换完整原文模式：{ex.Message}";}}
-        finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
+        finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;UpdateReaderControls();ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
     private void Navigate(int delta){if(results is null || results.Count==0)return;int index=selected is null?(delta<0?results.Count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,results.Count-1);var row=(FileRow)results[index]!;RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(results[index]);}}

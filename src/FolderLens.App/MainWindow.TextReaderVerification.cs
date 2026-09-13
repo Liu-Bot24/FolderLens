@@ -26,6 +26,19 @@ public sealed partial class MainWindow
                 if(TextContent.Text.ReplaceLineEndings("\n")!=text.ReplaceLineEndings("\n"))failures.Add("TXT正文未完整显示");
             }
             if(name.EndsWith("md")&&MarkdownHost.Visibility!=Visibility.Visible)failures.Add("Markdown排版未显示："+QualityLabel.Text);
+            await ResizeReaderFont(2);
+            if(TextContent.FontSize!=18)failures.Add("放大文字没有更新字号");
+            if(name.EndsWith("md"))
+            {
+                string zoomValue=await markdown!.CoreWebView2.ExecuteScriptAsync("document.body.style.zoom");
+                if(zoomValue!="\"1.125\"")failures.Add("Markdown 字号没有跟随阅读按钮");
+                if(markdown.CoreWebView2.Settings.IsScriptEnabled)failures.Add("阅读字号意外允许文档脚本执行");
+                ((IInvokeProvider)new ButtonAutomationPeer(ReaderRenderMode).GetPattern(PatternInterface.Invoke)).Invoke();
+                if(TextScroll.Visibility!=Visibility.Visible||ReaderRenderMode.Content as string!="阅读排版")failures.Add("查看原文没有正确切换状态");
+            }
+            else if(ReaderRenderMode.Visibility!=Visibility.Collapsed)failures.Add("TXT 出现了不适用的排版按钮");
+            await ResizeReaderFont(-2);
+            if(ReaderNextPage.IsEnabled||ReaderPreviousPage.IsEnabled)failures.Add("单页文档仍允许翻到空白页");
             var list=FilesGrid.ItemsSource;string beforeRoot=root;var current=selected;
             await SetImmersive(true);
             var exit=PreviewActions.Children.OfType<Button>().FirstOrDefault(b=>b.Content as string=="返回文件列表");

@@ -11,6 +11,8 @@ public sealed partial class MainWindow
     private void ShowActiveFilters(FilterSpec filter)
     {
         var parts=new List<string>();
+        Search.PlaceholderText=filter.SearchScope=="nameAndPath"?"搜索文件名或相对路径…":"搜索文件名…";
+        if(!string.IsNullOrWhiteSpace(filter.NamePathQuery))parts.Add((filter.SearchScope=="nameAndPath"?"文件名或路径：":"文件名：")+filter.NamePathQuery);
         foreach(var range in filter.Ranges)
         {
             string label=range.Key switch{"logicalBytes"=>"大小","allocatedBytes"=>"占用空间","width"=>"宽度","height"=>"高度","longEdge"=>"长边","shortEdge"=>"短边","pixelCount"=>"像素数","durationMs"=>"时长（毫秒）",_=>range.Key};
@@ -24,7 +26,8 @@ public sealed partial class MainWindow
         if(!filter.Recursive)parts.Add("不穿透子目录");
         if(filter.Exclusions.Length>0)parts.Add($"排除 {filter.Exclusions.Length} 个目录规则");
         if(filter.DirectoryRules.Any(r=>r.Enabled))parts.Add($"文件夹筛选：{filter.DirectoryRules.Count(r=>r.Enabled)} 条规则");
-        if(filter.Dates.Length>0)parts.Add($"日期范围：{filter.Dates.Length} 项");
+        foreach(var date in filter.Dates)
+            parts.Add(FolderLens.Core.DateRangeDisplay.Format(date));
         if(filter.AspectRatio is not null)parts.Add("已限制宽高比");
         if(filter.Orientation!="any")parts.Add("已限制图片方向");
         if(filter.FrameRate is not null||filter.VideoCodecs.Length>0||filter.AudioCodecs.Length>0)parts.Add("已限制媒体编码或帧率");

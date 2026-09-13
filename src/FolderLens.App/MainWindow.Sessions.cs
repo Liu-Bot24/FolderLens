@@ -40,7 +40,7 @@ public sealed partial class MainWindow
         {
             advanced=filter;folderGrouping=filter.Grouping;UpdateGroupingButton();Search.Text=filter.NamePathQuery;Formats.Text=string.Join(',',filter.Formats);
             string category=FileCategories.FromFilter(filter);
-            SelectTag(Category,category);UpdateSortOptions();SelectTag(RawMode,filter.Raw);SelectTag(AnimationMode,filter.Animation);SelectTag(SortField,FolderLens.Core.BrowserSortOptions.IsApplicable(category,filter.Sort.Field)?filter.Sort.Field:"name");
+            SelectTag(Category,category);UpdateSortOptions();ApplyDetailColumns();SelectTag(RawMode,filter.Raw);SelectTag(AnimationMode,filter.Animation);SelectTag(SortField,FolderLens.Core.BrowserSortOptions.IsApplicable(category,filter.Sort.Field)?filter.Sort.Field:"name");
             ShowHidden.IsChecked=filter.ShowHidden;PendingView.IsChecked=filter.IncludePending;Recursive.IsChecked=filter.Recursive;SearchPath.IsChecked=filter.SearchScope=="nameAndPath";sortDescending=filter.Sort.Direction=="desc";
             MinSize.Value=filter.Ranges.TryGetValue("logicalBytes",out var size)?size.Min/1048576.0??double.NaN:double.NaN;MaxSize.Value=size?.Max/1048576.0??double.NaN;
             MinWidth.Value=filter.Ranges.TryGetValue("width",out var width)?width.Min??double.NaN:double.NaN;MinHeight.Value=filter.Ranges.TryGetValue("height",out var height)?height.Min??double.NaN:double.NaN;

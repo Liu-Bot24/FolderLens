@@ -3,6 +3,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Graphics.Imaging;
 
 namespace FolderLens.App;
 
@@ -29,6 +33,11 @@ public sealed partial class MainWindow
         var list=rules.Children.OfType<ListView>().Single();
         if(list.Items.Count!=1)throw new InvalidOperationException("点击添加没有创建规则。");
         var enabled=(CheckBox)list.Items[0];enabled.IsChecked=false;enabled.IsChecked=true;
+        list.SelectedIndex=0;Invoke("编辑选中规则");pattern.Text="仅预览副本";Invoke("取消编辑");
+        list.SelectedIndex=0;Invoke("编辑选中规则");
+        if(pattern.Text!="仅预览")throw new InvalidOperationException("取消编辑没有保留原规则。");
+        pattern.Text="仅预览";Invoke("保存规则");
+        if(list.Items.Count!=1)throw new InvalidOperationException("编辑规则产生了重复规则。");
         Invoke("预览筛选结果");
         await WaitUntil(()=>rules.Children.OfType<TextBlock>().Any(t=>t.Text.Contains("隐藏 1 个文件")),TimeSpan.FromSeconds(5));
         // Apply through the native dialog button, preserving the current scan epoch.
@@ -49,10 +58,35 @@ public sealed partial class MainWindow
         long previousGeneration=generation;SelectTag(Category,"pdf");
         await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
         if(resultHandle!.Count!=1||DetailsMode.IsChecked!=true)throw new InvalidOperationException("PDF 分类没有使用详细信息显示未解码的 PDF 文件。");
+        if(detailColumns.Single(c=>c.Field=="pixelCount").Visible||detailColumns.Single(c=>c.Field=="durationMs").Visible||detailColumns.Single(c=>c.Field=="allocatedBytes").Visible)throw new InvalidOperationException("PDF 默认显示了不适用的详细信息列。");
+        var widthColumn=detailColumns.Single(c=>c.Field=="pixelCount");widthColumn.Resize(197);
+        await SaveDetailWidths();await RestoreDetailWidths();
+        if(widthColumn.SavedWidth!=197||widthColumn.Width.Value!=0)throw new InvalidOperationException("隐藏列丢失列宽或仍占据空间。");
+        var pdfRow=new FileRow(0);pdfRow.Fill((await catalog.ReadFirstPage(CurrentFilter())).Items.Single());
+        if(pdfRow.FileIconVisibility!=Visibility.Visible||pdfRow.FileTypeBadge!="PDF")throw new InvalidOperationException("文档没有格式图标。");
         DetailsMode.IsChecked=false;ToggleView(this,new());previousGeneration=generation;SelectTag(Category,"image");
         await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
+        if(!widthColumn.Visible||widthColumn.Width.Value!=197)throw new InvalidOperationException("切到图片分类没有恢复尺寸列及其宽度。");
         previousGeneration=generation;SelectTag(Category,"pdf");await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
         if(DetailsMode.IsChecked==true)throw new InvalidOperationException("切回分类后覆盖了用户选择的网格模式。");
+        FilesGrid.UpdateLayout();await WaitUntil(()=>FilesGrid.ContainerFromIndex(0) is GridViewItem,TimeSpan.FromSeconds(3));
+        var card=(GridViewItem)FilesGrid.ContainerFromIndex(0);
+        bool VisibleBadge(DependencyObject parent)
+        {
+            if(parent is FrameworkElement {Visibility:Visibility.Collapsed})return false;
+            if(parent is TextBlock {Text:"PDF"})return true;
+            for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++)if(VisibleBadge(VisualTreeHelper.GetChild(parent,i)))return true;
+            return false;
+        }
+        await WaitUntil(()=>VisibleBadge(card),TimeSpan.FromSeconds(3));
+        var capture=new RenderTargetBitmap();await capture.RenderAsync(card);byte[] pixels=(await capture.GetPixelsAsync()).ToArray();
+        using(var file=File.Create(Path.Combine(dataDirectory,"document-card.png")))
+        using(var stream=file.AsRandomAccessStream())
+        {
+            var encoder=await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId,stream);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,(uint)capture.PixelWidth,(uint)capture.PixelHeight,96,96,pixels);await encoder.FlushAsync();
+        }
+        report["documentCardVisible"]=true;report["columnVisibilityAndWidth"]=true;report["editSaveCancel"]=true;
         report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;report["status"]="PASS";
     }
 }
