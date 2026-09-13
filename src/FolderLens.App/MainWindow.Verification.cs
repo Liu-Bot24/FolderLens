@@ -24,6 +24,8 @@ public sealed partial class MainWindow
     private Func<Task>? verifyRetirementBarrier;
     private Action? verifySlideEventCompleted;
     private Action? verifySlideTickCompleted;
+    private Func<FileRow,CancellationToken,Task>? verifyThumbnailReadBarrier;
+    private Func<Task>? verifySelectionRestoreBarrier;
     private Func<CancellationToken,Task>? verifySlideAdvanceBarrier;
     private Func<CancellationToken,Task>? verifyMetadataBarrier;
     // Explicit, isolated native regression run. No user catalog or source folder is used.
@@ -54,6 +56,8 @@ public sealed partial class MainWindow
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
             if(arguments.Contains("--verify-player-settings")){await VerifyPlayerSettings(report);return;}
             if(arguments.Contains("--verify-audio-recovery")){await VerifyAudioRecovery(source,report);return;}
+            if(arguments.Contains("--verify-collection-contract")){VerifyCollectionContract(report);return;}
+            if(arguments.Any(arg=>arg.StartsWith("--verify-first-audit-"))){await VerifyFirstPageAudit(source,report);return;}
             if(arguments.Contains("--verify-capacity-ui")){await VerifyCapacityUi(source,report);return;}
             if(arguments.Contains("--verify-empty-audit")){await VerifyEmptyStateAudit(source,report);return;}
             if(arguments.Contains("--verify-empty-state")){await VerifyBrowserEmptyState(source,report);return;}

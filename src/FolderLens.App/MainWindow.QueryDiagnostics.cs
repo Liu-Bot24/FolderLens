@@ -7,16 +7,23 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private readonly SemaphoreSlim queryDiagnosticGate=new(1,1);
-    private sealed record QueryAttempt(long Request,long Generation,long Epoch,string RootId,bool Automatic,string FilterHash="");
+    private sealed record QueryAttempt(long Request,long Generation,long Epoch,string RootId,bool Automatic,string FilterHash="")
+    {public long StartedTimestamp{get;}=System.Diagnostics.Stopwatch.GetTimestamp();}
     private static string QueryFilterHash(FolderLens.Core.FilterSpec filter)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(filter))));
-    private async Task RecordQueryFailure(Exception error,string phase,QueryAttempt attempt)
+    private async Task RecordQueryFailure(Exception error,string phase,QueryAttempt attempt,string? candidateId)
     {
+        string? reason=error.Data["FolderLens.SnapshotFailure"] as string;
+        if(reason is not ("Cancelled" or "Timeout" or "CatalogWalLimit" or "SessionDiskLimit" or "DiskFull" or "SnapshotFailed"))reason=null;
         var entry=new
         {
             utc=DateTimeOffset.UtcNow,attempt,phase,
             display=resultHandle is null?firstPageSequence.Length>0?"firstPage":"empty":"snapshot",
             firstPageCount=firstPageSequence.Length,displayedCount=resultHandle?.Count,
             snapshotId=resultHandle?.Id,errorType=error.GetType().Name,hresult=error.HResult,
+            candidateId=candidateId??error.Data["FolderLens.CandidateId"] as string,
+            reason,elapsedMs=System.Diagnostics.Stopwatch.GetElapsedTime(attempt.StartedTimestamp).TotalMilliseconds,
+            rangeNotification=error.Data["FolderLens.RangeNotification"] as string,
+            resetCount=(FilesGrid.ItemsSource as BrowserVector)?.ResetCount,
             errorCode=error is Microsoft.Data.Sqlite.SqliteException sqlite?sqlite.SqliteExtendedErrorCode:(int?)null,
             cancelledByNewRequest=attempt.Request!=queryRequest,closing
         };

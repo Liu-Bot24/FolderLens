@@ -196,7 +196,7 @@ public sealed partial class MainWindow : Window
                 if(activeId!=rootId || activeEpoch!=epoch || requested!=rootChangeVersion || closing)return;
                 Status.Text=$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();}
-                if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,selected is not null||immersive||fullScreen,Stopwatch.GetElapsedTime(0)))
+                if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
                 {
                     _=RefreshQuery(preserveViewport:true,scanPreview:true);
                 }
@@ -211,7 +211,7 @@ public sealed partial class MainWindow : Window
             await scanTask;
             if(verifyScanBarrier is not null)await verifyScanBarrier(rootToken);
             if(requested!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
-            if(activeId==rootId){QueueTreeRefresh();if(selected is null)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
+            if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
             if(settings is not null)await settings.Save("last-root.json",activeRoot);
             if(activeId==rootId&&!scanStop.IsCancellationRequested)_=StartMetadataRefresh();
             if(reconcilePending)_=Reconcile();
@@ -240,7 +240,7 @@ public sealed partial class MainWindow : Window
         long previewSelection=selection;string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
-        bool PreviewInterrupted()=>scanPreview&&resultHandle is not null&&(selected is not null||selection!=previewSelection||immersive||fullScreen);
+        bool PreviewInterrupted()=>scanPreview&&(BrowserSequenceLocked||resultHandle is not null&&selection!=previewSelection);
         if(PreviewInterrupted())return;
         var completion=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);queryCompletion=completion.Task;
         queryStop.Cancel();queryStop.Dispose();queryStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var queryToken=queryStop.Token;long gen=scanPreview?generation:++generation,request=++queryRequest;queryBusy=true;
@@ -249,7 +249,7 @@ public sealed partial class MainWindow : Window
         browserEmptyError=null;UpdateBrowserEmptyState();
         try
         {
-            FilterSpec filter=CurrentFilter();attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=selected?.RelativePath;
+            FilterSpec filter=CurrentFilter();attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=selected?.RelativePath;long restoreSelectionRequest=browserSelectionRequest;
             var activeList=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
             int firstVisible=activeList.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
             string? viewportPath=preserveViewport&&firstVisible>=0&&firstVisible<activeList.Items.Count?(activeList.Items[firstVisible] as FileRow)?.RelativePath:null;
@@ -296,10 +296,11 @@ public sealed partial class MainWindow : Window
             {
                 matching=await catalog.ReadSnapshotEntries(handle.Id,firstPageSequence.Select(row=>row.Item!.EntryId).ToArray(),queryToken);
                 if(!IsCurrent()||closing)return;
-                previousPath=selected?.RelativePath;
+                previousPath=selected?.RelativePath;restoreSelectionRequest=browserSelectionRequest;
             }
             var nextResults=new VirtualResults(catalog,handle,DispatcherQueue);nextResults.SetPresentation(GridCardWidth,ShowPaths.IsChecked==true);
             bool adopted=false;
+            activeList=ActiveBrowser;
             var publicationAnchor=incremental||promoting?CapturePublicationViewport(activeList):null;
             if(incremental||promoting)publicationRows=visible.ToHashSet();
             queryPhase="publish";updatingBrowser=true;
@@ -388,13 +389,22 @@ public sealed partial class MainWindow : Window
             if(!IsCurrent()||closing||!ReferenceEquals(results,nextResults)||!ReferenceEquals(resultHandle,handle))return;
             UpdateDirectoryScopeBanner(filter);
             ResultSummary.Text=$"{(handle.IsPendingView?"待判断视图 · ":"")}已符合 {handle.ConfirmedMatchCount:N0} · 待判断 {handle.Pending:N0} · 无法判断 {handle.Unresolvable:N0}{(handle.Count==0?(scanTask is {IsCompleted:false}?" · 仍在扫描子目录，发现匹配文件后自动显示":" · 当前条件无匹配文件，请检查上方筛选条件"):"")}";
-            if(previousPath is not null&&await catalog.FindOrdinal(handle.Id,previousPath,queryToken) is {} ordinal&&IsCurrent()&&!closing){var restored=(FileRow)results[(int)ordinal]!;RevealBrowserRow(restored);ActiveBrowser.SelectedItem=restored;}
+            if(verifySelectionRestoreBarrier is not null)await verifySelectionRestoreBarrier();
+            if(previousPath is not null)
+            {
+                var ordinal=await catalog.FindOrdinal(handle.Id,previousPath,queryToken);
+                if(IsCurrent()&&!closing&&restoreSelectionRequest==browserSelectionRequest)
+                {
+                    if(ordinal is {} position){var restored=(FileRow)results[(int)position]!;RevealBrowserRow(restored);ActiveBrowser.SelectedItem=restored;}
+                    else{ActiveBrowser.SelectedItem=null;ClearResultSelection();}
+                }
+            }
             else if(!incremental&&!string.IsNullOrEmpty(viewportPath)&&await catalog.FindOrdinal(handle.Id,viewportPath,queryToken) is {} anchor&&IsCurrent())
                 activeList.ScrollIntoView(results[(int)anchor],ScrollIntoViewAlignment.Leading);
             if(IsCurrent()&&!closing)await TryRestoreBrowserView();
         }
-        catch(OperationCanceledException ex){await RecordQueryFailure(ex,queryPhase,attempt);}
-        catch(Exception ex){failed=true;await RecordQueryFailure(ex,queryPhase,attempt);if(IsCurrent()&&!closing)ShowBrowserError(ex);}
+        catch(OperationCanceledException ex){await RecordQueryFailure(ex,queryPhase,attempt,candidateLease);}
+        catch(Exception ex){failed=true;await RecordQueryFailure(ex,queryPhase,attempt,candidateLease);if(IsCurrent()&&!closing)ShowBrowserError(ex);}
         finally
         {
             try
@@ -703,11 +713,17 @@ public sealed partial class MainWindow : Window
         thumbnailWorkCount++;var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);thumbnailRequests[row]=request;var token=request.Token;string activeRoot=root,activeId=rootId;long activeEpoch=epoch,activeGeneration=generation;bool slot=false;ThumbnailCacheLease? cacheLease=null;ImageReply? produced=null;WorkerClient? decoder=null;string? coverAsset=null;
         long stageStart=verifyThumbnailStage is null?0:Stopwatch.GetTimestamp();
         bool pipeline=false;ImageReply? metadataReply=null;
+        SnapshotItem? requestedItem=null;
+        bool OwnsRequest()=>!closing&&activeId==rootId&&activeEpoch==epoch&&!token.IsCancellationRequested
+            &&visible.Contains(row)&&(firstPageRows.Contains(row)||results?.Contains(row)==true)
+            &&thumbnailRequests.TryGetValue(row,out var owner)&&ReferenceEquals(owner,request);
+        bool OwnsRow()=>OwnsRequest()&&requestedItem is {} expected&&row.Item is {} item&&item.EntryId==expected.EntryId&&item.Version==expected.Version
+            &&item.RelativePath==expected.RelativePath&&item.Bytes==expected.Bytes&&item.Kind==expected.Kind;
         void ReturnDecoder(){if(decoder is not null){thumbnailPool.Enqueue(decoder);decoder=null;}if(slot){thumbnailSlots.Release();slot=false;}}
         void Mark(string stage){if(verifyThumbnailStage is {} record){record(stage,Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds);stageStart=Stopwatch.GetTimestamp();}}
         try
         {
-            if(row.Item is null)await (results??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);Mark("page");await thumbnailPipelines.WaitAsync(token);pipeline=true;await thumbnailSlots.WaitAsync(token);slot=true;Mark("queue");if(!visible.Contains(row)||thumbnailWorker is null||activeId!=rootId)return;
+            if(row.Item is null)await (results??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);requestedItem=row.Item;Mark("page");await thumbnailPipelines.WaitAsync(token);pipeline=true;await thumbnailSlots.WaitAsync(token);slot=true;Mark("queue");if(!visible.Contains(row)||thumbnailWorker is null||!OwnsRow())return;
             // Each slot owns a separate decoder. Sharing one WorkerClient here
             // serializes both slots behind its IPC gate on every cold page.
             decoder=thumbnailPool.Dequeue();
@@ -719,16 +735,17 @@ public sealed partial class MainWindow : Window
             if(stat.Length!=row.Item!.Bytes)throw new IOException("文件已变化，请刷新目录。");
             string representation=kind=="video"?"videoCover":kind=="audio"?"audioCover":FileKinds.Raw.Contains(Path.GetExtension(source))?"rawEmbedded":"thumbnail";
             var cacheKey=new ThumbnailCacheKey(row.Item.EntryId,row.Item.Version,stat.Modified,stat.Length,edge,kind is "video" or "audio"?providerIdentity+"/"+MediaTools.CoverStrategyVersion:providerIdentity,representation);
+            if(verifyThumbnailReadBarrier is not null)await verifyThumbnailReadBarrier(row,token);
             cacheLease=await thumbnailCache!.TryGet(cacheKey,token);Mark("cacheLookup");
             if(cacheLease is not null)
             {
-                using var stream=cacheLease.OpenRead();var cached=new BitmapImage();await cached.SetSourceAsync(stream.AsRandomAccessStream());if(activeGeneration==generation&&visible.Contains(row)&&!token.IsCancellationRequested)row.Thumbnail=cached;return;
+                using var stream=cacheLease.OpenRead();var cached=new BitmapImage();await cached.SetSourceAsync(stream.AsRandomAccessStream());if(OwnsRow())row.Thumbnail=cached;return;
             }
             if(properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))return;
             if(kind=="image")
             {
                 var reply=await decoder.Request(source,representation,new(activeId,activeEpoch,activeGeneration,1,row.Item!.Version,1),new(edge,edge),token,Stamp(row));produced=reply;asset=reply.AssetPath!;Mark("decode");
-                metadataReply=reply;var info=reply.Message.Metadata!.Value;row.DescribeImage(info.GetProperty("width").GetInt32(),info.GetProperty("height").GetInt32(),Path.GetExtension(source).TrimStart('.'));
+                metadataReply=reply;if(!OwnsRow())return;var info=reply.Message.Metadata!.Value;row.DescribeImage(info.GetProperty("width").GetInt32(),info.GetProperty("height").GetInt32(),Path.GetExtension(source).TrimStart('.'));
             }
             else if(kind is "video" or "audio")
             {
@@ -736,9 +753,9 @@ public sealed partial class MainWindow : Window
             }
             else return;
             var cacheWrite=await thumbnailCache.StoreOptional(cacheKey,asset,token);cacheLease=cacheWrite.Lease;Mark("cacheStore");
-            if(activeRoot!=root||activeGeneration!=generation||!visible.Contains(row)||token.IsCancellationRequested)return;
+            if(!OwnsRow())return;
             if(cacheWrite.Warning is not null)Status.Text=cacheWrite.Warning;
-            var bitmap=new BitmapImage();using(var imageStream=cacheLease?.OpenRead()??File.OpenRead(asset)){await bitmap.SetSourceAsync(imageStream.AsRandomAccessStream());}if(activeGeneration==generation&&visible.Contains(row)&&!token.IsCancellationRequested)row.Thumbnail=bitmap;
+            var bitmap=new BitmapImage();using(var imageStream=cacheLease?.OpenRead()??File.OpenRead(asset)){await bitmap.SetSourceAsync(imageStream.AsRandomAccessStream());}if(OwnsRow())row.Thumbnail=bitmap;
             Mark("bitmap");
             if(metadataReply is not null)
             {
@@ -750,7 +767,7 @@ public sealed partial class MainWindow : Window
             }
         }
         catch(OperationCanceledException){}
-        catch(Exception ex){if(activeRoot==root&&activeGeneration==generation&&!token.IsCancellationRequested)row.FailThumbnail(ex);}
+        catch(Exception ex){if(OwnsRow()||(requestedItem is null&&OwnsRequest()))row.FailThumbnail(ex);}
         finally{try{cacheLease?.Dispose();if(coverAsset is not null&&File.Exists(coverAsset))File.Delete(coverAsset);if(produced is not null)await decoder!.ReleaseAsset(produced);}catch(Exception ex){ShowError(ex);}finally{ReturnDecoder();if(pipeline)thumbnailPipelines.Release();if(thumbnailRequests.TryGetValue(row,out var value)&&ReferenceEquals(value,request)){thumbnailRequests.Remove(row);request.Dispose();}if(--thumbnailWorkCount==0&&closing)thumbnailsIdle.TrySetResult();}}
     }
     private async Task LoadRowProperties(FileRow row,bool refresh=false)

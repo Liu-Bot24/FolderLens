@@ -68,7 +68,7 @@ public sealed partial class MainWindow
         if(widthColumn.SavedWidth!=197||widthColumn.Width.Value!=0)throw new InvalidOperationException("隐藏列丢失列宽或仍占据空间。");
         var pdfRow=new FileRow(0);pdfRow.Fill((await catalog!.ReadFirstPage(CurrentFilter())).Items.Single());
         if(pdfRow.FileIconVisibility!=Visibility.Visible||pdfRow.FileTypeBadge!="PDF")throw new InvalidOperationException("文档没有格式图标。");
-        DetailsMode.IsChecked=false;ToggleView(this,new());previousGeneration=generation;SelectTag(Category,"image");
+        DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());previousGeneration=generation;SelectTag(Category,"image");
         await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
         if(!widthColumn.Visible||widthColumn.Width.Value!=197)throw new InvalidOperationException("切到图片分类没有恢复尺寸列及其宽度。");
         previousGeneration=generation;SelectTag(Category,"pdf");await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
@@ -108,6 +108,12 @@ public sealed partial class MainWindow
         if(ruleEditor.Read()[0].Enabled||!ruleEditor.Read()[1].Enabled)throw new InvalidOperationException("重复规则的勾选修改了其他行。");
         DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());ApplySavedFilter(CurrentFilter() with{Kinds=["image"],Extensions=[]});
         if(!categoryDetailViews.TryGetValue("pdf",out bool preference)||preference)throw new InvalidOperationException("恢复收藏前的用户网格偏好未记录。");
+        ApplySavedFilter(CurrentFilter() with{Kinds=[],Extensions=FileCategories.Extensions("pdf")});
+        DetailsMode.IsChecked=true;ToggleView(this,new()); // A saved view restores details without changing the user's PDF preference.
+        SelectTag(Category,"image");await queryCompletion;
+        SelectTag(Category,"pdf");await queryCompletion;
+        if(DetailsMode.IsChecked==true||categoryDetailViews["pdf"])throw new InvalidOperationException("离开收藏视图后覆盖了 PDF 的用户网格偏好。");
+        report["savedViewDoesNotOverwriteCategoryPreference"]=true;
         report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;report["status"]="PASS";
     }
 }

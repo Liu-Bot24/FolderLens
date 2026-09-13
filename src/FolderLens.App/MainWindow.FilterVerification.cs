@@ -20,6 +20,14 @@ public sealed partial class MainWindow
         Check(editor.Dates["modified"].From.Date is not null && editor.Dates["captured"].To.Date is not null, "已有日期回填到原生控件");
         var unchanged = editor.Read([]);
         Check(unchanged.Dates.SequenceEqual(source.Dates) && unchanged.Ranges["logicalBytes"] == source.Ranges["logicalBytes"], "未编辑日期保留精确时间、时钟和大小条件");
+        var noon=new DateTimeOffset(DateTime.Today.AddHours(12));
+        var hourly=source with{Dates=[new("modified","utc",noon.ToUniversalTime().ToString("O"),noon.AddHours(1).ToUniversalTime().ToString("O"))]};
+        var todayEditor=new AdvancedFilterEditor(hourly);
+        Check(todayEditor.Read([]).Dates.SequenceEqual(hourly.Dates),"未操作的同日小时范围保持不变");
+        var todayPeer=new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(todayEditor.DatePresetButtons["modified:今天"]);
+        ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)todayPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+        var wholeDay=todayEditor.Read([]).Dates.Single();
+        Check(DateTimeOffset.Parse(wholeDay.StartInclusive).LocalDateTime==DateTime.Today&&DateTimeOffset.Parse(wholeDay.EndExclusive).LocalDateTime==DateTime.Today.AddDays(1),"点击今天替换同日小时范围为全天");
         Check(!editor.Ranges.ContainsKey("durationMs") && !editor.View.Children.OfType<Expander>().Any(x => (string)x.Header == "播放信息"), "图片不提供时长和编码条件");
         Check(new AdvancedFilterEditor(source with { Kinds = ["video"] }).Ranges.ContainsKey("durationMs"), "视频提供时长条件");
         Check(!new AdvancedFilterEditor(source with { Kinds = ["audio"], Dates = [] }).Ranges.ContainsKey("width"), "音频不提供画面尺寸条件");
