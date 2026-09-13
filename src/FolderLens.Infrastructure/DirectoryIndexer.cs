@@ -121,6 +121,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     if(!terminal)throw new IOException("扫描进程没有返回目录完成状态。");
                 }
                 catch(RootIdentityChangedException){availability="unknown";throw;}
+                catch(ScanWorkerUnavailableException){throw;}
                 catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or TimeoutException)
                 {
                     errors++;string state=ex is UnauthorizedAccessException?"inaccessible":ex is TimeoutException?"failed":"offline";
@@ -169,6 +170,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     else await dirty.RetryLater(rootId,epoch,scope,cancellation).ConfigureAwait(false);
                 }
                 catch(RootIdentityChangedException){throw;}
+                catch(ScanWorkerUnavailableException){throw;}
                 catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or TimeoutException)
                 {errors++;await dirty.RetryLater(rootId,epoch,scope,cancellation).ConfigureAwait(false);}
             }

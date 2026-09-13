@@ -23,6 +23,12 @@ foreach($required in $manifest.requiredFiles){if(-not $expected.ContainsKey($req
 foreach($required in @('App.xbf','MainWindow.xbf','FolderLens.App.pri')){
  if(-not $expected.ContainsKey($required)){throw "Required application XAML resource missing from manifest: $required"}
 }
+foreach($worker in @('FolderLens.Scan.Worker','FolderLens.Content.Worker','FolderLens.Media.Worker')){
+ if(Test-Path -LiteralPath (Join-Path $appRoot ($worker+'.exe'))){throw "Unexpected worker entry in application root: $worker"}
+}
+foreach($extension in @('.exe','.dll','.deps.json','.runtimeconfig.json')){
+ if(-not $expected.ContainsKey('scan-worker/FolderLens.Scan.Worker'+$extension)){throw "Incomplete published scan worker: $extension"}
+}
 $actualFiles=Get-ReleaseFiles $appRoot
 if($actualFiles.Count -ne $manifest.files.Count){throw 'Unexpected files exist in candidate application tree.'}
 foreach($file in $actualFiles){

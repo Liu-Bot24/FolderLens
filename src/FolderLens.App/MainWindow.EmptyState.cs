@@ -6,6 +6,11 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private string? browserEmptyError;
+    private string? browserScanError;
+    private void ShowScanError(Exception error)
+    {
+        browserScanError=error.Message;reconcilePending=false;ShowBrowserError(error);
+    }
     private void InitializeBrowserEmptyState()
     {
         ResultSummary.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_)=>UpdateBrowserEmptyState());
@@ -18,18 +23,19 @@ public sealed partial class MainWindow
     }
     private void UpdateBrowserEmptyState()
     {
+        string? error=browserScanError??browserEmptyError;
         // Observe the displayed controls, including the first page before a complete
         // snapshot exists. This presentation never binds or clears the result source.
         if(FilesGrid.Items.Count>0||FilesList.Items.Count>0||browserGroups is {Count:>0}&&groupedBrowserSource?.View is {} grouped&&ReferenceEquals(ActiveBrowser.ItemsSource,grouped))
         {BrowserEmptyState.Visibility=Visibility.Collapsed;return;}
         BrowserEmptyState.Visibility=Visibility.Visible;
-        bool initial=rootId.Length==0&&!replacingRoot&&browserEmptyError is null;
+        bool initial=rootId.Length==0&&!replacingRoot&&error is null;
         BrowserEmptyOpen.Visibility=initial?Visibility.Visible:Visibility.Collapsed;
-        BrowserEmptyIcon.Glyph=browserEmptyError is not null?"\uE783":initial?"\uE8B7":"\uE721";
-        if(browserEmptyError is not null)
+        BrowserEmptyIcon.Glyph=error is not null?"\uE783":initial?"\uE8B7":"\uE721";
+        if(error is not null)
         {
             BrowserEmptyTitle.Text="暂时无法显示浏览结果";
-            BrowserEmptyDescription.Text=browserEmptyError;
+            BrowserEmptyDescription.Text=error;
             BrowserEmptyDetail.Text="请检查文件夹是否可访问，或调整筛选条件后重试。";
         }
         else if(initial)

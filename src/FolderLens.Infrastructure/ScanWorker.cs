@@ -69,9 +69,16 @@ public static class ScanWorkerProtocol
 }
 
 /// <summary>One worker per scan, reused across directories. Cancellation kills the owning Job and awaits process exit.</summary>
+public sealed class ScanWorkerUnavailableException(string message,Exception? inner=null):IOException(message,inner);
+
 public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeout=null) : IAsyncDisposable
 {
-    public static string? FindExecutable()=>new[]{Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"),Path.Combine(AppContext.BaseDirectory,"FolderLens.Scan.Worker.exe"),Path.Combine(AppContext.BaseDirectory,"FolderLens.Scan.Worker","FolderLens.Scan.Worker.exe")}.FirstOrDefault(File.Exists);
+    public static string? FindExecutable(string? baseDirectory=null)
+    {
+        string directory=baseDirectory??AppContext.BaseDirectory;
+        return new[]{Path.Combine(directory,"scan-worker","FolderLens.Scan.Worker.exe"),Path.Combine(directory,"FolderLens.Scan.Worker","FolderLens.Scan.Worker.exe"),Path.Combine(directory,"FolderLens.Scan.Worker.exe")}.FirstOrDefault(HasRuntimeFiles);
+    }
+    private static bool HasRuntimeFiles(string path)=>File.Exists(path)&&new[]{".dll",".deps.json",".runtimeconfig.json"}.All(extension=>File.Exists(Path.ChangeExtension(path,null)+extension));
     private Process? process;private NamedPipeServerStream? pipe;private WorkerJob? job;
     private readonly string instance=Guid.NewGuid().ToString("N"),nonce=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private int busy;
@@ -156,6 +163,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
     }
     private async Task Start(CancellationToken cancellation)
     {
+        if(!HasRuntimeFiles(executable))throw new ScanWorkerUnavailableException("目录扫描组件不完整，请使用完整的程序目录重新启动。");
         string pipeName="FolderLens-scan-"+instance;
         pipe=new(pipeName,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous|PipeOptions.CurrentUserOnly,65536,65536);
         var info=new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=Path.GetDirectoryName(executable)!};
@@ -163,11 +171,17 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         try
         {
             process=Process.Start(info)??throw new IOException("无法启动目录扫描进程。");job=new WorkerJob(256L*1024*1024);job.Assign(process);
-            await pipe.WaitForConnectionAsync(cancellation).ConfigureAwait(false);
+            var connected=pipe.WaitForConnectionAsync(cancellation);
+            var exited=process.WaitForExitAsync(cancellation);
+            if(await Task.WhenAny(connected,exited).ConfigureAwait(false)==exited)
+            {await exited.ConfigureAwait(false);throw new ScanWorkerUnavailableException($"目录扫描组件在连接前退出（代码 {process.ExitCode}）。");}
+            await connected.ConfigureAwait(false);
             var hello=await ScanWorkerProtocol.Read(pipe,cancellation).ConfigureAwait(false);
             if(hello.Type!="hello"||hello.Instance!=instance||hello.Nonce!=nonce)throw new InvalidDataException("Invalid scan handshake.");
         }
-        catch{await Stop().ConfigureAwait(false);throw;}
+        catch(OperationCanceledException){await Stop().ConfigureAwait(false);throw;}
+        catch(ScanWorkerUnavailableException){await Stop().ConfigureAwait(false);throw;}
+        catch(Exception error){await Stop().ConfigureAwait(false);throw new ScanWorkerUnavailableException("目录扫描组件启动或连接失败。",error);}
     }
     private async Task Stop()
     {
