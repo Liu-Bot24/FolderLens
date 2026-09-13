@@ -124,16 +124,15 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested&&!lease.PressureCancellation.IsCancellationRequested){throw new TimeoutException("媒体封面处理超时。");}
         finally{DiscardTemporary();}
     }
-    public sealed record PlaylistBatch(string Path,int Count,long FirstOrdinal,long LastOrdinal,long? NextOrdinal);
-    public static async Task<PlaylistBatch> Playlist(CatalogStore catalog,ResultHandle handle,string root,string directory,long firstOrdinal,CancellationToken cancellation,int maxEntries=10_000,IReadOnlyList<OrdinalRange>? selection=null)
+    public sealed record PlaylistBatch(string Path,int Count,long FirstOrdinal,long LastOrdinal);
+    public static async Task<PlaylistBatch> Playlist(CatalogStore catalog,ResultHandle handle,string root,string directory,long firstOrdinal,CancellationToken cancellation,IReadOnlyList<OrdinalRange>? selection=null)
     {
         if(firstOrdinal<0 || firstOrdinal>handle.Count)throw new ArgumentOutOfRangeException(nameof(firstOrdinal));
-        if(maxEntries is <1 or >10_000)throw new ArgumentOutOfRangeException(nameof(maxEntries));
         cancellation.ThrowIfCancellationRequested();
         var ranges=selection is null?(handle.Count==0?Array.Empty<OrdinalRange>():new[]{new OrdinalRange(0,handle.Count)}):OrdinalSelection.Normalize(selection,handle.Count);
         string basePath=Path.GetFullPath(root).TrimEnd('\\','/')+Path.DirectorySeparatorChar;
         Directory.CreateDirectory(directory);string path=Path.Combine(directory,Guid.NewGuid().ToString("N")+".m3u8");
-        string temporary=path+".tmp";int written=0;long first=-1,last=-1;long? next=null;
+        string temporary=path+".tmp";int written=0;long first=-1,last=-1;
         try
         {
             await using(var output=new StreamWriter(temporary,false,new UTF8Encoding(false)))
@@ -142,8 +141,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
                 await output.WriteLineAsync(PlaylistFiles.OwnershipHeader(DateTimeOffset.UtcNow).AsMemory(),cancellation);
                 foreach(var range in ranges)
                 {
-                    if(next is not null)break;
-                    for(long offset=Math.Max(firstOrdinal,range.Start);offset<range.End&&next is null;offset+=256)
+                    for(long offset=Math.Max(firstOrdinal,range.Start);offset<range.End;offset+=256)
                     {
                         int pageCount=(int)Math.Min(256,range.End-offset);
                         var rows=await catalog.ReadPage(handle.Id,offset,pageCount,cancellation);
@@ -152,7 +150,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
                         {
                             cancellation.ThrowIfCancellationRequested();
                             if(row.Kind!="video")continue;
-                            if(written==maxEntries){next=row.Ordinal;break;}
+                            if(written==10_000)throw new InvalidOperationException("一次最多播放 10,000 个视频，请缩小筛选或选择范围。");
                             string file=Path.GetFullPath(Path.Combine(basePath,row.RelativePath));
                             if(file.Any(char.IsControl)||!file.StartsWith(basePath,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("播放列表包含无效或越界路径。");
                             if(first<0)first=row.Ordinal;last=row.Ordinal;written++;
@@ -163,7 +161,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
             }
             if(written==0)throw new InvalidOperationException("该范围没有可播放的视频。");
             cancellation.ThrowIfCancellationRequested();File.Move(temporary,path);
-            return new(path,written,first,last,next);
+            return new(path,written,first,last);
         }
         finally{if(File.Exists(temporary))File.Delete(temporary);}
     }

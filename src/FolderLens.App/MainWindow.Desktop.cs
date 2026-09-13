@@ -263,28 +263,28 @@ public sealed partial class MainWindow
         var chosen=SelectedOrdinals(DetailsMode.IsChecked==true?FilesList:FilesGrid);long chosenCount=chosen.Sum(range=>range.Count);
         string[] scopes=chosenCount>0?["当前结果的全部视频","从当前项开始的后续视频",$"仅选中项目中的视频（已选 {chosenCount:N0} 项）"]:["当前结果的全部视频","从当前项开始的后续视频"];
         var scope=new ComboBox{Header="播放范围",ItemsSource=scopes,SelectedIndex=chosenCount>1?2:0,MinWidth=440};
-        var note=new TextBlock{Text="按当前固定排序生成列表，每段最多 10,000 个视频。播放完成后可在此打开下一段。",TextWrapping=TextWrapping.Wrap,MaxWidth=480};
+        var note=new TextBlock{Text="按当前列表顺序播放，一次最多 10,000 个视频。超过上限请缩小筛选或选择范围。",TextWrapping=TextWrapping.Wrap,MaxWidth=480};
         var panel=new StackPanel{Spacing=12};panel.Children.Add(scope);panel.Children.Add(note);
         var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="播放筛选结果",Content=panel,PrimaryButtonText="开始播放",CloseButtonText="关闭"};
-        long? next=null;bool started=false;Task operation=Task.CompletedTask;
-        async Task GenerateNext()
+        Task operation=Task.CompletedTask;
+        async Task GeneratePlaylist()
         {
             if(busy)return;busy=true;dialog.IsPrimaryButtonEnabled=false;scope.IsEnabled=false;
             try
             {
-                long start=started?next!.Value:scope.SelectedIndex==1?currentOrdinal:0;
+                long start=scope.SelectedIndex==1?currentOrdinal:0;
                 var selectedRanges=scope.SelectedIndex==2?chosen:null;
                 var batch=await Task.Run(()=>FolderLens.Infrastructure.MediaTools.Playlist(store,handle,sourceRoot,directory,start,cancel.Token,selection:selectedRanges),cancel.Token);
                 if(cancel.IsCancellationRequested||closing)return;
-                StartPlayer(batch.Path);started=true;next=batch.NextOrdinal;
-                note.Text=$"已打开 {batch.Count:N0} 个视频（结果位置 {batch.FirstOrdinal+1:N0}–{batch.LastOrdinal+1:N0}）。"+(next is null?" 已到此范围末尾。":" 还有后续视频，可打开下一段。");
-                dialog.PrimaryButtonText="播放下一段";dialog.IsPrimaryButtonEnabled=next is not null;Status.Text=note.Text;
+                StartPlayer(batch.Path);
+                Status.Text=$"已打开 {batch.Count:N0} 个视频（结果位置 {batch.FirstOrdinal+1:N0}–{batch.LastOrdinal+1:N0}）。";
+                dialog.Hide();
             }
             catch(OperationCanceledException){note.Text="已取消生成播放列表。";}
-            catch(Exception ex){note.Text=$"无法播放：{ex.Message}";dialog.IsPrimaryButtonEnabled=true;if(!started)scope.IsEnabled=true;}
+            catch(Exception ex){note.Text=$"无法播放：{ex.Message}";dialog.IsPrimaryButtonEnabled=true;scope.IsEnabled=true;}
             finally{busy=false;}
         }
-        dialog.PrimaryButtonClick+=(_,args)=>{args.Cancel=true;if(!busy)operation=GenerateNext();};
+        dialog.PrimaryButtonClick+=(_,args)=>{args.Cancel=true;if(!busy)operation=GeneratePlaylist();};
         dialog.CloseButtonClick+=(_,_)=>cancel.Cancel();
         try
         {
