@@ -65,6 +65,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-first-page")){await VerifyFirstPage(source,report);return;}
             if(arguments.Contains("--verify-text-reader")){await VerifyTextReader(source,report);return;}
             if(arguments.Contains("--verify-selection-appearance")){await VerifySelectionAppearance(source,report);return;}
+            if(arguments.Contains("--verify-directory-filter")){await VerifyDirectoryFilter(source,report);return;}
             if(arguments.Contains("--verify-filmstrip")){await VerifyFilmstrip(report);return;}
             if(arguments.Contains("--verify-group-collapse")){await VerifyGroupCollapse(source,png,report);return;}
             if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}

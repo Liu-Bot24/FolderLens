@@ -46,6 +46,8 @@ public sealed record FilterSpec
     public NumberRange? FrameRate { get; init; }
     public DateRange[] Dates { get; init; } = [];
     public ExclusionSpec[] Exclusions { get; init; } = [];
+    public DirectoryRule[] DirectoryRules { get; init; } = [];
+    public string[] Extensions { get; init; } = [];
     public SortSpec Sort { get; init; } = new();
     public FolderGroupingSpec Grouping { get; init; } = new();
 
@@ -56,6 +58,8 @@ public sealed record FilterSpec
     public void Validate()
     {
         Grouping.Validate();
+        _=new DirectoryRuleSet(DirectoryRules);
+        if(Extensions.Length>64||Extensions.Any(e=>!Regex.IsMatch(e,"^[a-z0-9][a-z0-9._+-]{0,31}$",RegexOptions.CultureInvariant)))throw new ArgumentException("扩展名筛选无效。");
         if(DirectoryScope is null||DirectoryScope.Length>32767||DirectoryScope.Any(c=>char.IsControl(c)||":*?\"<>|".Contains(c))||
             DirectoryScope.Length>0&&(Path.IsPathRooted(DirectoryScope)||DirectoryScope.Split('\\','/').Any(p=>p is "" or "." or "..")))
             throw new ArgumentException("浏览目录范围必须是根目录内的相对路径。");

@@ -1,0 +1,58 @@
+using FolderLens.Core;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
+
+namespace FolderLens.App;
+
+public sealed partial class MainWindow
+{
+    private async Task VerifyDirectoryFilter(string source,Dictionary<string,object> report)
+    {
+        string excluded=Path.Combine(source,"A","仅预览");Directory.CreateDirectory(excluded);
+        File.Copy(Path.Combine(source,"A","image-00.png"),Path.Combine(excluded,"cover.png"));
+        await File.WriteAllTextAsync(Path.Combine(source,"document.pdf"),"fixture");
+        await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
+        long previousCount=resultHandle!.Count;long beforeEpoch=epoch;
+        AdvancedFilters(this,new RoutedEventArgs());
+        await WaitUntil(()=>advancedFilterDialog is {IsLoaded:true},TimeSpan.FromSeconds(3));
+        var dialog=advancedFilterDialog!;
+        var body=(StackPanel)dialog.Content;
+        var editor=(StackPanel)((ScrollViewer)body.Children[0]).Content;
+        var section=(Expander)editor.Children[0];
+        if(section.Header as string!="文件夹筛选")throw new InvalidOperationException("文件夹筛选没有放在更多条件的首位。");
+        var rules=(StackPanel)((StackPanel)section.Content).Children[0];
+        var pattern=rules.Children.OfType<TextBox>().Single();pattern.Text="仅预览";
+        void Invoke(string label)=>((IInvokeProvider)new ButtonAutomationPeer(rules.Children.OfType<Button>().Single(b=>b.Content as string==label)).GetPattern(PatternInterface.Invoke)).Invoke();
+        Invoke("添加规则");await Task.Delay(50);
+        var list=rules.Children.OfType<ListView>().Single();
+        if(list.Items.Count!=1)throw new InvalidOperationException("点击添加没有创建规则。");
+        var enabled=(CheckBox)list.Items[0];enabled.IsChecked=false;enabled.IsChecked=true;
+        Invoke("预览筛选结果");
+        await WaitUntil(()=>rules.Children.OfType<TextBlock>().Any(t=>t.Text.Contains("隐藏 1 个文件")),TimeSpan.FromSeconds(5));
+        // Apply through the native dialog button, preserving the current scan epoch.
+        dialog.ApplyTemplate();dialog.UpdateLayout();
+        FrameworkElement? Find(DependencyObject parent,string name)
+        {
+            if(parent is FrameworkElement element&&element.Name==name)return element;
+            for(int i=0;i<Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);i++)
+                if(Find(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent,i),name) is {} found)return found;
+            return null;
+        }
+        var apply=(Button)(Find(dialog,"PrimaryButton")??throw new InvalidOperationException("未找到应用筛选按钮。"));
+        ((IInvokeProvider)new ButtonAutomationPeer(apply).GetPattern(PatternInterface.Invoke)).Invoke();
+        await WaitUntil(()=>advancedFilterDialog is null&&!queryBusy&&resultHandle!.Count==previousCount-1,TimeSpan.FromSeconds(5));
+        if(epoch!=beforeEpoch||advanced?.DirectoryRules.Length!=1)throw new InvalidOperationException("应用文件夹规则重新扫描或丢失规则。");
+        var saved=CaptureView();ApplySavedFilter(saved.Filter);
+        if(CurrentFilter().DirectoryRules.Length!=1)throw new InvalidOperationException("保存视图丢失文件夹规则。");
+        long previousGeneration=generation;SelectTag(Category,"pdf");
+        await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
+        if(resultHandle!.Count!=1||DetailsMode.IsChecked!=true)throw new InvalidOperationException("PDF 分类没有使用详细信息显示未解码的 PDF 文件。");
+        DetailsMode.IsChecked=false;ToggleView(this,new());previousGeneration=generation;SelectTag(Category,"image");
+        await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
+        previousGeneration=generation;SelectTag(Category,"pdf");await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
+        if(DetailsMode.IsChecked==true)throw new InvalidOperationException("切回分类后覆盖了用户选择的网格模式。");
+        report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;report["status"]="PASS";
+    }
+}

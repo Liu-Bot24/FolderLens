@@ -23,6 +23,25 @@ public sealed partial class MainWindow
     {
         if(sender is FrameworkElement{DataContext:BrowserFileGroup group})ToggleFolderGroup(group);
     }
+    private void FolderGroupContext(object sender,Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs args)
+    {
+        if(sender is not FrameworkElement{DataContext:BrowserFileGroup group} element)return;
+        string path=group.Info.RelativePath;long revision=rootChangeVersion;
+        var menu=new MenuFlyout();var hide=new MenuFlyoutItem{Text="隐藏此文件夹及子文件夹",IsEnabled=path.Length>0};
+        hide.Click+=async(_,_)=>
+        {
+            try
+            {
+                if(revision!=rootChangeVersion||closing)return;
+                var filter=CurrentFilter();var rule=new DirectoryRule("exclude","path","equals",path);
+                advanced=filter with{DirectoryRules=filter.DirectoryRules.Where(r=>r!=rule).Append(rule).ToArray()};advanced.Validate();
+                await RefreshQuery(preserveViewport:true);
+            }
+            catch(Exception ex){ShowError(ex);}
+        };
+        menu.Items.Add(hide);var edit=new MenuFlyoutItem{Text="文件夹筛选…"};edit.Click+=AdvancedFilters;menu.Items.Add(edit);
+        menu.ShowAt(element,new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions{Position=args.GetPosition(element)});args.Handled=true;
+    }
     private void ToggleFolderGroup(BrowserFileGroup group)
     {
         if(browserGroups is null)return;int index=browserGroups.IndexOf(group);if(index<0)return;

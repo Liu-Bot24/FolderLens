@@ -168,7 +168,16 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND snapshot_relative_path=$path ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
     },cancellation);
 
-    private static void RegisterFunctions(SqliteConnection connection)=>connection.CreateFunction("lens_fold",(string value)=>value.ToUpperInvariant(),true);
+    private static void RegisterFunctions(SqliteConnection connection)
+    {
+        connection.CreateFunction("lens_fold",(string value)=>value.ToUpperInvariant(),true);
+        string? previous=null;DirectoryRuleSet? compiled=null;
+        connection.CreateFunction("lens_directory_visible",(string path,string json)=>
+        {
+            if(previous!=json){compiled=new DirectoryRuleSet(System.Text.Json.JsonSerializer.Deserialize<DirectoryRule[]>(json)!);previous=json;}
+            return compiled!.IsVisible(path);
+        },true);
+    }
     private static long FileBytes(string path)=>File.Exists(path)?new FileInfo(path).Length:0;
     private long SessionBytes()=>FileBytes(sessionPath)+FileBytes(sessionPath+"-wal")+FileBytes(sessionPath+"-shm");
     private static long Scalar(SqliteConnection c,string sql){using var cmd=c.CreateCommand();cmd.CommandText=sql;return Convert.ToInt64(cmd.ExecuteScalar(),System.Globalization.CultureInfo.InvariantCulture);}
