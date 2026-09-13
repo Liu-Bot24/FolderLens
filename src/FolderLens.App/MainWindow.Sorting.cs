@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         try
         {
             SortField.Items.Clear();
-            foreach(var option in new[]{("自然文件名","name"),("路径","path"),("格式","format"),("磁盘占用","allocatedBytes"),("文件体积","logicalBytes"),("修改时间","modified"),("宽度","width"),("高度","height"),("像素数","pixelCount"),("时长","durationMs")})
+            foreach(var option in new[]{("名称","name"),("文件路径","path"),("格式","format"),("大小","logicalBytes"),("修改时间","modified"),("宽度","width"),("高度","height"),("像素数","pixelCount"),("时长","durationMs")})
                 if(BrowserSortOptions.IsApplicable(category,option.Item2))SortField.Items.Add(new ComboBoxItem{Content=option.Item1,Tag=option.Item2});
             SelectTag(SortField,BrowserSortOptions.IsApplicable(category,selectedField)?selectedField:"name");
         }

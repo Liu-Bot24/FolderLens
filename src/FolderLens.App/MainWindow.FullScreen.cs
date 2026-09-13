@@ -43,8 +43,8 @@ public sealed partial class MainWindow
         viewerWheelSelector=new ComboBox{MinWidth=148,SelectedIndex=-1};foreach(var option in new[]{("滚轮：切图 / 长图平移","next"),("滚轮：上下平移","pan"),("滚轮：缩放","zoom")})viewerWheelSelector.Items.Add(new ComboBoxItem{Content=option.Item1,Tag=option.Item2});viewerWheelSelector.SelectedIndex=0;
         viewerWheelSelector.SelectionChanged+=(_,_)=>{if(!viewerPreferencesLoading)SetViewerWheelBehavior(Tag(viewerWheelSelector));};controls.Children.Add(viewerWheelSelector);AddViewerButton(controls,"返回列表 · Esc",ExitFullScreen);
         viewerBottom=ViewerPanel(new ScrollViewer{Content=controls,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled},HorizontalAlignment.Stretch,VerticalAlignment.Bottom);
-        viewerInformation=new TextBlock{TextWrapping=TextWrapping.Wrap,FontSize=13,Width=270,Margin=new Thickness(16)};viewerRight=ViewerPanel(viewerInformation,HorizontalAlignment.Right,VerticalAlignment.Center);
-        var commands=new StackPanel{Spacing=8,Padding=new Thickness(12),Width=170};AddViewerActionButton(commands,"自动适应",ViewerAction.AutomaticSizing);AddViewerActionButton(commands,"锁定缩放比例",ViewerAction.LockSizing);AddViewerButton(commands,"复制路径",CopyPath);AddViewerButton(commands,"复制文件引用",CopyFileReference);AddViewerButton(commands,"定位原文件",Reveal);AddViewerButton(commands,"外部打开",ExternalOpen);AddViewerActionButton(commands,"窗口查看 · F11",ViewerAction.ToggleFullScreen);AddViewerButton(commands,"返回列表",ExitFullScreen);viewerLeft=ViewerPanel(commands,HorizontalAlignment.Left,VerticalAlignment.Center);
+        viewerInformation=new TextBlock{TextWrapping=TextWrapping.Wrap,FontSize=13,Width=270,Margin=new Thickness(16)};viewerRight=ViewerPanel(new ScrollViewer{Content=viewerInformation,MaxHeight=720},HorizontalAlignment.Right,VerticalAlignment.Center);
+        var commands=new StackPanel{Spacing=8,Padding=new Thickness(12),Width=170};AddViewerActionButton(commands,"自动适应",ViewerAction.AutomaticSizing);AddViewerActionButton(commands,"锁定缩放比例",ViewerAction.LockSizing);AddViewerButton(commands,FileCommandLabels.CopyPath,CopyPath);AddViewerButton(commands,FileCommandLabels.CopyFileReference,CopyFileReference);AddViewerButton(commands,FileCommandLabels.Reveal,Reveal);AddViewerButton(commands,FileCommandLabels.ExternalOpen,ExternalOpen);AddViewerActionButton(commands,"窗口查看 · F11",ViewerAction.ToggleFullScreen);AddViewerButton(commands,"返回列表",ExitFullScreen);viewerLeft=ViewerPanel(commands,HorizontalAlignment.Left,VerticalAlignment.Center);
         Shell.PointerMoved+=ViewerPointerMoved;
         InitializeViewerInput();
         InitializeGroupNotice();
@@ -80,6 +80,8 @@ public sealed partial class MainWindow
     private void UpdateViewerInformation()
     {
         UpdateGroupNotice();
+        PreviewFilePath.Text=selected?.RelativePath??"";
+        PreviewFilePath.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
         bool video=selected?.Kind=="video",picture=selected?.Kind=="image";
         PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=video?Visibility.Collapsed:Visibility.Visible;
         PreviewExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
@@ -101,7 +103,8 @@ public sealed partial class MainWindow
         if(viewerPosition is not null)viewerPosition.Text=position;
         string help=video?"视频封面预览\n滚轮 / ← → / PageUp、PageDown：切换文件\n双击：使用本地播放器打开\nEsc：返回列表\nF11：全屏 / 窗口查看"
             :$"滚轮：{(EffectiveViewerWheelBehavior()=="next"?"切换图片":EffectiveViewerWheelBehavior()=="pan"?"平移阅读":"缩放")}\n短击：100% / 适屏\n按住：{(viewerPressZoom.UsesWholeImage(immersive||fullScreen)?"整图临时放大":"局部放大镜")} · {viewerPressZoom.Percent}%\n放大后拖动：平移\n双击 / Esc：返回列表\nF11：全屏 / 窗口查看\n缩放：{(viewerSizing==ViewerSizing.Locked?"锁定比例":"自动适应")}";
-        if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}\n\n{help}";
+        string exif=selected.Kind=="image"&&selectedProperties?.EntryId==selected.Item?.EntryId&&selectedProperties?.Version==selected.Item?.Version?FormatViewerExif(selectedProperties?.Details):"";
+        if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}{(exif.Length>0?"\n\n"+exif:"")}\n\n{help}";
     }
     private (Thickness Padding,Thickness Border)? previewChromeBeforeFullScreen;
     private void SetFullScreenChrome(bool enabled)
@@ -147,7 +150,7 @@ public sealed partial class MainWindow
     private void RestoreBrowserPosition()
     {
         var list=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;list.UpdateLayout();
-        if(selected is not null)list.SelectedIndex=(int)selected.Ordinal;
+        if(selected is not null){RevealBrowserRow(selected);list.SelectedItem=selected;}
         if(selected is not null&&selected.Ordinal==browserEntryOrdinal)FindScrollViewer(list)?.ChangeView(null,browserOffset,null,true);
         else if(selected is not null)list.ScrollIntoView(selected);
         list.Focus(FocusState.Programmatic);

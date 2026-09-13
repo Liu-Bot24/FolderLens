@@ -12,7 +12,7 @@ public sealed partial class MainWindow
         var parts=new List<string>();
         foreach(var range in filter.Ranges)
         {
-            string label=range.Key switch{"logicalBytes"=>"文件体积","allocatedBytes"=>"磁盘占用","width"=>"宽度","height"=>"高度","longEdge"=>"长边","shortEdge"=>"短边","pixelCount"=>"像素数","durationMs"=>"时长（毫秒）",_=>range.Key};
+            string label=range.Key switch{"logicalBytes"=>"大小","allocatedBytes"=>"占用空间","width"=>"宽度","height"=>"高度","longEdge"=>"长边","shortEdge"=>"短边","pixelCount"=>"像素数","durationMs"=>"时长（毫秒）",_=>range.Key};
             string Format(long value)=>range.Key is "logicalBytes" or "allocatedBytes"?FileRow.FormatBytes(value):value.ToString("N0");
             if(range.Value.Min is {} minimum)parts.Add($"{label} ≥ {Format(minimum)}");
             if(range.Value.Max is {} maximum)parts.Add($"{label} ≤ {Format(maximum)}");

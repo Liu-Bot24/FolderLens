@@ -104,11 +104,11 @@
         <MenuFlyoutItem Text="打开文件夹…" Click="PickRoot" />
         <MenuFlyoutItem Text="刷新目录" Click="RefreshRoot" />
         <MenuFlyoutSeparator />
-        <MenuFlyoutItem Text="复制完整路径  Ctrl+Shift+C" Click="CopyPath" />
-        <MenuFlyoutItem Text="复制文件引用" Click="CopyFileReference" />
-        <MenuFlyoutItem Text="定位原文件" Click="Reveal" />
-        <MenuFlyoutItem Text="外部打开" Click="ExternalOpen" />
-        <MenuFlyoutItem Text="文件属性…" Click="ShowProperties" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyPath}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C" Click="CopyPath" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyFileReference}" Click="CopyFileReference" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Reveal}" Click="Reveal" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.ExternalOpen}" Click="ExternalOpen" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Properties}" Click="ShowProperties" />
       </MenuBarItem>
       <MenuBarItem Title="查看">
         <MenuFlyoutItem Text="窗口查看 / 返回列表" Click="TogglePreview" />
@@ -207,11 +207,10 @@
             <ComboBoxItem Content="全部文件" Tag="all" />
           </ComboBox>
           <ComboBox x:Name="SortField" SelectedIndex="0" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="SortField" Grid.Column="1" Width="132" SelectionChanged="QuickFilterChanged">
-            <ComboBoxItem Content="自然文件名" Tag="name" />
-            <ComboBoxItem Content="路径" Tag="path" />
+            <ComboBoxItem Content="名称" Tag="name" />
+            <ComboBoxItem Content="文件路径" Tag="path" />
             <ComboBoxItem Content="格式" Tag="format" />
-            <ComboBoxItem Content="磁盘占用" Tag="allocatedBytes" />
-            <ComboBoxItem Content="文件体积" Tag="logicalBytes" />
+            <ComboBoxItem Content="大小" Tag="logicalBytes" />
             <ComboBoxItem Content="修改时间" Tag="modified" />
             <ComboBoxItem Content="宽度" Tag="width" />
             <ComboBoxItem Content="高度" Tag="height" />
@@ -220,10 +219,10 @@
           </ComboBox>
           <StackPanel x:Name="SortGroupingToolbar" Grid.Column="2" Orientation="Horizontal" Spacing="5">
             <Button x:Name="Descending" Click="ChangeSortDirection" ToolTipService.ToolTip="当前升序；点击改为降序" AutomationProperties.Name="升序排列"><FontIcon x:Name="SortDirectionIcon" Glyph="&#xE74A;" FontSize="16" /></Button>
-            <Button x:Name="GroupingButton" Content="按文件夹分组 ▾" Click="ConfigureGrouping" ToolTipService.ToolTip="按文件夹分组，分别设置文件夹顺序和组内文件顺序" />
+            <Button x:Name="GroupingButton" Content="文件夹分组：未启用 ▾" Click="ConfigureGrouping" ToolTipService.ToolTip="按文件夹分组，分别设置文件夹顺序和组内文件顺序" />
           </StackPanel>
           <TextBox x:Name="Search" PlaceholderText="搜索文件名…" AutomationProperties.AutomationId="FileSearch" Grid.Column="3" TextChanged="SearchChanged" KeyDown="SearchKeyDown" />
-          <Button x:Name="QuickFiltersButton" Grid.Column="4" ToolTipService.ToolTip="按格式、尺寸、体积等条件筛选文件" AutomationProperties.Name="筛选">
+          <Button x:Name="QuickFiltersButton" Grid.Column="4" ToolTipService.ToolTip="按格式、尺寸、大小等条件筛选文件" AutomationProperties.Name="筛选">
             <Button.Content><StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE71C;" FontSize="14" /><TextBlock Text="筛选" VerticalAlignment="Center" /></StackPanel></Button.Content>
             <Button.Flyout>
               <Flyout x:Name="FilterFlyout">
@@ -241,8 +240,8 @@
                       <ComboBoxItem Content="仅静态图片" Tag="static" />
                       <ComboBoxItem Content="仅动图" Tag="animated" />
                     </ComboBox>
-                    <NumberBox x:Name="MinSize" Header="最小体积 · MiB" Minimum="0" SmallChange="1" />
-                    <NumberBox x:Name="MaxSize" Header="最大体积 · MiB" Minimum="0" SmallChange="1" />
+                    <NumberBox x:Name="MinSize" Header="最小大小 · MiB" Minimum="0" SmallChange="1" />
+                    <NumberBox x:Name="MaxSize" Header="最大大小 · MiB" Minimum="0" SmallChange="1" />
                     <NumberBox x:Name="MinWidth" Header="最小宽度 · px" Minimum="0" />
                     <NumberBox x:Name="MinHeight" Header="最小高度 · px" Minimum="0" />
                     <CheckBox x:Name="ShowHidden" Content="显示隐藏文件" />
@@ -267,8 +266,9 @@
         </Grid>
         <TextBlock x:Name="ActiveFilterSummary" Margin="8,4" Foreground="{ThemeResource BrowserWarningBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
-        <GridView x:Name="FilesGrid" Grid.Row="2" SelectionMode="Extended" ItemTemplate="{StaticResource Card}" SelectionChanged="SelectFile" IsItemClickEnabled="True" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" AutomationProperties.AutomationId="FileGrid" Padding="5">
-          <GridView.GroupStyle><GroupStyle HidesIfEmpty="True"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,3,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></GridView.GroupStyle>
+        <GridView x:Name="FilesGrid" SizeChanged="ClipBrowserViewport" Grid.Row="2" SelectionMode="Extended" ItemTemplate="{StaticResource Card}" SelectionChanged="SelectFile" IsItemClickEnabled="True" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" AutomationProperties.AutomationId="FileGrid" Padding="5">
+          <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
+          <GridView.GroupStyle><GroupStyle HidesIfEmpty="False"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Click="ToggleFolderGroup" VerticalAlignment="Top" Padding="6" ToolTipService.ToolTip="{Binding ToggleLabel}" AutomationProperties.Name="{Binding ToggleLabel}"><FontIcon Glyph="{Binding ToggleGlyph}" FontSize="12" /></Button><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></GridView.GroupStyle>
           <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate></GridView.ItemsPanel>
           <GridView.ItemContainerStyle><Style TargetType="GridViewItem"><Setter Property="Margin" Value="2" /><Setter Property="Padding" Value="0" /><Setter Property="MinWidth" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></GridView.ItemContainerStyle>
         </GridView>
@@ -277,8 +277,9 @@
           <ScrollViewer x:Name="DetailsHeaderScroll" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled" Padding="0" IsTabStop="False">
             <Grid x:Name="DetailsHeader" Padding="8,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" HorizontalAlignment="Left" />
           </ScrollViewer>
-          <ListView x:Name="FilesList" Grid.Row="1" SelectionMode="Extended" ItemTemplate="{StaticResource DetailRow}" SelectionChanged="SelectFile" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollMode="Enabled" AutomationProperties.AutomationId="FileList">
-            <ListView.GroupStyle><GroupStyle HidesIfEmpty="True"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,3,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListView.GroupStyle>
+          <ListView x:Name="FilesList" SizeChanged="ClipBrowserViewport" Grid.Row="1" SelectionMode="Extended" ItemTemplate="{StaticResource DetailRow}" SelectionChanged="SelectFile" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollMode="Enabled" AutomationProperties.AutomationId="FileList">
+            <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
+            <ListView.GroupStyle><GroupStyle HidesIfEmpty="False"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Click="ToggleFolderGroup" VerticalAlignment="Top" Padding="6" ToolTipService.ToolTip="{Binding ToggleLabel}" AutomationProperties.Name="{Binding ToggleLabel}"><FontIcon Glyph="{Binding ToggleGlyph}" FontSize="12" /></Button><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListView.GroupStyle>
             <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="0" /><Setter Property="MinHeight" Value="32" /></Style></ListView.ItemContainerStyle>
           </ListView>
         </Grid>
@@ -291,7 +292,7 @@
             <Button x:Name="BrowserEmptyOpen" Content="打开文件夹" Click="PickRoot" HorizontalAlignment="Center" Margin="0,8,0,0" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" />
           </StackPanel>
         </ScrollViewer>
-        <Grid Grid.Row="3" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0">
+        <Grid x:Name="BrowserStatusBar" Grid.Row="3" Background="{ThemeResource BrowserSurfaceBrush}" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -337,6 +338,7 @@
           <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
         </local:ViewerSurface>
         <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
+          <TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" Visibility="Collapsed" ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.Name="文件路径" />
           <StackPanel x:Name="FrameTools" Visibility="Collapsed" Orientation="Horizontal" Spacing="6">
             <Button x:Name="AnimationButton" Visibility="Collapsed" Content="暂停动图" Click="ToggleAnimation" />
             <Button x:Name="ReplayAnimationButton" Visibility="Collapsed" Content="从头重播" Click="ReplayAnimation" />

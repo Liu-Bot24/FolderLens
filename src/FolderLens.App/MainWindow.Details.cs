@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         }
         public event PropertyChangedEventHandler? PropertyChanged;
     }
-    private readonly DetailColumn[] detailColumns=[new("名称","name",210),new("相对路径","path",300),new("格式","format",80),new("尺寸","pixelCount",120),new("文件大小","logicalBytes",105),new("磁盘占用","allocatedBytes",105),new("修改时间","modified",155),new("时长","durationMs",100)];
+    private readonly DetailColumn[] detailColumns=[new("名称","name",210),new("相对路径","path",300),new("格式","format",80),new("尺寸","pixelCount",120),new("大小","logicalBytes",105),new("占用空间","allocatedBytes",105),new("修改时间","modified",155),new("时长","durationMs",100)];
     private readonly List<Button> detailSortButtons=[];
     private readonly SemaphoreSlim detailSettingsGate=new(1,1);
     private ScrollViewer? detailScroll;

@@ -81,7 +81,7 @@ public sealed partial class MainWindow
             if(scanTask is {IsCompleted:false}&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
             pendingViewRestore=null;
             if(selectedOrdinal is not null&&saved.Preview is {} preview&&saved.SelectedPath is {} previewPath)pendingPreviewRestore=new(preview,previewPath,requestedRoot);
-            if(selectedOrdinal is {} ordinal)list.SelectedIndex=(int)ordinal;
+            if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);list.SelectedItem=row;}
             list.UpdateLayout();
             if((anchorOrdinal??selectedOrdinal) is {} visible)list.ScrollIntoView(sourceResults[(int)visible],ScrollIntoViewAlignment.Leading);
             else FindScrollViewer(list)?.ChangeView(null,double.IsFinite(saved.ScrollOffset)?Math.Max(0,saved.ScrollOffset):0,null,true);

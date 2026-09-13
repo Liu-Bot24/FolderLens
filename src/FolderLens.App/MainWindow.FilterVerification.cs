@@ -19,7 +19,7 @@ public sealed partial class MainWindow
         var editor = new AdvancedFilterEditor(source);
         Check(editor.Dates["modified"].From.Date is not null && editor.Dates["captured"].To.Date is not null, "已有日期回填到原生控件");
         var unchanged = editor.Read([]);
-        Check(unchanged.Dates.SequenceEqual(source.Dates) && unchanged.Ranges["logicalBytes"] == source.Ranges["logicalBytes"], "未编辑日期保留精确时间、时钟和文件体积条件");
+        Check(unchanged.Dates.SequenceEqual(source.Dates) && unchanged.Ranges["logicalBytes"] == source.Ranges["logicalBytes"], "未编辑日期保留精确时间、时钟和大小条件");
         Check(!editor.Ranges.ContainsKey("durationMs") && !editor.View.Children.OfType<Expander>().Any(x => (string)x.Header == "播放信息"), "图片不提供时长和编码条件");
         Check(new AdvancedFilterEditor(source with { Kinds = ["video"] }).Ranges.ContainsKey("durationMs"), "视频提供时长条件");
         Check(!new AdvancedFilterEditor(source with { Kinds = ["audio"], Dates = [] }).Ranges.ContainsKey("width"), "音频不提供画面尺寸条件");

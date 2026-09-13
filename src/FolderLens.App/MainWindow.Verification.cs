@@ -33,6 +33,8 @@ public sealed partial class MainWindow
         try
         {
             var arguments=Environment.GetCommandLineArgs();int gallery=Array.IndexOf(arguments,"--verify-gallery");
+            int categorySwitch=Array.IndexOf(arguments,"--verify-category-switch");
+            if(categorySwitch>=0){await VerifyCategorySwitch(arguments[categorySwitch+1],report);return;}
             if(gallery>=0){if(gallery+1>=arguments.Length)throw new ArgumentException("缺少只读源目录。");await VerifyGallery(arguments[gallery+1],report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-tree-scale")){VerifyTreeScale(report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-group-order")){VerifyGroupOrder(report);return;}
@@ -57,6 +59,11 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-video-card")){await VerifyVideoCard(source,report);return;}
             if(arguments.Contains("--verify-theme")){await VerifyTheme(source,report);return;}
             if(arguments.Contains("--verify-keyboard-completion")){await VerifyKeyboardCompletion(source,report);return;}
+            if(arguments.Contains("--verify-tree-current-folder")){await VerifyTreeCurrentFolder(source,png,report);return;}
+            if(arguments.Contains("--verify-press-gesture")){await VerifyPressGesture(source,report);return;}
+            if(arguments.Contains("--verify-group-collapse")){await VerifyGroupCollapse(source,png,report);return;}
+            if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}
+            if(arguments.Contains("--verify-browser-status")){await VerifyBrowserStatusBar(source,report);return;}
             if(arguments.Contains("--verify-tree-selection-visible")){await VerifyTreeSelectionVisible(source,png,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-container-recycle")){await VerifyContainerRecycle(source,first,png,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-preview-close")){await VerifyPreviewClose(source,report);return;}
@@ -70,6 +77,7 @@ public sealed partial class MainWindow
             if(Environment.GetCommandLineArgs().Contains("--verify-r2-close-query")||Environment.GetCommandLineArgs().Contains("--verify-r2-close-root")){await VerifyClosingWork(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-r2-flow")){await VerifyAuditFlow(source,png,report);return;}
             if(arguments.Contains("--verify-group-publication")){await VerifyGroupPublication(png,report);return;}
+            if(arguments.Contains("--verify-visible-group-move")){await VerifyVisibleGroupMove(source,png,report);return;}
             if(arguments.Contains("--verify-audit-three")){await VerifyAuditThree(source,report);return;}
             if(arguments.Contains("--verify-active-view-entry")){await VerifyActiveViewEntry(source,report);return;}
             if(arguments.Contains("--verify-selection-race")){await VerifySelectionRace(source,report);return;}

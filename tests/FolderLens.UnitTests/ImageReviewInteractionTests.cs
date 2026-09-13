@@ -12,6 +12,7 @@ public sealed class ImageReviewInteractionTests
         foreach(string category in new[]{"image","video","audio","text","media","all"})
         {
             Assert.True(BrowserSortOptions.IsApplicable(category,"logicalBytes"));
+            Assert.False(BrowserSortOptions.IsApplicable(category,"allocatedBytes"));
             Assert.Equal(category is "video" or "audio" or "media" or "all",BrowserSortOptions.IsApplicable(category,"durationMs"));
             Assert.Equal(category is "image" or "video" or "media" or "all",BrowserSortOptions.IsApplicable(category,"pixelCount"));
         }
