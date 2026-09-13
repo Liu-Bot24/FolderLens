@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     {
         // Observe the displayed controls, including the first page before a complete
         // snapshot exists. This presentation never binds or clears the result source.
-        if(FilesGrid.Items.Count>0||FilesList.Items.Count>0)
+        if(FilesGrid.Items.Count>0||FilesList.Items.Count>0||browserGroups is {Count:>0}&&groupedBrowserSource?.View is {} grouped&&ReferenceEquals(ActiveBrowser.ItemsSource,grouped))
         {BrowserEmptyState.Visibility=Visibility.Collapsed;return;}
         BrowserEmptyState.Visibility=Visibility.Visible;
         bool initial=rootId.Length==0&&!replacingRoot&&browserEmptyError is null;

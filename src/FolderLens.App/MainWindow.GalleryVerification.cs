@@ -152,6 +152,29 @@ public sealed partial class MainWindow
         report["unchangedFirstGroupRetainsThumbnail"]=ReferenceEquals(row.Thumbnail,bitmap);
         report["unchangedFirstGroupRetainsContainer"]=ReferenceEquals(container,FilesGrid.ContainerFromItem(row));
         if(!ReferenceEquals(row.Thumbnail,bitmap)||!ReferenceEquals(container,FilesGrid.ContainerFromItem(row)))throw new InvalidOperationException("只移动屏幕外的组，却重建了首组可见图片。");
+        ToggleFolderGroup(browserGroups![1]);Shell.UpdateLayout();
+        if(!ReferenceEquals(row.Thumbnail,bitmap)||FilesGrid.ContainerFromItem(row) is null)throw new InvalidOperationException("折叠其他组清除了当前可见图片。");
+        var stableView=FilesGrid.ItemsSource;var stableGroup=browserGroups[0];
+        var next=new VirtualResults(40900,(_,_)=>throw new InvalidOperationException("屏幕外文件不应读取。"));
+        foreach(var retained in source.CachedRows().Where(item=>item.Ordinal<256).ToArray())next.Retain(retained,checked((int)retained.Ordinal),null);
+        var enlarged=reordered.ToArray();enlarged[2]=enlarged[2] with{Count=40300,MatchCount=40300};
+        var edits=enlarged.ToDictionary(group=>group.Id,group=>(IReadOnlyList<RangeEdit>)(group.Id==enlarged[2].Id?[new RangeEdit(300,0,40000)]:Array.Empty<RangeEdit>()));
+        int frames=0,missing=0;
+        void ObserveBulk(object? sender,object args){frames++;if(!ReferenceEquals(row.Thumbnail,bitmap)||FilesGrid.ContainerFromItem(row) is null)missing++;}
+        CompositionTarget.Rendering+=ObserveBulk;
+        try
+        {
+            var anchor=CapturePublicationViewport(FilesGrid);publicationRows=visible.ToHashSet();updatingBrowser=true;results=next;
+            try{UpdateBrowserResults(next,enlarged,edits);RestorePublicationViewport(FilesGrid,anchor);}
+            finally{updatingBrowser=false;ReleasePublicationRows();}
+            await Task.Delay(150);
+            if(!ReferenceEquals(stableView,FilesGrid.ItemsSource)||!ReferenceEquals(stableGroup,browserGroups[0])||!browserGroups[1].IsCollapsed||FilesGrid.Items.Count!=40600)
+                throw new InvalidOperationException("大批量更新未保留视图、组对象、折叠状态或正确数量。");
+            if(frames==0||missing!=0)throw new InvalidOperationException($"大批量更新空白帧：{missing}/{frames}。");
+            if(next.CachedRows().Count()>1024)throw new InvalidOperationException("大批量更新提前创建屏幕外文件行。");
+            report["bulkFrames"]=frames;report["bulkMissingFrames"]=missing;report["bulkRetainsGroupsAndCollapse"]=true;report["bulkRowsCreated"]=next.CachedRows().Count();
+        }
+        finally{CompositionTarget.Rendering-=ObserveBulk;source.Dispose();}
         report["status"]="PASS";
     }
     private async Task VerifyNativeRanges(Dictionary<string,object> report)

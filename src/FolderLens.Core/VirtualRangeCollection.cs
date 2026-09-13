@@ -12,6 +12,12 @@ public sealed class VirtualRangeCollection<T>(int count,Func<int,T> read,Func<ob
     private Func<object?,int>? activeLocate=locate;
     public int Count {get;private set;}=count;
     public event NotifyCollectionChangedEventHandler? CollectionChanged;
+    public void Replace(int count,Func<int,T> next,Func<object?,int> locate)
+    {
+        if(count<0)throw new ArgumentOutOfRangeException(nameof(count));
+        Count=count;read=next;activeLocate=locate;
+        CollectionChanged?.Invoke(this,new(NotifyCollectionChangedAction.Reset));
+    }
     public void UpdateRanges(IReadOnlyList<RangeEdit> changes,Func<int,T> next,Func<object?,int> finalLocate,Func<object?,int>? originalLocate=null)
     {
         var original=read;int originalCount=Count,delta=0,end=0;

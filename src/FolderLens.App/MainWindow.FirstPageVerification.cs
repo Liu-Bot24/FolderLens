@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.UI.Xaml.Controls;
 
 namespace FolderLens.App;
 
@@ -6,37 +7,52 @@ public sealed partial class MainWindow
 {
     private async Task VerifyFirstPage(string source,Dictionary<string,object> report)
     {
-        await OpenRoot(source);
-        if(metadataTask is not null)await metadataTask;
-        await RefreshQuery();
+        string sample=Directory.EnumerateFiles(source,"*.png",SearchOption.AllDirectories).First();
+        for(int i=0;i<12;i++)File.Copy(sample,Path.Combine(source,$"first-page-{i:D2}.png"),true);
+        await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         CancelThumbnails();AttachBrowserView(null);results?.Dispose();results=null;
-        if(resultHandle is not null)await catalog!.ReleaseSnapshot(resultHandle.Id);
-        resultHandle=null;
-        bool observed=false;string? failure=null;
+        if(resultHandle is not null)await catalog!.ReleaseSnapshot(resultHandle.Id);resultHandle=null;
+        object? binding=null;FileRow[] rows=[];object?[] images=[],containers=[];int publications=0;
         verifyFirstPageBarrier=async token=>
         {
-            if(FilesGrid.Items.Count==0)return;
-            observed=true;
-            try
-            {
-            var rows=FilesGrid.Items.Cast<FileRow>().ToArray();
-            Shell.UpdateLayout();
-            var timer=Stopwatch.StartNew();
-            while(rows.All(row=>row.Thumbnail is null)&&timer.Elapsed<TimeSpan.FromSeconds(8))
-                await Task.Delay(25,token);
+            publications++;binding=FilesGrid.ItemsSource;rows=FilesGrid.Items.Cast<FileRow>().ToArray();
+            Shell.UpdateLayout();var timer=Stopwatch.StartNew();
+            await WaitUntil(()=>rows.All(row=>row.Thumbnail is not null),TimeSpan.FromSeconds(10));
+            images=rows.Select(row=>(object?)row.Thumbnail).ToArray();containers=rows.Select(row=>FilesGrid.ContainerFromItem(row)).ToArray();
             report["firstThumbnailMs"]=timer.Elapsed.TotalMilliseconds;
-            report["beforeSnapshot"]=resultHandle is null;
-            if(resultHandle is not null||rows.All(row=>row.Thumbnail is null))
-                failure="首批卡片在完整快照建立前没有加载任何缩略图";
-            }
-            catch(Exception ex){failure=ex.ToString();}
+            if(resultHandle is not null)throw new InvalidOperationException("首批检查已晚于完整快照。");
         };
-        try{await RefreshQuery();}finally{verifyFirstPageBarrier=null;}
-        if(!observed)throw new InvalidOperationException("未经过首批列表发布路径");
-        if(!report.ContainsKey("beforeSnapshot"))throw new InvalidOperationException("首批检查未完成："+failure);
-        if(failure is not null)throw new InvalidOperationException(failure);
-        await WaitUntil(()=>visible.Any(row=>row.Thumbnail is not null),TimeSpan.FromSeconds(8));
-        report["afterSnapshotThumbnails"]=true;
-        report["status"]="PASS";
+        void AssertRetained(string phase)
+        {
+            Shell.UpdateLayout();
+            if(!ReferenceEquals(binding,FilesGrid.ItemsSource))throw new InvalidOperationException(phase+" 替换了 ItemsSource。");
+            for(int i=0;i<rows.Length;i++)
+                if(!ReferenceEquals(images[i],rows[i].Thumbnail)||!ReferenceEquals(containers[i],FilesGrid.ContainerFromItem(rows[i])))
+                    throw new InvalidOperationException(phase+" 清空了已显示缩略图或容器。");
+        }
+        try
+        {
+            verifyCandidateBarrier=_=>throw new IOException("InjectedSnapshotFailure");
+            await RefreshQuery();AssertRetained("第一次失败");
+            await RefreshQuery(scanPreview:true);AssertRetained("第二次失败");
+            string diagnostic=await File.ReadAllTextAsync(Path.Combine(dataDirectory,"query-failures.jsonl"));
+            if(diagnostic.Split('\n').Count(line=>line.Contains("\"errorType\":\"IOException\""))<2||diagnostic.Contains(source,StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("查询失败历史未保留，或记录了源文件夹完整路径。");
+            report["failureHistoryRetainedWithoutSourcePaths"]=true;
+            if(publications!=1)throw new InvalidOperationException("重试重复发布首批列表。");
+            FileRow? chosen=null;Task? coalesced=null;
+            verifyCandidateBarrier=async token=>
+            {
+                FilesGrid.SelectedItem=rows[0];await WaitUntil(()=>ReferenceEquals(selected,rows[0]),TimeSpan.FromSeconds(3));
+                Navigate(1);chosen=rows[1];await WaitUntil(()=>ReferenceEquals(selected,chosen),TimeSpan.FromSeconds(3));
+                long request=queryRequest;coalesced=RefreshQuery(scanPreview:true);await Task.Yield();
+                if(queryRequest!=request||token.IsCancellationRequested)throw new InvalidOperationException("自动查询取消了同一候选快照。");
+            };
+            await RefreshQuery(scanPreview:true);if(coalesced is not null)await coalesced;AssertRetained("快照升级");
+            if(resultHandle is null||results is null||!ReferenceEquals(selected,chosen)||results.IndexOf(chosen)<0)throw new InvalidOperationException("首批选择阻断升级或未保留选择。");
+            Navigate(1);await WaitUntil(()=>ReferenceEquals(selected,rows[2]),TimeSpan.FromSeconds(3));
+            report["retryRetainsRowsContainersAndThumbnails"]=true;report["promotionRetainsSelection"]=true;report["firstPageNavigation"]=true;report["automaticQueryCoalesced"]=true;report["status"]="PASS";
+        }
+        finally{verifyFirstPageBarrier=null;verifyCandidateBarrier=null;}
     }
 }

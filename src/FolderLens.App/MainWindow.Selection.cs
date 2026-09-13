@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         // A collapsed ListView still receives every notification and may build a
         // nonvirtual item cache. Only the displayed view owns a source subscription.
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
-        firstPageRows=source is FileRow[] initial?new(initial):[];
+        if(!ReferenceEquals(source,flatBrowserItems))firstPageRows.Clear();
         try
         {
             if(DetailsMode.IsChecked==true){FilesList.ItemsSource=source;FilesGrid.ItemsSource=null;}
@@ -73,13 +73,14 @@ public sealed partial class MainWindow
     private void ToggleView(object sender,RoutedEventArgs args)
     {
         bool details=DetailsMode.IsChecked==true;
+        if(controlsReady&&!suppressFilters&&ReferenceEquals(sender,DetailsMode))categoryDetailViews[Tag(Category)]=details;
         var previous=details?(ListViewBase)FilesGrid:FilesList;
         var next=details?(ListViewBase)FilesList:FilesGrid;
         var ranges=previous.SelectedRanges.ToArray();
         object? source=previous.ItemsSource??next.ItemsSource;
         FilesGrid.Visibility=details?Visibility.Collapsed:Visibility.Visible;DetailsPane.Visibility=details?Visibility.Visible:Visibility.Collapsed;
         AttachBrowserView(source);
-        if(results is null)return;
+        if(results is null&&firstPageSequence.Length==0)return;
         syncingBrowserSelection=true;
         try
         {

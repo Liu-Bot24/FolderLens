@@ -74,33 +74,35 @@ public sealed partial class MainWindow
     }
     private async Task VerifyGroupLaziness(Dictionary<string,object> report)
     {
-        var samples=new List<object>();bool failed=false;
+        void Stage(string value)=>File.AppendAllText(Path.Combine(InitialDataDirectory!,"group-stages.log"),value+Environment.NewLine);
+        var samples=new List<object>();
         foreach(string mode in new[]{"unbound","view","grid"})
         {
+            Stage(mode+" start");
             FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;
             using var old=new VirtualResults(10000,(_,_)=>throw new InvalidOperationException("No file reads expected."));
-            using var next=new VirtualResults(37329,(_,_)=>throw new InvalidOperationException("No file reads expected."));
-            int reads=0,notifications=0;
-            var first=new VerificationFileGroup(new FolderLens.Core.VirtualRangeCollection<FileRow>(old.Count,i=>(FileRow)old[i]!,old.IndexOf));
-            var second=new VerificationFileGroup(new FolderLens.Core.VirtualRangeCollection<FileRow>(next.Count,i=>{reads++;return (FileRow)next[i]!;},next.IndexOf));
-            var groups=new System.Collections.ObjectModel.ObservableCollection<VerificationFileGroup>{first};
-            Microsoft.UI.Xaml.Data.CollectionViewSource? cvs=null;
-            // Managed event subscriptions add interop allocation of their own; enable
-            // this separately to count native flattening, not to benchmark latency.
-            if(mode!="unbound"){cvs=new(){IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(VerificationFileGroup.Items)),Source=groups};var view=cvs.View;if(Environment.GetCommandLineArgs().Contains("--verify-count-vector-events"))view.VectorChanged+=(_,_)=>notifications++;if(mode=="grid")FilesGrid.ItemsSource=view;}
+            using var next=new VirtualResults(47329,(_,_)=>throw new InvalidOperationException("No file reads expected."));
+            var first=new BrowserFileGroup(old,new("a","A",0,10000,0,10000,"ready","all"));
+            var second=new BrowserFileGroup(next,new("b","B",0,37329,10000,37329,"ready","all"));
+            var groups=new System.Collections.ObjectModel.ObservableCollection<BrowserFileGroup>{first};
+            using var view=mode=="unbound"?null:new BrowserCollectionView(groups);
+            if(mode=="grid")FilesGrid.ItemsSource=view;
+            Stage(mode+" attached");
             Shell.UpdateLayout();await Task.Delay(50);
+            Stage(mode+" initial layout");
             long allocated=GC.GetAllocatedBytesForCurrentThread();var timer=System.Diagnostics.Stopwatch.StartNew();
             groups.Add(second);timer.Stop();long allocation=GC.GetAllocatedBytesForCurrentThread()-allocated;
-            int synchronousReads=reads;
-            Shell.UpdateLayout();await Task.Delay(50);
-            samples.Add(new{mode,milliseconds=timer.Elapsed.TotalMilliseconds,allocatedBytes=allocation,synchronousReads,totalReads=reads,notifications,rows=next.CachedRows().Count()});
-            if(reads>1024)failed=true;
-            FilesGrid.ItemsSource=null;if(cvs is not null)cvs.Source=null;
+            Stage(mode+" added");
+            int synchronousRows=next.CachedRows().Count();
+            Shell.UpdateLayout();await Task.Delay(50);int rows=next.CachedRows().Count();
+            Stage(mode+" final layout");
+            samples.Add(new{mode,milliseconds=timer.Elapsed.TotalMilliseconds,allocatedBytes=allocation,synchronousRows,rows});
+            report["groupLazy"]=samples;
+            if(rows>1024)throw new InvalidOperationException($"生产分组视图提前实例化 {rows} 个屏幕外文件。");
+            FilesGrid.ItemsSource=null;
         }
-        report["groupLazy"]=samples;report["status"]=failed?"FAIL":"PASS";
-        if(failed)throw new InvalidOperationException("屏幕外新增组提前枚举了大量文件行。");
-    }
-    private async Task VerifyTreeSelectionVisible(string directory,byte[] png,Dictionary<string,object> report)
+        report["status"]="PASS";
+    }    private async Task VerifyTreeSelectionVisible(string directory,byte[] png,Dictionary<string,object> report)
     {
         for(int i=0;i<40;i++)Directory.CreateDirectory(Path.Combine(directory,$"a-{i:D2}"));
         string target=Path.Combine(directory,"z-selected");Directory.CreateDirectory(target);await File.WriteAllBytesAsync(Path.Combine(target,"preview.png"),png);

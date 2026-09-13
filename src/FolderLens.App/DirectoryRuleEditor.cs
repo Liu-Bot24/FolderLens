@@ -73,9 +73,9 @@ internal sealed class DirectoryRuleEditor
     private void Refresh()
     {
         list.Items.Clear();feedback.Text="";
-        foreach(var rule in rules.ToArray())
+        for(int i=0;i<rules.Count;i++)
         {
-            int index=rules.IndexOf(rule);
+            int index=i;var rule=rules[index];
             var label=new TextBlock{Text=$"{(rule.Action=="include"?"仅查看":rule.Action=="keep"?"例外保留":"排除")} · {(rule.Target=="name"?"名称":"路径")} · {rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是",_=>"正则"}}：{rule.Pattern}",TextWrapping=TextWrapping.Wrap};
             var box=new CheckBox{IsChecked=rule.Enabled,Content=label};
             ToolTipService.SetToolTip(box,$"{rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是",_=>"正则表达式"}}；{(rule.IncludeChildren?"包括子文件夹":"仅本层文件")}");

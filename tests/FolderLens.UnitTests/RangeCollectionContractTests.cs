@@ -6,6 +6,16 @@ namespace FolderLens.UnitTests;
 
 public sealed class RangeCollectionContractTests
 {
+    [Fact]
+    public void BulkVirtualIndexReplacementDoesNotMaterializeRows()
+    {
+        int reads=0,events=0;
+        var view=new VirtualRangeCollection<int>(12,index=>index,value=>value is int index?index:-1);
+        view.CollectionChanged+=(_,args)=>{Assert.Equal(NotifyCollectionChangedAction.Reset,args.Action);Assert.Equal(1_000_000,view.Count);events++;};
+        view.Replace(1_000_000,index=>{reads++;return index;},value=>value is int index?index:-1);
+        Assert.Equal(1,events);Assert.Equal(0,reads);Assert.Equal(999_999,view[999_999]);Assert.Equal(1,reads);
+        Assert.Throws<ArgumentOutOfRangeException>(()=>view.Replace(-1,index=>index,_=>-1));Assert.Equal(1_000_000,view.Count);
+    }
     private sealed record Row(string Name,int Ordinal);
     [Fact]
     public void CompatibilityRemovalLocatorMatchesEveryIntermediateView()

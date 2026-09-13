@@ -10,7 +10,7 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private FolderGroupingSpec folderGrouping=new();
-    private CollectionViewSource? groupedBrowserSource;
+    private BrowserCollectionView? groupedBrowserSource;
     private ObservableCollection<BrowserFileGroup>? browserGroups;
     private VirtualRangeCollection<FileRow>? flatBrowserItems;
     private void UpdateGroupingButton()
@@ -33,8 +33,7 @@ public sealed partial class MainWindow
             try
             {
                 if(revision!=rootChangeVersion||closing)return;
-                var filter=CurrentFilter();var rule=new DirectoryRule("exclude","path","equals",path);
-                advanced=filter with{DirectoryRules=filter.DirectoryRules.Where(r=>r!=rule).Append(rule).ToArray()};advanced.Validate();
+                ApplyDirectoryHideRule(path);
                 await RefreshQuery(preserveViewport:true);
             }
             catch(Exception ex){ShowError(ex);}
@@ -42,10 +41,17 @@ public sealed partial class MainWindow
         menu.Items.Add(hide);var edit=new MenuFlyoutItem{Text="文件夹筛选…"};edit.Click+=AdvancedFilters;menu.Items.Add(edit);
         menu.ShowAt(element,new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions{Position=args.GetPosition(element)});args.Handled=true;
     }
+    private void ApplyDirectoryHideRule(string path)
+    {
+        var filter=CurrentFilter();var rule=new DirectoryRule("exclude","path","equals",path);
+        var candidate=filter with{DirectoryRules=filter.DirectoryRules.Where(r=>r!=rule).Append(rule).ToArray()};
+        candidate.Validate();advanced=candidate;
+    }
     private void ToggleFolderGroup(BrowserFileGroup group)
     {
         if(browserGroups is null)return;int index=browserGroups.IndexOf(group);if(index<0)return;
         var retained=ActiveBrowser.SelectedItem;double offset=FindScrollViewer(ActiveBrowser)?.VerticalOffset??0;
+        bool ownsPublicationRows=publicationRows is null;publicationRows??=visible.ToHashSet();
         bool previous=syncingBrowserSelection;syncingBrowserSelection=true;
         try
         {
@@ -54,12 +60,12 @@ public sealed partial class MainWindow
             // user action; the snapshot, lazy rows and scan remain unchanged.
             AttachBrowserView(null);if(groupedBrowserSource is not null)groupedBrowserSource.Source=null;
             groupedBrowserSource=null;group.ToggleCollapsed();
-            groupedBrowserSource=new CollectionViewSource{IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(BrowserFileGroup.Items)),Source=browserGroups};
+            groupedBrowserSource=new BrowserCollectionView(browserGroups);
             AttachBrowserView(groupedBrowserSource.View);
             ActiveBrowser.SelectedItem=retained is not null&&ActiveBrowser.Items.Contains(retained)?retained:null;
             ActiveBrowser.UpdateLayout();FindScrollViewer(ActiveBrowser)?.ChangeView(null,offset,null,true);
         }
-        finally{syncingBrowserSelection=previous;}
+        finally{syncingBrowserSelection=previous;if(ownsPublicationRows)ReleasePublicationRows();UpdateBrowserEmptyState();}
     }
     private void RevealBrowserRow(FileRow row)
     {
@@ -93,11 +99,12 @@ public sealed partial class MainWindow
     }
     private void BindBrowserResults(VirtualResults source,IReadOnlyList<SnapshotGroup> groups)
     {
+        groupedBrowserSource?.Dispose();
         if(groups.Count==0){groupedBrowserSource=null;browserGroups=null;flatBrowserItems=new(source.Count,index=>(FileRow)source[index]!,source.IndexOf);AttachBrowserView(flatBrowserItems);return;}
         long end=0;foreach(var group in groups){if(group.Start!=end||group.Count<=0)throw new InvalidDataException("文件夹分组区间不连续。");end+=group.Count;}
         if(end!=source.Count)throw new InvalidDataException("文件夹分组未覆盖完整结果。");
         flatBrowserItems=null;browserGroups=new(groups.Select(group=>new BrowserFileGroup(source,group)));
-        groupedBrowserSource=new CollectionViewSource{IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(BrowserFileGroup.Items)),Source=browserGroups};
+        groupedBrowserSource=new BrowserCollectionView(browserGroups);
         AttachBrowserView(groupedBrowserSource.View);
     }
 
@@ -106,14 +113,6 @@ public sealed partial class MainWindow
         if(browserGroups is null)
         {
             flatBrowserItems!.UpdateRanges(changes[""],index=>(FileRow)source[index]!,source.IndexOf);return;
-        }
-        if(browserGroups.Any(group=>group.IsCollapsed)&&!browserGroups.Select(group=>group.Info.Id).SequenceEqual(groups.Select(group=>group.Id)))
-        {
-            var collapsed=browserGroups.Where(group=>group.IsCollapsed).Select(group=>group.Info.Id).ToHashSet();
-            AttachBrowserView(null);if(groupedBrowserSource is not null)groupedBrowserSource.Source=null;
-            browserGroups=new(groups.Select(info=>{var group=new BrowserFileGroup(source,info);if(collapsed.Contains(info.Id))group.ToggleCollapsed();return group;}));
-            groupedBrowserSource=new CollectionViewSource{IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(BrowserFileGroup.Items)),Source=browserGroups};
-            AttachBrowserView(groupedBrowserSource.View);return;
         }
         var wanted=groups.Select(group=>group.Id).ToHashSet();
         for(int i=browserGroups.Count-1;i>=0;i--)if(!wanted.Contains(browserGroups[i].Info.Id))browserGroups.RemoveAt(i);

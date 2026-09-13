@@ -323,17 +323,19 @@
           <TextBlock x:Name="FileTitle" Text="预览" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
           <TextBlock x:Name="QualityLabel" Text="单击文件即可查看" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
         </StackPanel>
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="2" Margin="0,5,0,6" x:Name="PreviewActions">
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,5,0,6" x:Name="PreviewActions">
           <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource PreviewActionButtonStyle}" /></StackPanel.Resources>
-          <Button x:Name="PreviewReturn" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭放大预览，保留目录和浏览位置（Esc）" />
+          <Button x:Name="PreviewReturn" Width="Auto" MinWidth="100" Padding="8,2" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭放大预览，保留目录和浏览位置（Esc）" />
           <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
           <Button Click="Next" ToolTipService.ToolTip="下一个文件（PageDown）" AutomationProperties.Name="下一个文件"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
-          <Button x:Name="PreviewFit" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
+          <Button x:Name="PreviewFit" Width="Auto" MinWidth="64" Padding="6,2" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
           <Button x:Name="PreviewActual" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
           <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
           <Button x:Name="PreviewExternalPlayer" Content="播放" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用本地播放器打开当前视频" />
           <Button Click="ToggleFullScreen" ToolTipService.ToolTip="全屏 / 窗口查看（F11）；Esc 返回列表" AutomationProperties.Name="全屏查看"><FontIcon Glyph="&#xE740;" FontSize="16" /></Button>
         </StackPanel>
+        </ScrollViewer>
         <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="#20242B">
           <canvas:CanvasControl x:Name="ImageCanvas" Draw="DrawImage" IsHitTestVisible="False" AutomationProperties.AutomationId="ImageCanvas" xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml" />
           <local:CursorInputSurface x:Name="ImageInput" Background="Transparent" Visibility="{Binding Visibility, ElementName=ImageCanvas}" PointerWheelChanged="ViewerWheel" PointerPressed="ViewerPointerDown" PointerMoved="ViewerPointerMove" PointerReleased="ViewerPointerUp" AutomationProperties.Name="图片浏览区域" />
@@ -394,8 +396,6 @@
                   <ScrollViewer MaxHeight="570">
                   <StackPanel Width="480" Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Button Content="上一页" Click="TextPrevious" />
-                      <Button Content="下一页" Click="TextNext" />
                       <NumberBox x:Name="TextOffset" Width="180" Minimum="0" PlaceholderText="字节位置" />
                       <Button Content="跳转" Click="TextJump" />
                     </StackPanel>

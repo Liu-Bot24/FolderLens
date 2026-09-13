@@ -58,7 +58,7 @@ public static class FilterSql
         foreach(var range in filter.Ranges)
         {
             string col = Columns[range.Key], group = range.Key == "allocatedBytes" ? "allocation" : range.Key == "durationMs" ? "media" : "imageGeometry";
-            if (range.Key is "width" or "height" or "longEdge" or "shortEdge" or "pixelCount") Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            if (range.Key is "width" or "height" or "longEdge" or "shortEdge" or "pixelCount") Known("f.kind IN ('image','video')");
             if (range.Key == "durationMs") Known("f.kind IN ('video','audio')");
             if (range.Value.Min is { } min) Nullable(col,$"{col}>={Param(min)}",group);
             if (range.Value.Max is { } max) Nullable(col,$"{col}<={Param(max)}",group);
@@ -66,14 +66,14 @@ public static class FilterSql
         void Geometry(NumberRange? range)
         {
             if (range is null) return;
-            Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            Known("f.kind IN ('image','video')");
             if (range.Min is { } min) Nullable(Columns["aspectRatio"],$"{Columns["aspectRatio"]}>={Param(min)}","imageGeometry");
             if (range.Max is { } max) Nullable(Columns["aspectRatio"],$"{Columns["aspectRatio"]}<={Param(max)}","imageGeometry");
         }
         Geometry(filter.AspectRatio);
         if (filter.Orientation != "any")
         {
-            Known(filter.Kinds.Contains("video") ? "f.kind IN ('image','video')" : "f.kind='image'");
+            Known("f.kind IN ('image','video')");
             string col=Columns["aspectRatio"];
             Nullable(col,filter.Orientation switch { "landscape"=>$"{col}>1.02", "portrait"=>$"{col}<0.98", _=>$"{col} BETWEEN 0.98 AND 1.02" },"imageGeometry");
         }
