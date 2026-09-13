@@ -105,43 +105,43 @@
     </Grid.RowDefinitions>
     <MenuBar Padding="0" x:Name="MainMenu">
       <MenuBarItem Title="文件">
-        <MenuFlyoutItem Text="打开文件夹…" Click="PickRoot" />
-        <MenuFlyoutItem Text="刷新目录" Click="RefreshRoot" />
+        <MenuFlyoutItem Text="打开文件夹…" Tag="PickRoot" Click="PickRoot" />
+        <MenuFlyoutItem Text="刷新目录" Tag="RefreshRoot" Click="RefreshRoot" />
         <MenuFlyoutSeparator />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyPath}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C" Click="CopyPath" />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyFileReference}" Click="CopyFileReference" />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Reveal}" Click="Reveal" />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.ExternalOpen}" Click="ExternalOpen" />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Properties}" Click="ShowProperties" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyPath}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C" Tag="CopyPath" Click="CopyPath" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyFileReference}" Tag="CopyFileReference" Click="CopyFileReference" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Reveal}" Tag="Reveal" Click="Reveal" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.ExternalOpen}" Tag="ExternalOpen" Click="ExternalOpen" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Properties}" Tag="ShowProperties" Click="ShowProperties" />
       </MenuBarItem>
       <MenuBarItem Title="查看">
-        <MenuFlyoutItem Text="窗口查看 / 返回列表" Click="TogglePreview" />
-        <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Click="ToggleFullScreen" />
-        <MenuFlyoutItem Text="幻灯片  Ctrl+Space" Click="ToggleSlideshow" />
+        <MenuFlyoutItem Text="窗口查看 / 返回列表" Tag="TogglePreview" Click="TogglePreview" />
+        <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Tag="ToggleFullScreen" Click="ToggleFullScreen" />
+        <MenuFlyoutItem Text="幻灯片  Ctrl+Space" Tag="ToggleSlideshow" Click="ToggleSlideshow" />
         <MenuFlyoutSeparator />
-        <MenuFlyoutItem Text="适应屏幕" Click="Fit" />
-        <MenuFlyoutItem Text="原图 100%" Click="Actual" />
-        <MenuFlyoutItem Text="顺时针旋转  R" Click="Rotate" />
-        <MenuFlyoutItem Text="逆时针旋转  Shift+R" Click="RotateCounterclockwise" />
+        <MenuFlyoutItem Text="适应屏幕" Tag="Fit" Click="Fit" />
+        <MenuFlyoutItem Text="原图 100%" Tag="Actual" Click="Actual" />
+        <MenuFlyoutItem Text="顺时针旋转  R" Tag="Rotate" Click="Rotate" />
+        <MenuFlyoutItem Text="逆时针旋转  Shift+R" Tag="RotateCounterclockwise" Click="RotateCounterclockwise" />
       </MenuBarItem>
       <MenuBarItem Title="筛选">
-        <MenuFlyoutItem Text="更多条件与目录排除…" Click="AdvancedFilters" />
-        <MenuFlyoutItem Text="补充筛选信息" Click="FillMetadata" />
-        <MenuFlyoutItem Text="清除筛选" Click="ResetFilters" />
+        <MenuFlyoutItem Text="更多条件与目录排除…" Tag="AdvancedFilters" Click="AdvancedFilters" />
+        <MenuFlyoutItem Text="补充筛选信息" Tag="FillMetadata" Click="FillMetadata" />
+        <MenuFlyoutItem Text="清除筛选" Tag="ResetFilters" Click="ResetFilters" />
       </MenuBarItem>
       <MenuBarItem Title="收藏">
-        <MenuFlyoutItem Text="保存当前视图…" Click="SaveView" />
-        <MenuFlyoutItem Text="恢复保存的视图…" Click="RestoreView" />
+        <MenuFlyoutItem Text="保存当前视图…" Tag="SaveView" Click="SaveView" />
+        <MenuFlyoutItem Text="恢复保存的视图…" Tag="RestoreView" Click="RestoreView" />
       </MenuBarItem>
       <MenuBarItem Title="工具">
-        <MenuFlyoutItem Text="目录容量…" Click="ShowCapacity" />
-        <MenuFlyoutItem Text="播放器设置…" Click="ConfigurePlayer" />
-        <MenuFlyoutItem Text="图片查看设置…" Click="ConfigureImageViewing" />
-        <MenuFlyoutItem x:Name="PlaylistMenu" Text="播放筛选结果…" Click="PlayResultVideos" IsEnabled="False" ToolTipService.ToolTip="在播放器设置中选择支持 M3U8 的播放器后使用" />
+        <MenuFlyoutItem Text="目录容量…" Tag="ShowCapacity" Click="ShowCapacity" />
+        <MenuFlyoutItem Text="播放器设置…" Tag="ConfigurePlayer" Click="ConfigurePlayer" />
+        <MenuFlyoutItem Text="图片查看设置…" Tag="ConfigureImageViewing" Click="ConfigureImageViewing" />
+        <MenuFlyoutItem x:Name="PlaylistMenu" Text="播放筛选结果…" Tag="PlayResultVideos" Click="PlayResultVideos" IsEnabled="False" ToolTipService.ToolTip="在播放器设置中选择支持 M3U8 的播放器后使用" />
         <MenuFlyoutSeparator />
-        <MenuFlyoutItem Text="缓存与诊断…" Click="ShowDiagnostics" />
+        <MenuFlyoutItem Text="缓存与诊断…" Tag="ShowDiagnostics" Click="ShowDiagnostics" />
       </MenuBarItem>
-      <MenuBarItem Title="帮助"><MenuFlyoutItem Text="使用帮助与快捷键  F1" Click="OpenLocalHelp" /></MenuBarItem>
+      <MenuBarItem Title="帮助"><MenuFlyoutItem Text="使用帮助与快捷键  F1" Tag="OpenLocalHelp" Click="OpenLocalHelp" /></MenuBarItem>
     </MenuBar>
     <Grid Grid.Row="1" Padding="10,4,10,10" ColumnSpacing="6" x:Name="AddressToolbar">
       <Grid.ColumnDefinitions>
@@ -268,6 +268,9 @@
           <Button x:Name="LargePreviewButton" Grid.Column="6" Content="放大预览" Click="TogglePreview" ToolTipService.ToolTip="在窗口内放大查看所选文件；Esc 返回列表" />
         </Grid>
         <StackPanel Grid.Row="1">
+        <InfoBar x:Name="BrowserScanErrorBar" Title="文件夹扫描未完成" Severity="Error" IsOpen="False" IsClosable="False" AutomationProperties.AutomationId="BrowserScanError">
+          <InfoBar.ActionButton><Button Content="重新扫描" Click="RefreshRoot" /></InfoBar.ActionButton>
+        </InfoBar>
         <Grid x:Name="DirectoryScopePanel" Padding="8,4" ColumnSpacing="10" Background="{ThemeResource ScopeFillBrush}" Visibility="Collapsed">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock x:Name="DirectoryScopeLabel" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -342,8 +345,8 @@
           <ScrollViewer x:Name="TextScroll" Visibility="Collapsed" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" HorizontalScrollBarVisibility="Auto">
             <TextBox x:Name="TextContent" IsReadOnly="True" AcceptsReturn="True" FontFamily="Segoe UI" FontSize="16" TextWrapping="Wrap" Padding="16,12" BorderThickness="0" AutomationProperties.AutomationId="TextPreview" PreviewKeyDown="TextPreviewKeyDown" SelectionChanged="TextSelectionChanged">
               <TextBox.ContextFlyout><MenuFlyout>
-                <MenuFlyoutItem Text="复制所选文字  Ctrl+C" Click="CopyTextSelection" />
-                <MenuFlyoutItem Text="全选整个文档  Ctrl+A" Click="SelectWholeText" />
+                <MenuFlyoutItem Text="复制所选文字  Ctrl+C" Tag="CopyTextSelection" Click="CopyTextSelection" />
+                <MenuFlyoutItem Text="全选整个文档  Ctrl+A" Tag="SelectWholeText" Click="SelectWholeText" />
               </MenuFlyout></TextBox.ContextFlyout>
             </TextBox>
           </ScrollViewer>

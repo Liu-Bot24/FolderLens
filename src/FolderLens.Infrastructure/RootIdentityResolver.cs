@@ -5,7 +5,7 @@ namespace FolderLens.Infrastructure;
 public sealed record OpenedRoot(string RootId,long Epoch,string Availability,bool IdentityChanged,bool HasPreviousIndex);
 
 /// <summary>Preserves a separate indexed root for each observed volume/directory identity at the same display path.</summary>
-public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorkerExecutable=null)
+public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorkerExecutable=null,TimeSpan? operationTimeout=null)
 {
     public async Task<OpenedRoot> Open(string path,CancellationToken cancellation=default)
     {
@@ -18,7 +18,7 @@ public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorker
         string? physical=null;string availability="unknown";
         string? executable=scanWorkerExecutable??ScanWorkerClient.FindExecutable();
         if(executable is null)throw new FileNotFoundException("找不到目录扫描工作进程，无法安全核验根目录身份。");
-        await using(var worker=new ScanWorkerClient(executable))
+        await using(var worker=new ScanWorkerClient(executable,operationTimeout))
         {
             try
             {

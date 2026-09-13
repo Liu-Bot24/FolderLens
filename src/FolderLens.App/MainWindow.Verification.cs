@@ -13,6 +13,18 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private readonly Dictionary<string,string> verificationComponents=[];
+    private async Task FailVerificationInitialization(Exception error)
+    {
+        Environment.ExitCode=1;
+        try
+        {
+            Directory.CreateDirectory(dataDirectory);
+            await File.WriteAllTextAsync(Path.Combine(dataDirectory,"native-refresh.json"),JsonSerializer.Serialize(new {status="FAIL",phase="initialize",error=error.ToString(),components=verificationComponents}));
+        }
+        catch(Exception reportError){Console.Error.WriteLine(error);Console.Error.WriteLine(reportError);}
+        finally{PostVerificationClose(WinRT.Interop.WindowNative.GetWindowHandle(this),0x0010,0,0);}
+    }
     private Action? verifyPublishFault;
     private Func<CancellationToken,Task>? verifyCandidateBarrier,verifyScanBarrier,verifyPageBarrier,verifyPreviewBarrier,verifyFirstPageBarrier;
     private Func<Task>? verifyClosingState;
@@ -31,10 +43,14 @@ public sealed partial class MainWindow
     // Explicit, isolated native regression run. No user catalog or source folder is used.
     private async Task VerifyRefresh()
     {
-        var report=new Dictionary<string,object>();var timer=Stopwatch.StartNew();
+        var report=new Dictionary<string,object>{{"components",verificationComponents},{"deployedVerification",Environment.GetCommandLineArgs().Contains("--verify-deployed")}};var timer=Stopwatch.StartNew();
         try
         {
             var arguments=Environment.GetCommandLineArgs();int gallery=Array.IndexOf(arguments,"--verify-gallery");
+            int bitmapAssets=Array.IndexOf(arguments,"--verify-bitmap-assets");
+            if(bitmapAssets>=0){await VerifyBitmapAssets(arguments[bitmapAssets+1],report);return;}
+            int switching=Array.IndexOf(arguments,"--verify-image-switch");
+            if(switching>=0){await VerifyImageSwitch(arguments[switching+1],report);return;}
             int categorySwitch=Array.IndexOf(arguments,"--verify-category-switch");
             if(categorySwitch>=0){await VerifyCategorySwitch(arguments[categorySwitch+1],report);return;}
             if(gallery>=0){if(gallery+1>=arguments.Length)throw new ArgumentException("缺少只读源目录。");await VerifyGallery(arguments[gallery+1],report);return;}
@@ -55,6 +71,13 @@ public sealed partial class MainWindow
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,pixels);await encoder.FlushAsync();stream.Seek(0);byte[] png=new byte[checked((int)stream.Size)];await stream.ReadAsync(png.AsBuffer(),(uint)png.Length,InputStreamOptions.None);
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
             if(arguments.Contains("--verify-scan-pipeline")){await VerifyScanPipeline(source,report);return;}
+            if(arguments.Contains("--verify-thumbnail-priority")){await VerifyThumbnailPriority(source,report);return;}
+            if(arguments.Contains("--verify-menu-availability")){await VerifyMenuAvailability(source,report);return;}
+            if(arguments.Contains("--verify-prefetch-adoption")){await VerifyPrefetchAdoption(source,report);return;}
+            if(arguments.Contains("--verify-wheel-distance")){await VerifyWheelDistance(source,report);return;}
+            if(arguments.Contains("--verify-prepared-cache")){await VerifyPreparedCache(source,report);return;}
+            if(arguments.Contains("--verify-prefetch-turnaround")){await VerifyPrefetchTurnaround(source,report);return;}
+            if(arguments.Any(arg=>arg.StartsWith("--verify-scan-audit-"))){await VerifyScanAudit(source,report);return;}
             if(arguments.Contains("--verify-promotion-viewport")){await VerifyPromotionViewport(source,report);return;}
             if(arguments.Contains("--verify-player-settings")){await VerifyPlayerSettings(report);return;}
             if(arguments.Contains("--verify-audio-recovery")){await VerifyAudioRecovery(source,report);return;}

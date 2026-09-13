@@ -135,7 +135,7 @@ internal sealed class StaticDecoder : IDisposable
         if(data.Slice(4,4).SequenceEqual("ftyp"u8))return data.Slice(8,4).SequenceEqual("avif"u8)?"avif":"heic";
         throw new NotSupportedException("Unsupported image container.");
     }
-    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false)
+    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false,bool fastPreview=false)
     {
         if(targetWidth is <1 or >16384 || targetHeight is <1 or >16384 || tileX<0 || tileY<0)throw new ArgumentOutOfRangeException(nameof(targetWidth));
         CheckVersion();
@@ -163,13 +163,23 @@ internal sealed class StaticDecoder : IDisposable
             using var small=VImage.ThumbnailStream(input,targetWidth,height:targetHeight,size:Enums.Size.Down,outputProfile:"srgb",failOn:Enums.FailOn.Error);
             using var output=small.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
         }
-        else WriteFit(image!,destination,targetWidth,targetHeight);
+        else WriteFit(image!,destination,targetWidth,targetHeight,fastPreview);
         CheckVersion();return(Width,Height,IsRaw?"rawDeveloped":full?"full":"fit");
     }
-    private static void WriteFit(VImage input,string destination,int width,int height)
+    private static void WriteFit(VImage input,string destination,int width,int height,bool fastPreview=false)
     {
         double scale=Math.Min(1,Math.Min((double)width/input.Width,(double)height/input.Height));
-        using var small=ResizeForDisplay(input,scale);using var output=small.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
+        using var small=ResizeForDisplay(input,scale);using var output=small.Colourspace(Enums.Interpretation.Srgb);
+        if(fastPreview)output.Pngsave(destination,compression:1,filter:Enums.ForeignPngFilter.None);
+        else output.WriteToFile(destination);
+    }
+    internal byte[] MeasureFitPixels(int width,int height)
+    {
+        if(image is null||IsRaw)throw new NotSupportedException("Static decoded image required.");
+        CheckVersion();double scale=Math.Min(1,Math.Min((double)width/image.Width,(double)height/image.Height));
+        using var small=ResizeForDisplay(image,scale);using var output=small.Colourspace(Enums.Interpretation.Srgb);
+        using var rgba=output.HasAlpha()?output.Copy():output.Bandjoin(255);
+        byte[] pixels=rgba.WriteToMemory<byte>();CheckVersion();return pixels;
     }
     internal static VImage ResizeForDisplay(VImage input,double scale)
     {

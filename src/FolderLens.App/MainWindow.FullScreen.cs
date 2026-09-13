@@ -88,6 +88,7 @@ public sealed partial class MainWindow
     }
     private void UpdateViewerInformation()
     {
+        UpdateCommandAvailability();
         UpdateGroupNotice();SyncPressZoomSelector();
         PreviewFilePath.Text=selected?.RelativePath??"";
         PreviewFilePath.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;

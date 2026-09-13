@@ -21,6 +21,7 @@ internal static class DisplayPixelProbe
             string hash=Hash(path);double[] expected;
             using(var reference=new MagickImage(path)){if(highDepth)reference.TransformColorSpace(ColorProfiles.SRGB);expected=Pixel(reference,4,4);}
             using var decoder=new StaticDecoder(path);string fit=Path.Combine(directory,highDepth?"rgba16-fit.png":"rgba8-fit.png");decoder.Render(fit,1,1);
+            CheckFastPng(decoder,fit,1,1);
             using(var output=new MagickImage(fit)){double[] actual=Pixel(output,0,0);Require(actual.Take(3).Zip(expected).All(p=>Math.Abs(p.First-p.Second)<=3),$"Hidden RGB leaked: actual={string.Join(',',actual)}, visible reference={string.Join(',',expected)}");Require(Math.Abs(actual[3]-expected[3]/2)<=5,"Alpha coverage changed");}
             string full=Path.Combine(directory,highDepth?"rgba16-full.png":"rgba8-full.png");decoder.Render(full,32,32,full:true);
             using(var output=new MagickImage(full))Require(Pixel(output,4,4).Zip(expected).All(p=>Math.Abs(p.First-p.Second)<=3),"Native-size ICC/alpha mismatch");
@@ -36,31 +37,46 @@ internal static class DisplayPixelProbe
             using(var fixture=new MagickImage(rgb.WriteToBuffer(".png"))){var profile=new ExifProfile();profile.SetValue(ExifTag.Orientation,(ushort)orientation);fixture.SetProfile(profile);fixture.Orientation=(OrientationType)orientation;fixture.Quality=100;fixture.Write(path);}
             using(var fixture=new MagickImage(path))Require((int)fixture.Orientation==orientation,"Fixture orientation did not persist");
             string hash=Hash(path);using var decoder=new StaticDecoder(path);int w=orientation>=5?48:80,h=orientation>=5?80:48;Require(decoder.Width==w&&decoder.Height==h,"Oriented dimensions incorrect");
-            foreach(bool full in new[]{false,true}){string output=Path.Combine(directory,$"orientation-{orientation}-{full}.png");decoder.Render(output,w,h,full:full);using var image=new MagickImage(output);for(int c=0;c<4;c++){double[] actual=Pixel(image,c%2==0?8:w-9,c<2?8:h-9);Require(actual.Take(3).Zip(colors[corners[orientation-1][c]]).All(p=>Math.Abs(p.First-p.Second)<=4),$"Corner {c} mismatch");}}
+            foreach(bool full in new[]{false,true}){string output=Path.Combine(directory,$"orientation-{orientation}-{full}.png");decoder.Render(output,w,h,full:full);if(!full)CheckFastPng(decoder,output,w,h);using var image=new MagickImage(output);for(int c=0;c<4;c++){double[] actual=Pixel(image,c%2==0?8:w-9,c<2?8:h-9);Require(actual.Take(3).Zip(colors[corners[orientation-1][c]]).All(p=>Math.Abs(p.First-p.Second)<=4),$"Corner {c} mismatch");}}
             Require(Hash(path)==hash,"Source changed");
         });
         foreach(bool profile in new[]{false,true})for(int orientation=1;orientation<=8;orientation++)Check($"jpeg-thumbnail-{orientation}-icc-{profile}",()=>
         {
             string path=Path.Combine(directory,$"large-{orientation}-{profile}.jpg");
-            using(var black=VImage.Black(2400,1600,bands:3))using(var orange=black.Linear([1,1,1],[210,120,30]).Cast(Enums.BandFormat.Uchar))
-            using(var rgb=orange.Copy(interpretation:Enums.Interpretation.Srgb))using(var fixture=new MagickImage(rgb.WriteToBuffer(".png")))
+            byte[] pixels=new byte[2400*1600*3];
+            for(int y=0;y<1600;y++)for(int x=0;x<2400;x++)colors[(y>=800?2:0)+(x>=1200?1:0)].CopyTo(pixels,(y*2400+x)*3);
+            using(var memory=VImage.NewFromMemory(pixels,2400,1600,3,Enums.BandFormat.Uchar))
+            using(var rgb=memory.Copy(interpretation:Enums.Interpretation.Srgb))using(var fixture=new MagickImage(rgb.WriteToBuffer(".png")))
             {
                 fixture.Orientation=(OrientationType)orientation;var exif=new ExifProfile();exif.SetValue(ExifTag.Orientation,(ushort)orientation);fixture.SetProfile(exif);
                 if(profile)fixture.SetProfile(ColorProfiles.AdobeRGB1998);fixture.Write(path);
             }
             string hash=Hash(path);using var decoder=new StaticDecoder(path);
+            string fullPath=Path.Combine(directory,"jpeg-before-thumbnail-full.png");decoder.Render(fullPath,120,120,full:true);string fullPixels=PixelHash(fullPath);
             string expected=Path.Combine(directory,"jpeg-reference.png"),actual=Path.Combine(directory,"jpeg-thumbnail.png");
             decoder.Render(expected,120,120);var metadata=decoder.Render(actual,120,120,thumbnail:true);
+            CheckFastPng(decoder,expected,120,120);
             using var reference=new MagickImage(expected);using var thumbnail=new MagickImage(actual);
             Require(reference.Width==thumbnail.Width&&reference.Height==thumbnail.Height,"Thumbnail orientation/size mismatch");
             Require(metadata.Width==decoder.Width&&metadata.Height==decoder.Height,"Thumbnail overwrote source dimensions");
-            Require(Pixel(reference,20,20).Zip(Pixel(thumbnail,20,20)).All(p=>Math.Abs(p.First-p.Second)<=3),"Thumbnail ICC color mismatch");
-            decoder.Render(Path.Combine(directory,"jpeg-after-thumbnail-full.png"),120,120,full:true);
+            for(int corner=0;corner<4;corner++)
+            {
+                int x=corner%2==0?10:(int)reference.Width-11,y=corner<2?10:(int)reference.Height-11;
+                Require(Pixel(reference,x,y).Zip(Pixel(thumbnail,x,y)).All(p=>Math.Abs(p.First-p.Second)<=3),$"Thumbnail ICC/orientation mismatch at corner {corner}");
+            }
+            string afterFull=Path.Combine(directory,"jpeg-after-thumbnail-full.png");decoder.Render(afterFull,120,120,full:true);
+            Require(PixelHash(afterFull)==fullPixels,"Thumbnail decoding changed full-resolution pixels or dimensions");
             Require(Hash(path)==hash,"Source changed");
         });
         string json=JsonSerializer.Serialize(new{checks,scope="Native pixel conversion only; display ICC and UI NOT_RUN"},new JsonSerializerOptions{WriteIndented=true});File.WriteAllText(Path.Combine(directory,"display-pixels.json"),json);Console.WriteLine(json);return passed?0:1;
     }
     private static double[] Pixel(IMagickImage<ushort> image,int x,int y){using var pixels=image.GetPixels();var c=pixels.GetPixel(x,y).ToColor()!;return[c.R/257.0,c.G/257.0,c.B/257.0,c.A/257.0];}
+    private static void CheckFastPng(StaticDecoder decoder,string baseline,int width,int height)
+    {
+        string fast=baseline+".fast.png";decoder.Render(fast,width,height,fastPreview:true);
+        Require(PixelHash(fast)==PixelHash(baseline),"Fast PNG encoding changed decoded pixels");
+    }
     private static string Hash(string path)=>Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+    private static string PixelHash(string path){using var image=VImage.NewFromFile(path);return $"{image.Width}x{image.Height}:"+Convert.ToHexString(SHA256.HashData(image.WriteToMemory<byte>()));}
     private static void Require(bool condition,string message){if(!condition)throw new InvalidDataException(message);}
 }

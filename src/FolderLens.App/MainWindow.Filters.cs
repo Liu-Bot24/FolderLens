@@ -63,7 +63,7 @@ public sealed partial class MainWindow
         try
         {
             if(verifyVideoMetadataBarrier is not null)await verifyVideoMetadataBarrier(token);
-            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current()&&count%32==0)Status.Text=$"已补充 {count:N0} 个文件的信息。";}),token);
+            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token);
             if(Current())
             {
                 // Cover readiness does not imply that catalog metadata was ready when
@@ -75,6 +75,10 @@ public sealed partial class MainWindow
             }
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
+    }
+    private void ReportMetadataProgress(long count)
+    {
+        if(count%32==0)Status.Text=$"已补充 {count:N0} 个文件的信息。";
     }
     private async void AdvancedFilters(object sender,RoutedEventArgs e)
     {

@@ -11,6 +11,11 @@ public sealed partial class MainWindow
     {
         browserScanError=error.Message;reconcilePending=false;ShowBrowserError(error);
     }
+    private void ClearScanError()
+    {
+        if(browserEmptyError==browserScanError)browserEmptyError=null;
+        browserScanError=null;UpdateBrowserEmptyState();
+    }
     private void InitializeBrowserEmptyState()
     {
         ResultSummary.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_)=>UpdateBrowserEmptyState());
@@ -23,6 +28,9 @@ public sealed partial class MainWindow
     }
     private void UpdateBrowserEmptyState()
     {
+        UpdateCommandAvailability();
+        BrowserScanErrorBar.Message=browserScanError??"";
+        BrowserScanErrorBar.IsOpen=browserScanError is not null;
         string? error=browserScanError??browserEmptyError;
         // Observe the displayed controls, including the first page before a complete
         // snapshot exists. This presentation never binds or clears the result source.

@@ -27,6 +27,39 @@ try
     return 0;
  }
  if(args[0]=="image-variants"&&args.Length==2)return ImageVariantProbe.Run(Path.GetFullPath(args[1]));
+ if(args[0]=="measure-fit"&&args.Length==3)
+ {
+    string sourceDirectory=Path.GetFullPath(args[1]),directory=Path.GetFullPath(args[2]);
+    if(directory.Equals(sourceDirectory,StringComparison.OrdinalIgnoreCase)||directory.StartsWith(sourceDirectory.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Diagnostic output must be outside the source directory.");
+    string[] samples=Directory.EnumerateFiles(sourceDirectory,"*.jpg").Order(StringComparer.Ordinal).Take(6).ToArray();
+    if(samples.Length==0)throw new ArgumentException("No JPEG samples found.");
+    Directory.CreateDirectory(directory);
+    foreach(string file in samples)
+    {
+      var timings=new List<object>();byte[]? reference=null;
+      foreach(int mode in new[]{0,1,2,3})
+      {
+        bool fast=mode==1;
+        var timer=Stopwatch.StartNew();using var decoder=new StaticDecoder(file);double opened=timer.Elapsed.TotalMilliseconds;
+        if(mode==3)
+        {
+          byte[] rgba=decoder.MeasureFitPixels(3840,2160);double renderedPixels=timer.Elapsed.TotalMilliseconds;
+          using var baseline=VImage.NewFromFile(Path.Combine(directory,"mode-0.png"));using var expected=baseline.HasAlpha()?baseline.Copy():baseline.Bandjoin(255);
+          if(!SHA256.HashData(rgba).SequenceEqual(SHA256.HashData(expected.WriteToMemory<byte>())))throw new InvalidDataException("Direct fit pixels changed.");
+          for(int i=0;i<rgba.Length;i+=4)(rgba[i],rgba[i+2])=(rgba[i+2],rgba[i]);
+          File.WriteAllBytes(Path.Combine(directory,"mode-3.bgra"),rgba);
+          File.WriteAllText(Path.Combine(directory,"bitmap-assets.json"),JsonSerializer.Serialize(new{width=expected.Width,height=expected.Height,format="bgra8",opaque=true}));
+          timings.Add(new{mode,decoder.Width,decoder.Height,openedMs=opened,renderMs=renderedPixels-opened,bytes=rgba.Length});continue;
+        }
+        string output=Path.Combine(directory,$"mode-{mode}.png");decoder.Render(output,3840,2160,thumbnail:mode==2,fastPreview:fast);double rendered=timer.Elapsed.TotalMilliseconds;
+        using var pixels=VImage.NewFromFile(output);byte[] hash=SHA256.HashData(pixels.WriteToMemory<byte>());
+        if(mode==1&&reference is not null&&!reference.SequenceEqual(hash))throw new InvalidDataException("Preview pixels changed.");reference=hash;
+        timings.Add(new{mode,decoder.Width,decoder.Height,openedMs=opened,renderMs=rendered-opened,bytes=new FileInfo(output).Length});
+      }
+      Console.WriteLine(JsonSerializer.Serialize(timings));
+    }
+    return 0;
+ }
  if(args[0]=="display-pixels"&&args.Length==2)return DisplayPixelProbe.Run(Path.GetFullPath(args[1]));
  if(args[0]=="generate-health"&&args.Length==2){CapabilityProbe.GenerateFixtures(Path.GetFullPath(args[1]));return 0;}
  if(args[0]=="capabilities"&&args.Length==2){string directory=Path.GetFullPath(args[1]);Directory.CreateDirectory(directory);using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(30));var report=await CapabilityProbe.Read(directory,deadline.Token);string json=JsonSerializer.Serialize(report,FolderLens.Contracts.WorkerProtocol.Json);File.WriteAllText(Path.Combine(directory,"capabilities.json"),json);Console.WriteLine(json);return report.Formats.Any(f=>f.BasicDecodeStatus=="FAIL")?1:0;}

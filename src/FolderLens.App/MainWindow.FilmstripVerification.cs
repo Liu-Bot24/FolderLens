@@ -20,6 +20,9 @@ public sealed partial class MainWindow
         var provider=(IScrollProvider)new ScrollViewerAutomationPeer(scroll).GetPattern(PatternInterface.Scroll);
         provider.SetScrollPercent(25,-1);await WaitUntil(()=>scroll.HorizontalOffset>0,TimeSpan.FromSeconds(3));
         double offset=scroll.HorizontalOffset;report["scrollOffset"]=offset;
+        // Layout may replace the template's peer after the first virtualized scroll.
+        scroll=FindScrollViewer(viewerStrip)??throw new InvalidOperationException("缩略图条没有滚动控件");
+        provider=(IScrollProvider)new ScrollViewerAutomationPeer(scroll).GetPattern(PatternInterface.Scroll);
         provider.SetScrollPercent(0,-1);await WaitUntil(()=>scroll.HorizontalOffset<1,TimeSpan.FromSeconds(3));
         report["status"]="PASS";
     }

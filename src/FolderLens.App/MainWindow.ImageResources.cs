@@ -25,7 +25,7 @@ public sealed partial class MainWindow
         bool running=animationRunning,sliding=slideShow,preserve=previewReadySelection==selection&&!previewLoading;
         var intent=viewerScaleIntent;double physical=viewerCustomPhysicalScale;Vector2 offset=pan*(float)(previousRaster/currentRaster);
         ResetViewerGesture();animationTimer?.Stop();slideTimer?.Stop();animationRevision++;
-        ClearImage();
+        prefetchStop.Cancel();ClearPrefetchedImages();ClearImage();
         if(row?.Kind=="audio")
         {
             long audioSelection=selection;
