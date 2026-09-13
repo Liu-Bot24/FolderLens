@@ -26,7 +26,7 @@ public sealed partial class MainWindow
     private readonly SemaphoreSlim thumbnailSlots=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency,FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency);
     // Bound metadata tails as well as active decoders; slow writes cannot create
     // an unbounded backlog of completed image requests on smaller machines.
-    private readonly SemaphoreSlim thumbnailPipelines=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency*2,FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency*2);
+    private readonly FolderLens.Core.PriorityAdmissionGate thumbnailPipelines=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency*2);
     private readonly List<FolderLens.Infrastructure.WorkerClient> extraThumbnailWorkers=[];
     private int thumbnailWorkCount;
     private readonly TaskCompletionSource thumbnailsIdle=new(TaskCreationOptions.RunContinuationsAsynchronously);

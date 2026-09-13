@@ -736,9 +736,15 @@ public sealed partial class MainWindow : Window
             &&item.RelativePath==expected.RelativePath&&item.Bytes==expected.Bytes&&item.Kind==expected.Kind;
         void ReturnDecoder(){if(decoder is not null){thumbnailPool.Enqueue(decoder);decoder=null;}if(slot){thumbnailSlots.Release();slot=false;}}
         void Mark(string stage){if(verifyThumbnailStage is {} record){record(stage,Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds);stageStart=Stopwatch.GetTimestamp();}}
+        bool InViewport()=>sender.Visibility==Visibility.Visible&&sender.ItemsPanelRoot switch
+        {
+            ItemsWrapGrid panel=>row.Ordinal>=panel.FirstVisibleIndex&&row.Ordinal<=panel.LastVisibleIndex,
+            ItemsStackPanel panel=>row.Ordinal>=panel.FirstVisibleIndex&&row.Ordinal<=panel.LastVisibleIndex,
+            _=>false
+        };
         try
         {
-            if(row.Item is null)await (results??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);requestedItem=row.Item;Mark("page");await thumbnailPipelines.WaitAsync(token);pipeline=true;await thumbnailSlots.WaitAsync(token);slot=true;Mark("queue");if(!visible.Contains(row)||thumbnailWorker is null||!OwnsRow())return;
+            if(row.Item is null)await (results??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);requestedItem=row.Item;Mark("page");await thumbnailPipelines.WaitAsync(InViewport,token);pipeline=true;await thumbnailSlots.WaitAsync(token);slot=true;Mark("queue");if(!visible.Contains(row)||thumbnailWorker is null||!OwnsRow())return;
             // Each slot owns a separate decoder. Sharing one WorkerClient here
             // serializes both slots behind its IPC gate on every cold page.
             decoder=thumbnailPool.Dequeue();
