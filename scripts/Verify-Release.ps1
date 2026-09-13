@@ -26,8 +26,8 @@ foreach($required in @('App.xbf','MainWindow.xbf','FolderLens.App.pri')){
 foreach($worker in @('FolderLens.Scan.Worker','FolderLens.Content.Worker','FolderLens.Media.Worker')){
  if(Test-Path -LiteralPath (Join-Path $appRoot ($worker+'.exe'))){throw "Unexpected worker entry in application root: $worker"}
 }
-foreach($extension in @('.exe','.dll','.deps.json','.runtimeconfig.json')){
- if(-not $expected.ContainsKey('scan-worker/FolderLens.Scan.Worker'+$extension)){throw "Incomplete published scan worker: $extension"}
+foreach($required in Get-RequiredWorkerFiles){
+ if(-not $expected.ContainsKey($required)){throw "Incomplete published worker: $required"}
 }
 $actualFiles=Get-ReleaseFiles $appRoot
 if($actualFiles.Count -ne $manifest.files.Count){throw 'Unexpected files exist in candidate application tree.'}

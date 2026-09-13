@@ -91,8 +91,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool terminal=false;
         try
         {
-            try{if(process is null)await Start(timeout.Token).ConfigureAwait(false);}
-            catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("扫描进程启动超时。");}
+            if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");
             try{await ScanWorkerProtocol.Write(pipe!,new("directory",instance,nonce,request,PathRules.ValidateSource(directory),allowCloud),timeout.Token).ConfigureAwait(false);}
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("扫描目录请求超时。");}
@@ -128,7 +127,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool completed=false;
         try
         {
-            if(process is null)await Start(timeout.Token).ConfigureAwait(false);
+            if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");await ScanWorkerProtocol.Write(pipe!,new("stat",instance,nonce,request,PathRules.ValidateSource(path),allowCloud),timeout.Token).ConfigureAwait(false);
             var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
             if(reply.Type!="packet"||reply.Instance!=instance||reply.Nonce!=nonce||reply.RequestId!=request||reply.Packet is null||reply.Packet.Entries.Length!=0||reply.Packet.State is not ("present" or "missing" or "offline" or "inaccessible" or "excluded"))throw new InvalidDataException("Invalid stat response.");
@@ -144,7 +143,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool completed=false;
         try
         {
-            if(process is null)await Start(timeout.Token).ConfigureAwait(false);
+            if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");
             await ScanWorkerProtocol.Write(pipe!,new("resolveImage",instance,nonce,request,PathRules.ValidateSource(root),Document:PathRules.ValidateSource(document),RelativeUrl:relativeUrl),timeout.Token).ConfigureAwait(false);
             var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
@@ -161,7 +160,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("Markdown 图片路径核验超时。");}
         finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
     }
-    private async Task Start(CancellationToken cancellation)
+    private async Task Start(CancellationToken cancellation,CancellationToken callerCancellation)
     {
         if(!HasRuntimeFiles(executable))throw new ScanWorkerUnavailableException("目录扫描组件不完整，请使用完整的程序目录重新启动。");
         string pipeName="FolderLens-scan-"+instance;
@@ -179,7 +178,12 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
             var hello=await ScanWorkerProtocol.Read(pipe,cancellation).ConfigureAwait(false);
             if(hello.Type!="hello"||hello.Instance!=instance||hello.Nonce!=nonce)throw new InvalidDataException("Invalid scan handshake.");
         }
-        catch(OperationCanceledException){await Stop().ConfigureAwait(false);throw;}
+        catch(OperationCanceledException error)
+        {
+            await Stop().ConfigureAwait(false);
+            callerCancellation.ThrowIfCancellationRequested();
+            throw new ScanWorkerUnavailableException("目录扫描组件启动或握手超时，请检查程序组件后重试。",error);
+        }
         catch(ScanWorkerUnavailableException){await Stop().ConfigureAwait(false);throw;}
         catch(Exception error){await Stop().ConfigureAwait(false);throw new ScanWorkerUnavailableException("目录扫描组件启动或连接失败。",error);}
     }
@@ -188,7 +192,8 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         pipe?.Dispose();pipe=null;job?.Dispose();job=null;
         if(process is not null)
         {
-            if(!process.HasExited){process.Kill(entireProcessTree:true);await process.WaitForExitAsync().ConfigureAwait(false);}
+            if(!process.HasExited)process.Kill(entireProcessTree:true);
+            if(!await Task.Run(()=>process.WaitForExit(5000)).ConfigureAwait(false))throw new TimeoutException("目录扫描进程未能在终止后退出。");
             process.Dispose();process=null;
         }
     }

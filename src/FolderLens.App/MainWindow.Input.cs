@@ -176,7 +176,7 @@ public sealed partial class MainWindow
                 case ViewerAction.Previous: Navigate(-1);return;
                 case ViewerAction.Next: Navigate(1);return;
                 case ViewerAction.First: if(selected is not null)Navigate(-(int)selected.Ordinal);return;
-                case ViewerAction.Last: if(selected is not null&&results is not null)Navigate(results.Count-1-(int)selected.Ordinal);return;
+                case ViewerAction.Last: if(selected is not null)Navigate((results?.Count??firstPageSequence.Length)-1-(int)selected.Ordinal);return;
                 case ViewerAction.ContextMenu: ShowViewerContextMenu(new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
             }
             if(selected?.Kind=="video")
@@ -251,16 +251,23 @@ public sealed partial class MainWindow
             if(selected.Kind=="video")
             {
                 if(control)return;
-                wheelRemainder+=delta;if(Math.Abs(wheelRemainder)>=120){wheelRemainder=0;await RunViewerAction(delta>0?ViewerAction.Previous:ViewerAction.Next);}return;
+                NavigateViewerWheel(delta);return;
             }
             string effectiveWheel=EffectiveViewerWheelBehavior();
             if(!control&&effectiveWheel=="next")
-            {wheelRemainder+=delta;if(Math.Abs(wheelRemainder)>=120){int steps=Math.Clamp(wheelRemainder/120,-8,8);wheelRemainder-=steps*120;await RunViewerAction(steps>0?ViewerAction.Previous:ViewerAction.Next);}return;}
+            {NavigateViewerWheel(delta);return;}
             if(!control&&effectiveWheel=="pan")
             {bool horizontal=point.Properties.IsHorizontalMouseWheel||wheelBehavior=="next"&&viewerScaleIntent==ViewerScaleIntent.Height;PanViewerScreen(horizontal?new(delta*.75f,0):new(0,delta*.75f));await RefreshViewerPixels();return;}
             await ZoomViewerAt(EffectiveScale()*Math.Pow(1.2,delta/120.0),point.Position);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
+    }
+    private void NavigateViewerWheel(int delta)
+    {
+        wheelRemainder+=delta;
+        if(Math.Abs(wheelRemainder)<120)return;
+        int steps=wheelRemainder/120;wheelRemainder-=steps*120;
+        Navigate(-steps);
     }
     private async void ViewerPointerDown(object sender,PointerRoutedEventArgs e)
     {
@@ -400,12 +407,12 @@ public sealed partial class MainWindow
                 toggle.Click+=async(_,_)=>{await RunViewerAction(ViewerAction.LockSizing);toggle.IsChecked=viewerSizing==ViewerSizing.Locked;};
                 viewerContextMenu.Items.Add(toggle);continue;
             }
-            var item=new MenuFlyoutItem{Text=label};item.Click+=async(_,_)=>await RunViewerAction(option.Item2);viewerContextMenu.Items.Add(item);
+            var item=new MenuFlyoutItem{Text=label,IsEnabled=CanUseViewerAction(option.Item2)};item.Click+=async(_,_)=>await RunViewerAction(option.Item2);viewerContextMenu.Items.Add(item);
         }
         viewerContextMenu.Items.Add(new MenuFlyoutSeparator());
         if(selected?.Kind=="image"){var settingsItem=new MenuFlyoutItem{Text="图片查看设置…"};settingsItem.Click+=ConfigureImageViewing;viewerContextMenu.Items.Add(settingsItem);}
-        var open=new MenuFlyoutItem{Text=FileCommandLabels.ExternalOpen};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
-        var copy=new MenuFlyoutItem{Text=FileCommandLabels.CopyPath};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text=FileCommandLabels.Reveal};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
+        var open=new MenuFlyoutItem{Text=FileCommandLabels.ExternalOpen,IsEnabled=selected?.Item is not null};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
+        var copy=new MenuFlyoutItem{Text=FileCommandLabels.CopyPath,IsEnabled=selected?.Item is not null};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text=FileCommandLabels.Reveal,IsEnabled=selected?.Item is not null};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
     }
     private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.LockSizing or ViewerAction.Slideshow;
     private void ShowViewerContextMenu(Point at){PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();BuildViewerContextMenu();viewerContextMenu!.ShowAt(ImageCanvas,new FlyoutShowOptions{Position=at});}

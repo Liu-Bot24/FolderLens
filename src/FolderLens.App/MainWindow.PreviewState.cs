@@ -25,10 +25,10 @@ public sealed partial class MainWindow
     }
     private void PreparePreview()
     {
-        foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();ImageCanvas.Opacity=fitBitmap is null?1:.4;
+        foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=fitBitmap is null?1:.4;
         if(loadingBadge is not null){loadingText!.Text="正在打开 "+selected?.Name;loadingText.MaxWidth=Math.Max(120,PreviewSurface.ActualWidth-48);loadingBadge.Visibility=Visibility.Visible;}
     }
-    private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;}
+    private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;}
     private void ClearResultSelection()
     {
         pendingPreviewRestore=null;previewReadySelection=-1;

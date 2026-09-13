@@ -103,17 +103,18 @@ public sealed partial class MainWindow : Window
         using var initialization=browserWork.Enter();if(initialization is null||closing)return;
         try
         {
-            string[] args=Environment.GetCommandLineArgs();dataDirectory=InitialDataDirectory??await AppPaths.DataDirectory(args);
+            string[] args=Environment.GetCommandLineArgs();bool deployedVerification=args.Contains("--verify-refresh")&&args.Contains("--verify-deployed");dataDirectory=InitialDataDirectory??await AppPaths.DataDirectory(args);
             catalog=await Task.Run(async()=>{var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));await store.Initialize(lifetime.Token);return store;});
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
             await RestoreDesktop();
             string worker=Path.Combine(AppContext.BaseDirectory,"workers","FolderLens.Media.Worker.exe");
-            if(!File.Exists(worker))
+            if(!deployedVerification&&!File.Exists(worker))
             {
                 var current=new DirectoryInfo(AppContext.BaseDirectory);
                 while(current is not null && !File.Exists(Path.Combine(current.FullName,"FolderLens.slnx")))current=current.Parent;
                 if(current is not null)worker=Path.Combine(current.FullName,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
             }
+            verificationComponents["media"]=Path.GetRelativePath(AppContext.BaseDirectory,worker);
             previewWorker=new(worker,Path.Combine(dataDirectory,"temp","preview"));thumbnailWorker=new(worker,Path.Combine(dataDirectory,"temp","thumbnails"),WorkerPriority.Visible);metadataWorker=new(worker,Path.Combine(dataDirectory,"temp","metadata"),WorkerPriority.Metadata);prefetchWorker=new(worker,Path.Combine(dataDirectory,"temp","prefetch"),WorkerPriority.Prefetch);
             secondThumbnailWorker=new(worker,Path.Combine(dataDirectory,"temp","thumbnails-2"),WorkerPriority.Visible);
             thumbnailPool.Enqueue(thumbnailWorker);thumbnailPool.Enqueue(secondThumbnailWorker);
@@ -125,13 +126,24 @@ public sealed partial class MainWindow : Window
             thumbnailCache=new(Path.Combine(dataDirectory,"cache","thumbnails"));await thumbnailCache.Initialize(lifetime.Token);
             providerIdentity=await thumbnailWorker.GetProviderIdentity(lifetime.Token);
             capabilityTask=ReadRuntimeCapabilities();
-            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(dataDirectory,"temp","markdown"));
-            string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
+            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(dataDirectory,"temp","markdown"));
+            verificationComponents["content"]=Path.GetRelativePath(AppContext.BaseDirectory,contentExecutable);
+            verificationComponents["scan"]=Path.GetRelativePath(AppContext.BaseDirectory,ScanWorkerClient.FindExecutable()??Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"));
+            string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!deployedVerification&&!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
+            verificationComponents["ffprobe"]=Path.GetRelativePath(AppContext.BaseDirectory,Path.Combine(native,"ffprobe.exe"));
             if(InstanceBroker is not null)_=ReceiveActivations();
             if(args.Contains("--verify-refresh")){initialization.Dispose();await VerifyRefresh();return;}
             int openIndex=Array.IndexOf(args,"--open"),rootIndex=Array.IndexOf(args,"--root");if(openIndex>=0&&openIndex+1<args.Length)await OpenPath(args[openIndex+1]);else if(rootIndex>=0 && rootIndex+1<args.Length){RootPath.Text=args[rootIndex+1];await OpenRoot(RootPath.Text);}else if(await settings.Load<SavedView>("last-session.json") is {} session)await RestoreSavedView(session);else if(await settings.Load<string>("last-root.json") is {} last){RootPath.Text=last;await OpenRoot(last);}
         }
-        catch(Exception ex){ShowBrowserError(ex);}
+        catch(Exception ex)
+        {
+            if(Environment.GetCommandLineArgs().Contains("--verify-refresh"))
+            {
+                initialization.Dispose();
+                await FailVerificationInitialization(ex);
+            }
+            else ShowBrowserError(ex);
+        }
     }
     private static string Tag(ComboBox box)=>((ComboBoxItem)box.SelectedItem).Tag.ToString()!;
     private FilterSpec CurrentFilter()
@@ -153,11 +165,23 @@ public sealed partial class MainWindow : Window
     private async void RootPathKeyDown(object sender,KeyRoutedEventArgs e){if(e.Key==VirtualKey.Enter){e.Handled=true;await OpenRoot(RootPath.Text);}}
     private async void RefreshRoot(object sender,RoutedEventArgs e)
     {
+        await RefreshCurrentRoot();
+    }
+    private async Task RefreshCurrentRoot()
+    {
         try
         {
             if(!replacingRoot&&!scanStop.IsCancellationRequested&&string.Equals(RootPath.Text,root,StringComparison.Ordinal))
             {
-                if(scanTask is not {IsCompleted:false}){reconcilePending=true;await Reconcile(force:true);}
+                long requestedRoot=rootChangeVersion;var token=scanStop.Token;
+                // F5 must not silently degrade to a query while automatic reconciliation
+                // is busy. Wait for its bounded worker, then scan this same root fully.
+                while(scanTask is {IsCompleted:false} active)
+                {
+                    await active.WaitAsync(token);
+                    if(closing||replacingRoot||requestedRoot!=rootChangeVersion||token.IsCancellationRequested)return;
+                }
+                reconcilePending=true;await Reconcile(force:true);
                 await RefreshQuery(preserveViewport:true);return;
             }
             await OpenRoot(RootPath.Text,true);
@@ -185,11 +209,11 @@ public sealed partial class MainWindow : Window
             monitor?.Dispose();monitor=null;
             await RootTaskRetirement.Wait(scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
             if(requested!=rootChangeVersion)return;
-            scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;
+            scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,FolderLabel(path),rootId,"",path);
             QueueTreeRefresh();
             if(resultHandle is {} oldHandle)await catalog.ReleaseSnapshot(oldHandle.Id);
-            prefetchStop.Cancel();prefetched.Clear();prefetchBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
+            prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
             string activeRoot=root,activeId=rootId;long activeEpoch=epoch;
             try{monitor=new(root,()=>DispatcherQueue.TryEnqueue(()=>{if(requested!=rootChangeVersion||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,rootId,epoch);}catch(IOException){Status.Text="目录监听暂不可用；可手动刷新核对。";}
             var report=new Progress<ScanProgress>(p=>
@@ -205,7 +229,7 @@ public sealed partial class MainWindow : Window
             Status.Text="正在扫描；文件总量尚未确定。";
             bool recursive=Recursive.IsChecked==true;scannedPolicy=CurrentFilter();
             ExclusionSpec[] exclusions=ScanExclusions();
-            string? scanWorker=File.Exists(Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"))?Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"):null;
+            string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var rootToken=scanStop.Token;
             scanTask=Task.Run(()=>new DirectoryIndexer(catalog,scanWorker).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,rootToken,forceRefresh));
             UpdateBrowserEmptyState();
@@ -227,7 +251,23 @@ public sealed partial class MainWindow : Window
         if(closing||replacingRoot||scanStop.IsCancellationRequested||catalog is null||scanTask is {IsCompleted:false}||!reconcilePending)return;reconcilePending=false;
         string activeRoot=root,activeId=rootId;long activeEpoch=epoch;bool recursive=Recursive.IsChecked==true;var exclusions=ScanExclusions();
         var rootToken=scanStop.Token;long rootVersion=rootChangeVersion;
-        try{if(force)Status.Text="正在核对目录，保留已有结果…";var task=Task.Run(()=>force?new DirectoryIndexer(catalog).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken,true):new DirectoryIndexer(catalog).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken));scanTask=task;var report=await task;if(rootVersion==rootChangeVersion&&activeId==rootId&&!closing&&!rootToken.IsCancellationRequested)_=StartMetadataRefresh();if(rootVersion==rootChangeVersion&&activeId==rootId)Status.Text=report.State=="ready"?"目录变化已核对。当前浏览顺序保持不变。":"部分目录尚未就绪，将自动重试；已保留当前结果。";}
+        try
+        {
+            if(force)Status.Text="正在核对目录，保留已有结果…";
+            string? executable=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
+            var task=Task.Run(async()=>
+            {
+                if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(rootToken);
+                return await (force?new DirectoryIndexer(catalog,executable).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken,true):new DirectoryIndexer(catalog,executable).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken));
+            });
+            scanTask=task;var report=await task;
+            if(rootVersion!=rootChangeVersion||activeId!=rootId||activeEpoch!=epoch||closing||rootToken.IsCancellationRequested)return;
+            // A successful query or a dirty-subdirectory scan does not prove that a
+            // previous root scan failure recovered. F5 performs the complete scope.
+            if(force&&report.State=="ready")ClearScanError();
+            _=StartMetadataRefresh();
+            Status.Text=report.State=="ready"?"目录变化已核对。当前浏览顺序保持不变。":"部分目录尚未就绪，将自动重试；已保留当前结果。";
+        }
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
         catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}
         finally{if(reconcilePending&&!closing&&rootVersion==rootChangeVersion&&!rootToken.IsCancellationRequested)_=Reconcile();}
@@ -427,13 +467,15 @@ public sealed partial class MainWindow : Window
     }
     private async Task SelectPreview(FileRow row)
     {
+        verifyPreviewStage?.Invoke("selection");
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         browserSelectionRequest++;
         ResetViewerGesture();
         rawPreviewOnly=false;
         AnimationButton.Visibility=ReplayAnimationButton.Visibility=Visibility.Collapsed;
         pendingAnimationBitmap?.Dispose();pendingAnimationBitmap=null;animationFrameIndex=animationNextFrame=0;animationNeedsOpen=true;animationDeadline=0;animationCompletedLoops=0;animationCompleted=false;animationRevision++;
-        prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
+        if(selected is {} previous&&previous.Ordinal!=row.Ordinal)prefetchDirection=row.Ordinal>previous.Ordinal?1:-1;
+        if(!CanAdoptPrefetch(row))prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
         MarkdownHost.Visibility=Visibility.Collapsed;markdownImages.Clear();
         selected=row;requestedImagePage=null;selectionStop.Cancel();selectionStop.Dispose();selectionStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var token=selectionStop.Token;long current=++selection;PreparePreview();FileTitle.Text=row.Name;QualityLabel.Text="正在读取…";
         UpdateViewerInformation();
@@ -441,9 +483,10 @@ public sealed partial class MainWindow : Window
         {
             if(verifyPreviewBarrier is not null)await verifyPreviewBarrier(token);
             if(animationIdle is {} retiringAnimation)await retiringAnimation.Task.WaitAsync(token);
-            var rowSource=results;await ResetTextSession();if(row.Item is null)await (rowSource??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);if(current!=selection)return;
+            var rowSource=results;await ResetTextSession();verifyPreviewStage?.Invoke("resetText");if(row.Item is null)await (rowSource??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);if(current!=selection)return;
             UpdateViewerInformation();
             var properties=await ResolveRow(row,rootId,token);if(current!=selection)return;selectedProperties=properties;FileTitle.Text=row.Name;offlinePreview=false;
+            verifyPreviewStage?.Invoke("properties");
             bool cloud=selectedProperties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row));cloudPreviewButton!.Visibility=cloud?Visibility.Visible:Visibility.Collapsed;
             if(cloud){QualityLabel.Text="此文件仅在线，读取前需要确认。";ClearImage();return;}
             await RenderSelectedContent(row,current,token);
@@ -452,7 +495,7 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(current==selection&&!closing){ClearImage();ShowPreviewError(ex);}}
-        finally{if(current==selection&&!closing)FinishPreview();}
+        finally{if(current==selection&&!closing){FinishPreview();verifyPreviewStage?.Invoke("finished");}}
         if(current==selection&&!closing&&!offlinePreview&&row.Kind=="image")await LoadSelectedExif(row,current,token);
     }
     private async Task RenderSelectedContent(FileRow row,long current,CancellationToken token)
@@ -487,6 +530,7 @@ public sealed partial class MainWindow : Window
     {
         string path=Path.Combine(root,row.RelativePath);int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*Shell.XamlRoot.RasterizationScale)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*Shell.XamlRoot.RasterizationScale));
         bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));var cached=await FindPrefetched(row,width,height,cancellation);WorkerEnvelope? message=null;
+        verifyPreviewStage?.Invoke(cached is null?"prefetchMiss":"prefetchHit");
         if(current!=selection||cancellation.IsCancellationRequested)return;
         if(cached is not null){await PresentPrefetched(cached,current,cancellation);if(current!=selection||cancellation.IsCancellationRequested)return;message=cached.Message;}
         if(raw)
@@ -503,7 +547,9 @@ public sealed partial class MainWindow : Window
             try
             {
                 var reply=await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
+                verifyPreviewStage?.Invoke("workerFit");
                 await RecordMetadata(row,reply,cancellation);
+                verifyPreviewStage?.Invoke("metadataSaved");
                 if(row.Kind!="image")
                 {
                     await previewWorker.ReleaseAsset(reply);
@@ -511,6 +557,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
                 await PresentFit(reply,current,cancellation);message=reply.Message;
+                verifyPreviewStage?.Invoke("presented");
             }
             catch(Exception ex) when(raw&&rawPreviewOnly&&current==selection&&CanRetainRawPreview(ex))
             {QualityLabel.Text="相机内嵌预览 · 原始开发未完成："+ex.Message;SchedulePrefetch(current);return;}
@@ -631,16 +678,19 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            using var stream=new FileStream(reply.AssetPath!,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
-            using var random=stream.AsRandomAccessStream();return await CanvasBitmap.LoadAsync(ImageCanvas,random);
+            // This is the worker-owned local output, never the original source.
+            // In the same-asset native comparison, path loading avoids the measured
+            // overhead of the managed Stream -> WinRT adapter.
+            verifyPreviewStage?.Invoke("bitmapLoadStart");
+            var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,reply.AssetPath!);verifyPreviewStage?.Invoke("bitmapLoadDone");return bitmap;
         }
-        finally{if(previewWorker is not null)await previewWorker.ReleaseAsset(reply);}
+        finally{if(previewWorker is not null)await previewWorker.ReleaseAsset(reply);verifyPreviewStage?.Invoke("assetReleased");}
     }
     private async Task PresentFit(ImageReply reply,long current,CancellationToken cancellation)
     {
         if(current!=selection||cancellation.IsCancellationRequested){await previewWorker!.ReleaseAsset(reply);cancellation.ThrowIfCancellationRequested();return;}
         var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || cancellation.IsCancellationRequested){bitmap.Dispose();return;}
-        fitBitmap?.Dispose();fitBitmap=bitmap;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";ImageCanvas.Opacity=1;ApplyViewerSizing();
+        fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";ImageCanvas.Opacity=1;ApplyViewerSizing();
     }
     private void DrawImage(CanvasControl sender,CanvasDrawEventArgs args)
     {
@@ -650,6 +700,7 @@ public sealed partial class MainWindow : Window
         args.DrawingSession.DrawImage(fitBitmap,new Rect(origin.X,origin.Y,sourceWidth*scale,sourceHeight*scale));
         foreach(var pair in tiles){var size=pair.Value.SizeInPixels;args.DrawingSession.DrawImage(pair.Value,new Rect(origin.X+pair.Key.Item1*1024*scale,origin.Y+pair.Key.Item2*1024*scale,size.Width*scale,size.Height*scale));}
         args.DrawingSession.Transform=Matrix3x2.Identity;
+        if(verifyBitmapSelection==selection)verifyImageDrawn?.Invoke(selection);
     }
     private double EffectiveScale()
     {
@@ -736,12 +787,7 @@ public sealed partial class MainWindow : Window
             &&item.RelativePath==expected.RelativePath&&item.Bytes==expected.Bytes&&item.Kind==expected.Kind;
         void ReturnDecoder(){if(decoder is not null){thumbnailPool.Enqueue(decoder);decoder=null;}if(slot){thumbnailSlots.Release();slot=false;}}
         void Mark(string stage){if(verifyThumbnailStage is {} record){record(stage,Stopwatch.GetElapsedTime(stageStart).TotalMilliseconds);stageStart=Stopwatch.GetTimestamp();}}
-        bool InViewport()=>sender.Visibility==Visibility.Visible&&sender.ItemsPanelRoot switch
-        {
-            ItemsWrapGrid panel=>row.Ordinal>=panel.FirstVisibleIndex&&row.Ordinal<=panel.LastVisibleIndex,
-            ItemsStackPanel panel=>row.Ordinal>=panel.FirstVisibleIndex&&row.Ordinal<=panel.LastVisibleIndex,
-            _=>false
-        };
+        bool InViewport()=>IsThumbnailInViewport(sender,row);
         try
         {
             if(row.Item is null)await (results??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);requestedItem=row.Item;Mark("page");await thumbnailPipelines.WaitAsync(InViewport,token);pipeline=true;await thumbnailSlots.WaitAsync(token);slot=true;Mark("queue");if(!visible.Contains(row)||thumbnailWorker is null||!OwnsRow())return;
@@ -1002,7 +1048,7 @@ public sealed partial class MainWindow : Window
             foreach(var task in new[]{scanTask,metadataTask,prefetchTask,capabilityTask,treeRefreshTask,physicalTreeTask})if(task is not null)await Cleanup(()=>task);
             if(thumbnailWorkCount>0)await Cleanup(()=>thumbnailsIdle.Task);
             await Cleanup(()=>PruneTreeListings(all:true));
-            await Cleanup(()=>{results?.Dispose();results=null;ClearImage();ImageCanvas.RemoveFromVisualTree();return Task.CompletedTask;});
+            await Cleanup(()=>{results?.Dispose();results=null;ClearPrefetchedImages();ClearImage();ImageCanvas.RemoveFromVisualTree();return Task.CompletedTask;});
             if(catalog is not null&&resultHandle is {} displayed){resultHandle=null;await Cleanup(()=>catalog.ReleaseSnapshot(displayed.Id));}
             if(verifyClosingState is not null)await Cleanup(verifyClosingState);
             await Cleanup(()=>prefetchSourceProbe.DisposeAsync().AsTask());

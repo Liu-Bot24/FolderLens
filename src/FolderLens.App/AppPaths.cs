@@ -6,6 +6,22 @@ internal static class AppPaths
 {
     public static async Task<string> DataDirectory(string[] args)
     {
+        string directory=await ResolveDataDirectory(args);
+        // This runs before the instance broker or catalog can create any files.
+        if(args.Contains("--verify-refresh"))
+        foreach(string option in new[]{"--verify-image-switch","--verify-gallery","--verify-category-switch","--verify-bitmap-assets"})
+        {
+            int index=Array.IndexOf(args,option);if(index<0)continue;
+            if(index+1>=args.Length)throw new ArgumentException("缺少只读源目录。");
+            string source=Path.GetFullPath(args[index+1]).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+            string data=Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+            if(data.Equals(source,StringComparison.OrdinalIgnoreCase)||data.StartsWith(source+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("验证输出必须位于源目录以外。");
+        }
+        return directory;
+    }
+    private static async Task<string> ResolveDataDirectory(string[] args)
+    {
         int index=Array.IndexOf(args,"--data-dir");
         if(index>=0&&index+1<args.Length)return Local(args[index+1]);
         string portable=Path.Combine(AppContext.BaseDirectory,"portable.json");

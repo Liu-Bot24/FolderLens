@@ -76,7 +76,8 @@ function ConvertTo-NativeArgument([string]$Value) {
 }
 function Invoke-LoggedProcess {
     param([string]$FilePath, [string[]]$Arguments = @(), [string]$LogBase,
-          [string]$WorkingDirectory = $script:ProjectRoot, [switch]$AllowFailure)
+          [string]$WorkingDirectory = $script:ProjectRoot, [switch]$AllowFailure,
+          [ValidateRange(1,7200)][int]$TimeoutSeconds=1800)
     if (-not $LogBase) { throw 'A persistent log path is required.' }
     $LogBase = Resolve-ProjectPath $LogBase
     New-Item -ItemType Directory -Force -Path (Split-Path $LogBase -Parent) | Out-Null
@@ -98,20 +99,32 @@ function Invoke-LoggedProcess {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $outFile = [IO.File]::Create($LogBase + '.stdout.log')
     $errFile = [IO.File]::Create($LogBase + '.stderr.log')
+    $code=-1; $peak=0; $timedOut=$false; $failure=$null; $started=$false
     try {
         if (-not $process.Start()) { throw "Could not start $FilePath" }
+        $started=$true
         $stdout = $process.StandardOutput.BaseStream.CopyToAsync($outFile)
         $stderr = $process.StandardError.BaseStream.CopyToAsync($errFile)
-        $process.WaitForExit()
-        [void]$stdout.GetAwaiter().GetResult()
-        [void]$stderr.GetAwaiter().GetResult()
-        $code = $process.ExitCode
+        if(-not $process.WaitForExit($TimeoutSeconds*1000)) {
+            $timedOut=$true
+            Stop-LoggedProcessTree $process
+        }
         $peak = $process.PeakWorkingSet64
+        $drained=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr))
+        if(-not $drained.Wait(10000)) { $timedOut=$true; throw 'Process output did not close within the drain deadline.' }
+        $code = if($timedOut){124}else{$process.ExitCode}
+    } catch {
+        $failure=$_.Exception.ToString();$code=if($timedOut){124}else{1}
+        if($started -and -not $process.HasExited) {
+            try { Stop-LoggedProcessTree $process }
+            catch { $failure+="`nProcess tree cleanup failed: "+$_.Exception.ToString() }
+        }
     } finally { $outFile.Dispose(); $errFile.Dispose(); $process.Dispose() }
     $watch.Stop()
     $result = [ordered]@{ executable=$FilePath; arguments=$Arguments; workingDirectory=$WorkingDirectory;
         startedUtc=$began.ToString('o'); elapsedMs=$watch.Elapsed.TotalMilliseconds; exitCode=$code;
-        processPeakWorkingSetBytes=$peak; stdout=$LogBase+'.stdout.log'; stderr=$LogBase+'.stderr.log' }
+        processPeakWorkingSetBytes=$peak; stdout=$LogBase+'.stdout.log'; stderr=$LogBase+'.stderr.log';
+        timeoutSeconds=$TimeoutSeconds; timedOut=$timedOut; failure=$failure }
     Write-JsonFile $result ($LogBase + '.command.json')
     Write-Host ("{0}: exit {1}; logs {2}.*" -f [IO.Path]::GetFileName($FilePath),$code,$LogBase)
     if ($code -ne 0 -and -not $AllowFailure) {
@@ -120,6 +133,23 @@ function Invoke-LoggedProcess {
         throw "Process failed with exit code ${code}: $FilePath. Original logs: $LogBase.*"
     }
     return [pscustomobject]$result
+}
+function Stop-LoggedProcessTree([Diagnostics.Process]$Process) {
+    if($Process.HasExited){return}
+    if($PSVersionTable.PSEdition -eq 'Core') { $Process.Kill($true) }
+    else {
+        $killer=New-Object Diagnostics.Process
+        $killer.StartInfo=New-Object Diagnostics.ProcessStartInfo
+        $killer.StartInfo.FileName=Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
+        $killer.StartInfo.Arguments='/PID '+$Process.Id+' /T /F'
+        $killer.StartInfo.UseShellExecute=$false;$killer.StartInfo.CreateNoWindow=$true
+        try {
+            if(-not $killer.Start()){throw 'Could not start process-tree cleanup.'}
+            if(-not $killer.WaitForExit(5000)){$killer.Kill();throw 'Process-tree cleanup timed out.'}
+            if($killer.ExitCode -ne 0 -and -not $Process.HasExited){throw "Process-tree cleanup failed: $($killer.ExitCode)"}
+        } finally {$killer.Dispose()}
+    }
+    if(-not $Process.WaitForExit(5000)){throw 'Child process did not exit after tree termination.'}
 }
 function Get-BuildInputs {
     $files = @()
@@ -162,6 +192,11 @@ function Get-ReleaseFiles([string]$Directory) {
     return @(Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object FullName | ForEach-Object {
         [pscustomobject]@{ path=$_.FullName.Substring($Directory.Length+1).Replace('\','/'); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
     })
+}
+function Get-RequiredWorkerFiles {
+    foreach($worker in @('scan-worker/FolderLens.Scan.Worker','content-worker/FolderLens.Content.Worker','workers/FolderLens.Media.Worker')) {
+        foreach($extension in @('.exe','.dll','.deps.json','.runtimeconfig.json')) { $worker+$extension }
+    }
 }
 function Test-PrivateReleasePath([string]$Path) {
     $normalized=$Path.Replace('\','/')
