@@ -401,7 +401,9 @@ public sealed partial class MainWindow : Window
                     else{ActiveBrowser.SelectedItem=null;ClearResultSelection();}
                 }
             }
-            else if(!incremental&&!string.IsNullOrEmpty(viewportPath)&&await catalog.FindOrdinal(handle.Id,viewportPath,queryToken) is {} anchor&&IsCurrent())
+            // Promotion already restored the row's exact pixel offset above.
+            // A second leading-edge scroll would discard that offset.
+            else if(!incremental&&!promoting&&!string.IsNullOrEmpty(viewportPath)&&await catalog.FindOrdinal(handle.Id,viewportPath,queryToken) is {} anchor&&IsCurrent())
                 activeList.ScrollIntoView(results[(int)anchor],ScrollIntoViewAlignment.Leading);
             if(IsCurrent()&&!closing)await TryRestoreBrowserView();
         }

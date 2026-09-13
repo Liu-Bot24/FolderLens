@@ -46,6 +46,7 @@ public sealed partial class MainWindow
             }
             return rows;
         }
+        var anchorFaults=new List<object>();
         void Frame(object? sender,object args)
         {
             frames++;var viewport=Viewport();peakProcessTree=Math.Max(peakProcessTree,WorkerResources.Shared.Snapshot.ProcessTreeBytes);
@@ -58,7 +59,11 @@ public sealed partial class MainWindow
                 {
                     var entry=viewport.FirstOrDefault(item=>ReferenceEquals(item.Row,anchor.Row));
                     if(entry.Container is not FrameworkElement element)stationaryMissing++;
-                    else if(Math.Abs(element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y-anchor.Top)>2)stationaryMoved++;
+                    else if(Math.Abs(element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y-anchor.Top)>2)
+                    {
+                        stationaryMoved++;
+                        if(anchorFaults.Count<8)anchorFaults.Add(new{ms=watch.Elapsed.TotalMilliseconds,expectedTop=anchor.Top,actualTop=element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y,ordinal=anchor.Row.Ordinal,queryRequest,queryBusy,updatingBrowser,viewWidth=FilesGrid.ActualWidth,viewHeight=FilesGrid.ActualHeight,offset=FindScrollViewer(FilesGrid)?.VerticalOffset});
+                    }
                 }
                 else stationaryAnchor=CapturePublicationViewport(FilesGrid);
             }
@@ -133,6 +138,7 @@ public sealed partial class MainWindow
             report["firstRowsMs"]=firstRows;report["firstThumbnailOnRenderingMs"]=firstImage;report["screens"]=screens;
             report["frames"]=frames;report["continuousVisibleThumbnailClears"]=cleared;report["continuousVisibleContainerChanges"]=replaced;
             report["stationaryAnchorMissingFrames"]=stationaryMissing;report["stationaryAnchorMovedFrames"]=stationaryMoved;
+            report["stationaryAnchorFaults"]=anchorFaults;
             report["hostPeakWorkingSetBytes"]=Process.GetCurrentProcess().PeakWorkingSet64;
             report["measurementScope"]="Read-only real source; fresh app catalog/cache; OS cache not cleared; offscreen WinUI Rendering observations, not physical display Present timing. No source paths or image content in this report.";
         }

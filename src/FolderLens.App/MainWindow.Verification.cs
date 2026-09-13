@@ -55,6 +55,7 @@ public sealed partial class MainWindow
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,pixels);await encoder.FlushAsync();stream.Seek(0);byte[] png=new byte[checked((int)stream.Size)];await stream.ReadAsync(png.AsBuffer(),(uint)png.Length,InputStreamOptions.None);
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
             if(arguments.Contains("--verify-scan-pipeline")){await VerifyScanPipeline(source,report);return;}
+            if(arguments.Contains("--verify-promotion-viewport")){await VerifyPromotionViewport(source,report);return;}
             if(arguments.Contains("--verify-player-settings")){await VerifyPlayerSettings(report);return;}
             if(arguments.Contains("--verify-audio-recovery")){await VerifyAudioRecovery(source,report);return;}
             if(arguments.Contains("--verify-collection-contract")){VerifyCollectionContract(report);return;}
