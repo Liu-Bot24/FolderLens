@@ -20,6 +20,9 @@ foreach($file in $manifest.files){
  $expected[$file.path]=$file
 }
 foreach($required in $manifest.requiredFiles){if(-not $expected.ContainsKey($required)){throw "Required runtime file missing from manifest: $required"}}
+foreach($required in @('App.xbf','MainWindow.xbf','FolderLens.App.pri')){
+ if(-not $expected.ContainsKey($required)){throw "Required application XAML resource missing from manifest: $required"}
+}
 $actualFiles=Get-ReleaseFiles $appRoot
 if($actualFiles.Count -ne $manifest.files.Count){throw 'Unexpected files exist in candidate application tree.'}
 foreach($file in $actualFiles){

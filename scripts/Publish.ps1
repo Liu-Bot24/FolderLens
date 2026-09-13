@@ -47,6 +47,7 @@ $webLock=@($nativeLock.components | Where-Object {$_.id -eq 'Microsoft.WebView2.
 if((Get-FileHash -LiteralPath (Resolve-ProjectPath $webLock.binary)).Hash -ne $webLock.binarySha256){throw 'Fixed WebView2 binary hash mismatch.'}
 Copy-VerifiedTree (Join-Path $script:ProjectRoot '.tools\webview2-fixed\Microsoft.WebView2.FixedVersionRuntime.153.0.4234.32.x64') (Join-Path $appRoot 'runtime\webview2')
 $shell=Get-ScriptShell
+$null=Invoke-LoggedProcess $shell @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$PSScriptRoot\Verify-Startup.ps1",'-AppRoot',$appRoot,'-EvidenceRoot',(Join-Path $releaseRoot 'startup-verification')) (Join-Path $releaseRoot 'logs\startup-verification')
 $null=Invoke-LoggedProcess $shell @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$PSScriptRoot\Write-Sbom.ps1",'-AppRoot',$appRoot) (Join-Path $releaseRoot 'logs\sbom')
 Write-JsonFile ([ordered]@{schemaVersion=1;dataDirectory='data';mode='portable'}) (Join-Path $appRoot 'portable.json')
 Copy-Item -LiteralPath (Join-Path $script:ProjectRoot 'installer\README-candidate.md') -Destination (Join-Path $appRoot 'README.md')
@@ -62,6 +63,7 @@ if($inputs.sha256 -ne $after.sha256){throw "Source changed during publish; candi
 Write-JsonFile ([ordered]@{buildId=$id;source=$after;runtime=$Runtime;configuration=$Configuration;status='CANDIDATE_UNVERIFIED';releaseVerdict='NO-GO';builtUtc=[DateTime]::UtcNow.ToString('o')}) (Join-Path $appRoot 'BUILD-INFO.json')
 $manifest=[ordered]@{schemaVersion=1;buildId=$id;sourceSha256=$after.sha256;status='CANDIDATE_UNVERIFIED';releaseVerdict='NO-GO';sourceGitHead=$after.gitHead;selfContainedDotNet=$true;selfContainedWindowsAppSdk=$true;requiredFiles=@('FolderLens.App.exe','FolderLens.App.dll','FolderLens.App.runtimeconfig.json','coreclr.dll','hostfxr.dll','hostpolicy.dll','Microsoft.UI.Xaml.dll','Microsoft.Graphics.Canvas.dll','WebView2Loader.dll','workers/FolderLens.Media.Worker.exe','workers/FolderLens.RawBridge.dll','workers/libraw.dll','workers/libvips-42.dll','workers/magick/policy.xml','content-worker/FolderLens.Content.Worker.exe','native/ffmpeg/ffmpeg.exe','native/ffmpeg/ffprobe.exe','runtime/webview2/msedgewebview2.exe','SBOM.json','THIRD-PARTY-NOTICES.md','BUILD-INFO.json','CAPABILITIES.json','portable.json');files=Get-ReleaseFiles $appRoot;gates=@{cleanOfflinePortable='NOT_RUN';cleanOfflineInstaller='NOT_RUN';upgradeCancelUninstall='NOT_RUN';allP1Acceptance='NOT_RUN';referenceHardwarePerformance='NOT_RUN';sourceLicenseObligations='BLOCKED'}}
 if(Test-Path -LiteralPath $scan){$manifest.requiredFiles+=@('FolderLens.Scan.Worker/FolderLens.Scan.Worker.exe')}
+$manifest.requiredFiles+=@('App.xbf','MainWindow.xbf','FolderLens.App.pri')
 Write-JsonFile $manifest (Join-Path $releaseRoot 'release-manifest.json')
 Write-JsonFile ([ordered]@{artifactRoot=$releaseRoot;buildId=$id}) (Join-Path $script:ProjectRoot 'artifacts\publish\latest-candidate.json')
 Write-Host "Candidate published: $releaseRoot. Full release verdict: NO-GO."

@@ -13,6 +13,15 @@
   <ProjectReference Include="../FolderLens.Media.Worker/FolderLens.Media.Worker.csproj" ReferenceOutputAssembly="false" />
   <ProjectReference Include="../FolderLens.Scan.Worker/FolderLens.Scan.Worker.csproj" ReferenceOutputAssembly="false" />
  </ItemGroup>
+ <!-- WinUI emits these during Build but does not include them in the unpackaged
+      SDK publish list. Use this build's TargetDir, including custom OutDir. -->
+ <Target Name="PublishCompiledXaml" AfterTargets="ComputeFilesToPublish">
+  <ItemGroup>
+   <CompiledXamlResource Include="$(TargetDir)**/*.xbf;$(TargetDir)$(TargetName).pri" />
+   <ResolvedFileToPublish Include="@(CompiledXamlResource)" RelativePath="%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <Error Condition="!Exists('$(TargetDir)App.xbf') Or !Exists('$(TargetDir)MainWindow.xbf') Or !Exists('$(TargetDir)$(TargetName).pri')" Text="Compiled application XAML resources are missing from this build." />
+ </Target>
  <Target Name="StageMatchingWorkers" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
   <ItemGroup>
    <ContentWorkerFiles Include="../FolderLens.Content.Worker/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/**/*" Exclude="**/*.pdb" />
