@@ -17,6 +17,28 @@ public sealed partial class MainWindow
         string png=Path.Combine(directory,"mode-0.png"),raw=Path.Combine(directory,"mode-3.bgra");
         if(new FileInfo(raw).Length!=expected)throw new InvalidDataException("Invalid diagnostic pixel length.");
         byte[] pixels=await File.ReadAllBytesAsync(raw);
+        var lifetimeChecks=new List<object>();report["fileLifetime"]=lifetimeChecks;
+        foreach(string mode in new[]{"path","closedOperation","nativeStream"})
+        {
+            string owned=Path.Combine(dataDirectory,mode+"-lifetime.png");File.Copy(png,owned);
+            CanvasBitmap bitmap;
+            if(mode=="nativeStream")
+            {
+                bitmap=await LoadLocalBitmap(owned);
+            }
+            else
+            {
+                var operation=CanvasBitmap.LoadAsync(ImageCanvas,owned);bitmap=await operation;
+                if(mode=="closedOperation")operation.Close();
+            }
+            using(bitmap)
+            {
+                bool released;string? error=null;
+                try{File.Delete(owned);released=true;}catch(IOException ex){released=false;error=ex.GetType().Name+":"+ex.HResult;}
+                lifetimeChecks.Add(new{mode,released,error,pixelsValid=bitmap.GetPixelBytes().Length==expected});
+                if(mode=="nativeStream"&&!released)throw new IOException("Native stream retained the worker asset after loading.");
+            }
+        }
         using(var reference=await CanvasBitmap.LoadAsync(ImageCanvas,png))
         using(var direct=CanvasBitmap.CreateFromBytes(ImageCanvas,pixels,width,height,DirectXPixelFormat.B8G8R8A8UIntNormalized))
         {
@@ -24,12 +46,19 @@ public sealed partial class MainWindow
             using var stream=new FileStream(png,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
             using var random=stream.AsRandomAccessStream();using var adapted=await CanvasBitmap.LoadAsync(ImageCanvas,random);
             if(!SHA256.HashData(reference.GetPixelBytes()).SequenceEqual(SHA256.HashData(adapted.GetPixelBytes())))throw new InvalidDataException("PNG path and stream loading changed pixels.");
+            using var native=await LoadLocalBitmap(png);
+            if(!SHA256.HashData(reference.GetPixelBytes()).SequenceEqual(SHA256.HashData(native.GetPixelBytes())))throw new InvalidDataException("Native stream loading changed pixels.");
         }
         var samples=new List<object>();
-        for(int i=0;i<100;i++)foreach(string mode in i%2==0?new[]{"pngPath","pngStream","bgra"}:new[]{"bgra","pngStream","pngPath"})
+        for(int i=0;i<100;i++)foreach(string mode in i%2==0?new[]{"pngPath","pngStream","pngNativeStream","bgra"}:new[]{"bgra","pngNativeStream","pngStream","pngPath"})
         {
             var timer=Stopwatch.StartNew();
             if(mode=="pngPath"){using var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,png);samples.Add(new{mode,ms=timer.Elapsed.TotalMilliseconds});}
+            else if(mode=="pngNativeStream")
+            {
+                using var stream=await Windows.Storage.Streams.FileRandomAccessStream.OpenAsync(png,Windows.Storage.FileAccessMode.Read);
+                using var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,stream);samples.Add(new{mode,ms=timer.Elapsed.TotalMilliseconds});
+            }
             else if(mode=="pngStream")
             {
                 using var stream=new FileStream(png,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);

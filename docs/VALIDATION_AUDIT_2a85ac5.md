@@ -85,13 +85,39 @@ max 965.1 ms，没有收益，WorkerServer 的实验调用已撤回。像素相�
 PNG 托管流 P50 95.2 / P95 118.5 ms；PNG 原生路径 P50 20.9 / P95 26.5 ms；
 BGRA 文件读取和位图创建 P50 4.1 / P95 8.0 ms。此处仅位图加载，不含解码、IPC
 或 Present，不能把差值直接当作完整切图收益。
-据此源码将 `LoadRenderedBitmap` 改为 Win2D 原生路径加载工作进程自有 PNG，
-保留释放 finally 和选择代次检查；没有修改源图读取方式或生产 IPC。
-**此最后改动已完成 Release 构建，尚未完成端到端复验。** 构建 0 错误，7 个
-NU1900 警告，证据为 `resume-baseline/native-path-final-build.log`。
-同一源码的完整单元测试 `tests/native-path-current/native-path-current.trx`
-为 266/266 通过，0 跳过；8 个本批 PowerShell 脚本语法检查通过。
-最终冷切、取消生命周期及同入口启动仍待原生复验，当前不能给出完整性能或交付结论。
+第一次将 `LoadRenderedBitmap` 改为原生路径重载后，`native-path-cold-final`
+首个测量样本失败。实际 PreviewError 为 ReleaseAsset 的文件共享冲突（Win32 32），
+不是图片解码失败。`bitmap-lifetime-probe` 缩小到同一 PNG：路径重载加载后无法删除，
+显式关闭异步操作仍无法删除；显式关闭原生 FileRandomAccessStream 后立即可删且位图有效。
+据此使用显式原生流，释放资产异常时也释放尚未交付的位图；没有放宽删除安全校验或重试吞错。
+诊断增加像素哈希等价及文件释放断言，完整切图失败报告保留当前阶段。
+
+`native-stream-cold-final` 在真实大图布局禁用应用预取，111/111 成功：
+P50 309.7/P95 493.9/P99 528.1/max 540.1 ms；对旧托管流基线中位与 P95
+约减少 24%/22%。这不是磁盘冷读或显示器 Present；用户可能同时使用电脑，
+因此不作为受控参考机的产品整体倍率。`bitmap-lifetime-probe` 四种方式交替各100次，
+原生流 P50 18.9/P95 22.1 ms，托管流 83.4/113.3 ms，支持消除适配成本的诊断。
+构建证据为 `resume-baseline/native-stream-build.log`（0 错误，7 个 NU1900）。
+之前里程碑的 `tests/native-path-current/native-path-current.trx` 为266/266通过；
+最终原生流版完整回归、取消生命周期及同入口启动另行记录，不沿用旧单测结论冒充最终验证。
+
+`native-stream-prepared-final` 111 次成功，后 104 次全部命中预制缓存：
+P50 5.3/P95 10.4/P99 22.2/max 434.9 ms。最大值样本在 25.3 ms 已完成选择，
+但目标 Draw 延后至 434.9 ms；尚未定位该次调度停顿，不能删除样本或称全部低延迟。
+初始七次快速切换 P50 401.2/max 498.8 ms。末尾应用 private 约 602 MB，
+进程树约 1.06 GB；不是长稳或 GPU committed 验收。
+
+同类检查发现视频大封面的路径重载也在 finally 删除时发生共享冲突。
+原 video-card 用例只检查卡片，新增选中视频后的预览与资产释放断言，
+`cover-lifetime-red` 失败，改用同一显式原生流后 `cover-lifetime-green` 通过。
+`native-stream-pixels-final` 确认原生流、托管流、路径加载的完整像素哈希一致，
+并断言原生流关闭后删除成功、位图仍有效；此轮与单测并行，耗时不作性能对照。
+`tests/native-stream-final/native-stream-final.trx` 为最终修复后 266/266 通过、0跳过。
+`native-stream-complete-regression/summary.json` 为最终 26/26 原生回归通过，
+包括增强后的视频大封面、预取接管/反向/压力与设备重建、选择竞态、关闭与幻灯片。
+`native-stream-complete-startup*` 四个严格部署模式场景全部通过：目录/图片/返回、
+扫描管线、视口保持、TXT/Markdown 阅读和返回。它们来自开发构建目录，
+不是用户既有入口的验证；该入口仍运行旧程序，尚未覆盖或重启。
 
 诊断输出目录的检查原在初始化之后且漏掉与源目录相等的情况。现在在实例锁与
 目录创建之前拒绝相等/子目录；`diagnostic-paths-red.trx` 四个反例失败，

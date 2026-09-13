@@ -146,7 +146,10 @@ public sealed partial class MainWindow
                 await SelectPreview(row).WaitAsync(TimeSpan.FromSeconds(15));
                 double ready=clock.Elapsed.TotalMilliseconds;
                 if(previewReadySelection!=selection||previewLoading||fitBitmap is null)
+                {
+                    report["failedSample"]=new{index=sample,ordinal=index,stages=stages.ToArray(),previewReadySelection,selection,previewLoading,hasBitmap=fitBitmap is not null};
                     throw new InvalidOperationException("切图结束但目标图片未显示。");
+                }
                 ImageCanvas.Invalidate();double drawMs=await drawn.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 samples.Add(new{index=sample,ordinal=index,phase=verifyColdSwitch?"applicationCacheCold":sample<=6?"rapid":"afterPrefetchWait",elapsedMs=ready,targetDrawMs=drawMs,stages=stages.ToArray()});
                 if(sample%10==0||sample==ordinals.Length-1)
