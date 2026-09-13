@@ -48,6 +48,7 @@ public sealed record FilterSpec
     public ExclusionSpec[] Exclusions { get; init; } = [];
     public DirectoryRule[] DirectoryRules { get; init; } = [];
     public string[] Extensions { get; init; } = [];
+    public string[] FileExtensions { get; init; } = [];
     public SortSpec Sort { get; init; } = new();
     public FolderGroupingSpec Grouping { get; init; } = new();
 
@@ -58,6 +59,7 @@ public sealed record FilterSpec
     public void Validate()
     {
         Grouping.Validate();
+        if(FileExtensions.Length>64||FileExtensions.Distinct(StringComparer.Ordinal).Count()!=FileExtensions.Length||FileExtensions.Any(e=>e.Length>255||e!=e.ToLowerInvariant()||e.Any(c=>char.IsControl(c)||"\\/:*?\"<>|".Contains(c))))throw new ArgumentException("扩展名选择无效。");
         _=new DirectoryRuleSet(DirectoryRules);
         if(Extensions.Length>64||Extensions.Any(e=>!Regex.IsMatch(e,"^[a-z0-9][a-z0-9._+-]{0,31}$",RegexOptions.CultureInvariant)))throw new ArgumentException("扩展名筛选无效。");
         if(DirectoryScope is null||DirectoryScope.Length>32767||DirectoryScope.Any(c=>char.IsControl(c)||":*?\"<>|".Contains(c))||

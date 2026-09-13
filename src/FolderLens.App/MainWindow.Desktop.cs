@@ -170,7 +170,7 @@ public sealed partial class MainWindow
         =>await ResetBrowserFilters();
     private async Task ResetBrowserFilters()
     {
-        suppressFilters=true;advanced=null;Search.Text="";Formats.Text="";RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;SearchPath.IsChecked=false;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
+        suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;SearchPath.IsChecked=false;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
         MinSize.Value=MaxSize.Value=MinWidth.Value=MinHeight.Value=double.NaN;suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
     }
     private async void ParentRoot(object sender,RoutedEventArgs e){var parent=Directory.GetParent(root);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
@@ -224,6 +224,7 @@ public sealed partial class MainWindow
     private async void InvokeFolder(TreeView sender,TreeViewItemInvokedEventArgs e)
     {
         try{var node=e.InvokedItem as TreeViewNode;var folder=node?.Content as FolderNode??e.InvokedItem as FolderNode;
+        if(node?.Content is NavigationGroup){node.IsExpanded=!node.IsExpanded;return;}
         if(folder?.PageOffset is {} offset&&node?.Parent is {} parent){await ChangeTreePage(parent,offset);return;}
         if(folder is not null)await NavigateFolder(folder);}
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}

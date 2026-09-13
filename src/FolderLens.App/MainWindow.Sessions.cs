@@ -38,7 +38,7 @@ public sealed partial class MainWindow
         filter.Validate();suppressFilters=true;searchTimer?.Stop();
         try
         {
-            advanced=filter;folderGrouping=filter.Grouping;UpdateGroupingButton();Search.Text=filter.NamePathQuery;Formats.Text=string.Join(',',filter.Formats);
+            advanced=filter;folderGrouping=filter.Grouping;UpdateGroupingButton();Search.Text=filter.NamePathQuery;SetFormatChoices(filter);
             string category=FileCategories.FromFilter(filter);
             SelectTag(Category,category);UpdateSortOptions();ApplyDetailColumns();SelectTag(RawMode,filter.Raw);SelectTag(AnimationMode,filter.Animation);SelectTag(SortField,FolderLens.Core.BrowserSortOptions.IsApplicable(category,filter.Sort.Field)?filter.Sort.Field:"name");
             ShowHidden.IsChecked=filter.ShowHidden;PendingView.IsChecked=filter.IncludePending;Recursive.IsChecked=filter.Recursive;SearchPath.IsChecked=filter.SearchScope=="nameAndPath";sortDescending=filter.Sort.Direction=="desc";

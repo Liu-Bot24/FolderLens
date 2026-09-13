@@ -46,6 +46,7 @@ public static class FilterSql
         if (!filter.ShowHidden) Known("(f.file_attributes & 2)=0");
         Set("f.kind",filter.Kinds);
         Set("lower(ltrim(f.extension,'.'))",filter.Extensions);
+        Set("lower(ltrim(f.extension,'.'))",filter.FileExtensions);
         if(filter.DirectoryRules.Any(r=>r.Enabled))
         {
             string rules=Param(System.Text.Json.JsonSerializer.Serialize(filter.DirectoryRules));

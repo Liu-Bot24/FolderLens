@@ -234,33 +234,53 @@
           <Button x:Name="QuickFiltersButton" Grid.Column="4" ToolTipService.ToolTip="按格式、尺寸、大小等条件筛选文件" AutomationProperties.Name="筛选">
             <Button.Content><StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE71C;" FontSize="14" /><TextBlock Text="筛选" VerticalAlignment="Center" /></StackPanel></Button.Content>
             <Button.Flyout>
-              <Flyout x:Name="FilterFlyout">
-                <ScrollViewer MaxHeight="560" Width="280">
-                  <StackPanel Spacing="8">
-                    <CheckBox x:Name="SearchPath" Content="同时搜索相对路径" />
-                    <TextBox x:Name="Formats" Header="格式" PlaceholderText="jpeg,png,arw" />
-                    <ComboBox x:Name="RawMode" Header="RAW" SelectedIndex="0" HorizontalAlignment="Stretch">
-                      <ComboBoxItem Content="包含 RAW" Tag="any" />
-                      <ComboBoxItem Content="仅 RAW" Tag="only" />
-                      <ComboBoxItem Content="排除 RAW" Tag="exclude" />
-                    </ComboBox>
-                    <ComboBox x:Name="AnimationMode" Header="动静态" SelectedIndex="0" HorizontalAlignment="Stretch">
-                      <ComboBoxItem Content="不限" Tag="any" />
-                      <ComboBoxItem Content="仅静态图片" Tag="static" />
-                      <ComboBoxItem Content="仅动图" Tag="animated" />
-                    </ComboBox>
-                    <NumberBox x:Name="MinSize" Header="最小大小 · MiB" Minimum="0" SmallChange="1" />
-                    <NumberBox x:Name="MaxSize" Header="最大大小 · MiB" Minimum="0" SmallChange="1" />
-                    <NumberBox x:Name="MinWidth" Header="最小宽度 · px" Minimum="0" />
-                    <NumberBox x:Name="MinHeight" Header="最小高度 · px" Minimum="0" />
-                    <CheckBox x:Name="ShowHidden" Content="显示隐藏文件" />
-                    <CheckBox x:Name="Recursive" Content="包含子文件夹" IsChecked="True" />
-                    <CheckBox x:Name="PendingView" Content="查看待判断文件" />
-                    <Button Content="应用筛选" Click="ApplyFilters" AutomationProperties.AutomationId="ApplyFilters" />
-                    <Button Content="更多条件与目录排除…" Click="AdvancedFilters" />
-                    <Button Content="清除筛选" Click="ResetFilters" />
+              <Flyout x:Name="FilterFlyout" Opening="OpenFilterPanel">
+                <Flyout.FlyoutPresenterStyle><Style TargetType="FlyoutPresenter"><Setter Property="MaxWidth" Value="600" /></Style></Flyout.FlyoutPresenterStyle>
+                <Grid x:Name="FilterPanel" Width="520" MaxHeight="650" RowSpacing="12">
+                  <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                  <ScrollViewer x:Name="FilterFieldsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid ColumnSpacing="16" RowSpacing="10">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                      <CheckBox x:Name="SearchPath" Content="同时搜索相对路径" Grid.ColumnSpan="2" />
+                      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="6">
+                        <TextBlock Text="格式（扩展名）" />
+                    <DropDownButton x:Name="FormatPicker" Content="全部格式" HorizontalAlignment="Stretch" AutomationProperties.Name="选择文件格式">
+                      <DropDownButton.Flyout>
+                        <Flyout x:Name="FormatChoicesFlyout" Opening="OpenFormatChoices" Closed="CloseFormatChoices">
+                          <StackPanel Width="220" Spacing="8">
+                            <TextBlock x:Name="FormatChoicesStatus" TextWrapping="Wrap" />
+                            <ListView x:Name="FormatOptions" SelectionMode="Multiple" DisplayMemberPath="Label" SelectionChanged="FormatSelectionChanged" MaxHeight="240" AutomationProperties.Name="扩展名，可多选" />
+                            <Button Content="全部格式" Click="ClearFormatChoices" HorizontalAlignment="Stretch" />
+                          </StackPanel>
+                        </Flyout>
+                      </DropDownButton.Flyout>
+                    </DropDownButton>
+                      </StackPanel>
+                      <ComboBox x:Name="RawMode" Grid.Row="2" Header="RAW" SelectedIndex="0" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="包含 RAW" Tag="any" /><ComboBoxItem Content="仅 RAW" Tag="only" /><ComboBoxItem Content="排除 RAW" Tag="exclude" />
+                      </ComboBox>
+                      <ComboBox x:Name="AnimationMode" Grid.Row="2" Grid.Column="1" Header="动静态" SelectedIndex="0" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="不限" Tag="any" /><ComboBoxItem Content="仅静态图片" Tag="static" /><ComboBoxItem Content="仅动图" Tag="animated" />
+                      </ComboBox>
+                      <NumberBox x:Name="MinSize" Grid.Row="3" Header="最小大小 · MiB" Minimum="0" SmallChange="1" />
+                      <NumberBox x:Name="MaxSize" Grid.Row="3" Grid.Column="1" Header="最大大小 · MiB" Minimum="0" SmallChange="1" />
+                      <NumberBox x:Name="MinWidth" Grid.Row="4" Header="最小宽度 · px" Minimum="0" />
+                      <NumberBox x:Name="MinHeight" Grid.Row="4" Grid.Column="1" Header="最小高度 · px" Minimum="0" />
+                      <CheckBox x:Name="ShowHidden" Grid.Row="5" Content="显示隐藏文件" />
+                      <CheckBox x:Name="Recursive" Grid.Row="5" Grid.Column="1" Content="包含子文件夹" IsChecked="True" />
+                      <CheckBox x:Name="PendingView" Grid.Row="6" Grid.ColumnSpan="2" Content="查看待判断文件" />
+                    </Grid>
+                  </ScrollViewer>
+                  <StackPanel Grid.Row="1" Spacing="10">
+                    <Button Content="更多条件与目录排除…" Click="AdvancedFilters" HorizontalAlignment="Stretch" />
+                    <Grid ColumnSpacing="12">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                      <Button x:Name="ApplyFiltersButton" Content="应用筛选" Click="ApplyFilters" HorizontalAlignment="Stretch" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="ApplyFilters" />
+                      <Button x:Name="ClearFiltersButton" Grid.Column="1" Content="清除筛选" Click="ResetFilters" HorizontalAlignment="Stretch" />
+                    </Grid>
                   </StackPanel>
-                </ScrollViewer>
+                </Grid>
               </Flyout>
             </Button.Flyout>
           </Button>
