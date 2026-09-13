@@ -6,7 +6,7 @@ public sealed record DirectoryRule(string Action, string Target, string Match, s
 {
     public void Validate()
     {
-        if(Action is not ("include" or "exclude" or "keep") || Target is not ("name" or "path") || Match is not ("equals" or "contains" or "startsWith" or "regex"))
+        if(Action is not ("include" or "exclude" or "keep") || Target is not ("name" or "path") || Match is not ("equals" or "contains" or "startsWith" or "wildcard" or "regex"))
             throw new ArgumentException("文件夹规则类型无效。");
         if(string.IsNullOrWhiteSpace(Pattern)||Pattern.Length>512||Pattern.Any(char.IsControl))throw new ArgumentException("文件夹规则不能为空，且最多为 512 个字符。");
         if(Match=="regex")
@@ -18,7 +18,15 @@ public sealed record DirectoryRule(string Action, string Target, string Match, s
         else if(Target=="name"&&(Pattern.Contains('/')||Pattern.Contains('\\')))throw new ArgumentException("文件夹名称不应包含路径分隔符，请改用相对路径。");
         else if(Target=="path"&&(Path.IsPathRooted(Pattern)||Pattern.Contains(':')||Pattern.Split('/','\\').Any(p=>p is "" or "." or "..")))throw new ArgumentException("请填写当前根目录内的相对文件夹路径。");
     }
-    internal Regex CreateRegex()=>new(Pattern,RegexOptions.IgnoreCase|RegexOptions.CultureInvariant|RegexOptions.NonBacktracking,TimeSpan.FromMilliseconds(50));
+    internal Regex CreateRegex()
+    {
+        // Wildcards match a complete name/path. Neither wildcard crosses a path separator;
+        // IncludeChildren controls descendant matching independently of the pattern.
+        string expression=Match=="wildcard"
+            ? @"\A"+Regex.Escape(Pattern.Replace('/','\\')).Replace(@"\*",@"[^\\]*").Replace(@"\?",@"[^\\]")+@"\z"
+            : Pattern;
+        return new(expression,RegexOptions.IgnoreCase|RegexOptions.CultureInvariant|RegexOptions.NonBacktracking,TimeSpan.FromMilliseconds(50));
+    }
 }
 
 // Compiled once per query. Called for directories, never for individual files.
@@ -30,7 +38,7 @@ public sealed class DirectoryRuleSet
     {
         var items=source.ToArray();if(items.Length>64)throw new ArgumentException("最多支持 64 条文件夹规则。");
         foreach(var rule in items)rule.Validate();
-        rules=items.Where(r=>r.Enabled).Select(r=>(r,r.Match=="regex"?r.CreateRegex():null)).ToArray();
+        rules=items.Where(r=>r.Enabled).Select(r=>(r,r.Match is "regex" or "wildcard"?r.CreateRegex():null)).ToArray();
         hasIncludes=rules.Any(r=>r.Rule.Action=="include");
     }
     public bool IsVisible(string relativeDirectory)

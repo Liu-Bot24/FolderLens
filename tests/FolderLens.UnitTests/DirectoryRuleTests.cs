@@ -6,6 +6,30 @@ namespace FolderLens.UnitTests;
 
 public sealed class DirectoryRuleTests
 {
+    [Theory]
+    [InlineData("cache*","cache",false)]
+    [InlineData("cache*","CACHE01",false)]
+    [InlineData("cache*","mycache",true)]
+    [InlineData("cache?","cache1",false)]
+    [InlineData("cache?","cache",true)]
+    [InlineData("cache?","cache12",true)]
+    [InlineData("[cache]*","cache1",true)]
+    public void WildcardsMatchWholeNames(string pattern,string path,bool visible)
+        =>Assert.Equal(visible,new DirectoryRuleSet([new("exclude","name","wildcard",pattern)]).IsVisible(path));
+
+    [Fact]
+    public void WildcardsRespectSegmentsChildrenAndLiteralModes()
+    {
+        var rule=new DirectoryRule("exclude","path","wildcard","A/cache?",IncludeChildren:false);
+        var set=new DirectoryRuleSet([rule]);
+        Assert.False(set.IsVisible(@"a\cache1"));Assert.True(set.IsVisible(@"a\cache1\child"));
+        Assert.True(set.IsVisible(@"a\nested\cache1"));Assert.True(set.IsVisible(@"a\cache12"));
+        Assert.False(new DirectoryRuleSet([rule with{IncludeChildren=true}]).IsVisible(@"a\cache1\child"));
+        Assert.True(new DirectoryRuleSet([new("exclude","path","wildcard","A/*/cache",false)]).IsVisible(@"A\one\two\cache"));
+        Assert.True(new DirectoryRuleSet([rule with{Enabled=false}]).IsVisible(@"a\cache1"));
+        Assert.True(new DirectoryRuleSet([new("exclude","name","contains","cache*")]).IsVisible("cache1"));
+        Assert.Throws<ArgumentException>(()=>new DirectoryRuleSet([rule with{Pattern="../cache*"}]));
+    }
     [Fact]
     public void SqlEvaluatesFolderRulesPerDirectoryInsteadOfPerFile()
     {
@@ -79,7 +103,7 @@ public sealed class DirectoryRuleTests
             }
             return true;
         });
-        var filter=new FilterSpec{RootId="benchmark",DirectoryRules=[new("exclude","name","equals","仅预览")]};
+        var filter=new FilterSpec{RootId="benchmark",DirectoryRules=[new("exclude","name","wildcard","仅预?")]};
         Assert.Equal(3,(await catalog.ReadFirstPage(filter)).Items.Count);
         Assert.Equal(3,(await catalog.CreateSnapshot(filter,1,1)).Count);
         Assert.Equal(3,(await catalog.CreateSnapshot(filter with{Grouping=new(true)},1,2)).Count);

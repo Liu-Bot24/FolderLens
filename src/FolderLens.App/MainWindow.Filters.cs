@@ -71,7 +71,7 @@ public sealed partial class MainWindow
                 await Task.WhenAll(visible.Where(row=>row.Kind=="video").ToArray().Select(row=>LoadRowProperties(row,refresh:true)));
                 if(!Current())return;
                 Status.Text="文件信息已补充，当前浏览顺序保持不变。";
-                if(selected is null&&!restoringView)await RefreshQuery(preserveViewport:true,scanPreview:true);
+                if(!BrowserSequenceLocked&&!restoringView)await RefreshQuery(preserveViewport:true,scanPreview:true);
             }
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}

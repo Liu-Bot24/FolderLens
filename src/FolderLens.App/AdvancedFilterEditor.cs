@@ -16,6 +16,7 @@ internal sealed class AdvancedFilterEditor
     internal Dictionary<string, Button> ClearDateButtons { get; } = [];
     internal Dictionary<string, Button> DatePresetButtons { get; } = [];
     private readonly Dictionary<string, (DateTimeOffset? From, DateTimeOffset? To)> initialDates = [];
+    private readonly HashSet<string> explicitDatePresets = [];
     private readonly NumberBox ratioMin = Number("最小宽高比"), ratioMax = Number("最大宽高比");
     private readonly NumberBox fpsMin = Number("最低帧率"), fpsMax = Number("最高帧率");
     private readonly ComboBox orientation = new() { Header = "画面方向", HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -81,7 +82,7 @@ internal sealed class AdvancedFilterEditor
             {
                 var button=new Button{Content=preset.Item1,Padding=new(8,2,8,2),MinHeight=28};
                 AutomationProperties.SetName(button,field.Item2+"："+preset.Item1);
-                button.Click+=(_,_)=>{var today=DateTimeOffset.Now.Date;from.Date=preset.Item2<0?new DateTime(today.Year,today.Month,1):today.AddDays(-preset.Item2);to.Date=today;};
+                button.Click+=(_,_)=>{explicitDatePresets.Add(field.Item1);var today=DateTimeOffset.Now.Date;from.Date=preset.Item2<0?new DateTime(today.Year,today.Month,1):today.AddDays(-preset.Item2);to.Date=today;};
                 Grid.SetColumn(button,presetIndex%2);Grid.SetRow(button,presetIndex/2);presetIndex++;DatePresetButtons[field.Item1+":"+preset.Item1]=button;
                 presets.Children.Add(button);
             }
@@ -189,7 +190,7 @@ internal sealed class AdvancedFilterEditor
         var dates = original.Dates.ToDictionary(d => d.Field);
         foreach (var (key, boxes) in Dates)
         {
-            if ((boxes.From.Date, boxes.To.Date) == initialDates[key]) continue; // Preserve exact clock and sub-day bounds on an unchanged draft.
+            if (!explicitDatePresets.Contains(key) && (boxes.From.Date, boxes.To.Date) == initialDates[key]) continue; // Preserve exact bounds only when no explicit whole-day preset was chosen.
             if (boxes.From.Date is null && boxes.To.Date is null) { dates.Remove(key); continue; }
             if (boxes.From.Date is not { } start || boxes.To.Date is not { } end) throw new ArgumentException("日期范围需要同时选择起始和结束日期。清除时请将两项都留空。");
             string clock = dates.GetValueOrDefault(key)?.Clock ?? (key == "captured" ? "captureWall" : "utc");

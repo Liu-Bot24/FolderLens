@@ -37,7 +37,9 @@ public sealed class QueryLifecycleTests
         string timeout=Temp();await using(var catalog=new CatalogStore(timeout,new SnapshotLimits{SoftDeadline=TimeSpan.Zero,HardDeadline=TimeSpan.FromTicks(1)}))
         {
             await catalog.Initialize();await catalog.SeedBenchmark(4096);
-            await Assert.ThrowsAsync<TimeoutException>(()=>catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Sort=new("allocatedBytes")},1,1));
+            var timedOut=await Assert.ThrowsAsync<TimeoutException>(()=>catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Sort=new("allocatedBytes")},1,1));
+            Assert.Equal("Timeout",timedOut.Data["FolderLens.SnapshotFailure"]);
+            Assert.True(Guid.TryParse(timedOut.Data["FolderLens.CandidateId"] as string,out _));
             Assert.Equal(0,await Sessions(timeout,c=>Scalar(c,"SELECT count(*) FROM ResultSessions WHERE state='ready'")));
         }
         string small=Temp();await using(var catalog=new CatalogStore(small,new SnapshotLimits{SessionDiskBytes=262144}))
@@ -45,6 +47,7 @@ public sealed class QueryLifecycleTests
             await catalog.Initialize();await catalog.SeedBenchmark(4096);
             var error=await Record.ExceptionAsync(()=>catalog.CreateSnapshot(new FilterSpec{RootId="benchmark"},1,1));
             Assert.True(error is IOException or SqliteException { SqliteErrorCode:13 },$"Expected session disk budget failure, got {error}");
+            Assert.Contains(error.Data["FolderLens.SnapshotFailure"] as string,new[]{"SessionDiskLimit","DiskFull"});
             Assert.Equal(0,await Sessions(small,c=>Scalar(c,"SELECT count(*) FROM ResultSessions WHERE state='ready'")));
             Assert.Equal(0,await Sessions(small,c=>Scalar(c,"SELECT count(*) FROM ResultSessions WHERE state='building'")));
         }

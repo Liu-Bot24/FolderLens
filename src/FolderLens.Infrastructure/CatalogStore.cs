@@ -346,9 +346,11 @@ public sealed partial class CatalogStore : IAsyncDisposable
             interrupt.Dispose();deadline.DisposeAsync().AsTask().GetAwaiter().GetResult();
             string code=cancellation.IsCancellationRequested?"Cancelled":resourceFault switch {1=>"Timeout",2=>"CatalogWalLimit",3=>"SessionDiskLimit",_=>ex is SqliteException {SqliteErrorCode:13}?"DiskFull":"SnapshotFailed"};
             if(started)Execute(session,"UPDATE ResultSessions SET state=$state,error_code=$error,completed_utc_ticks=$now WHERE session_id=$id",("$state",cancellation.IsCancellationRequested?"cancelled":"failed"),("$error",code),("$now",DateTime.UtcNow.Ticks),("$id",id));
-            if(cancellation.IsCancellationRequested)throw new OperationCanceledException(cancellation);
-            if(resourceFault==1)throw new TimeoutException("结果快照超过硬期限；已保留之前的结果。",ex);
-            if(resourceFault is 2 or 3)throw new IOException("结果快照触及 WAL 或会话磁盘预算；可重试。",ex);
+            Exception Classified(Exception error){error.Data["FolderLens.SnapshotFailure"]=code;error.Data["FolderLens.CandidateId"]=id;return error;}
+            if(cancellation.IsCancellationRequested)throw Classified(new OperationCanceledException(cancellation));
+            if(resourceFault==1)throw Classified(new TimeoutException("结果快照超过硬期限；已保留之前的结果。",ex));
+            if(resourceFault is 2 or 3)throw Classified(new IOException("结果快照触及 WAL 或会话磁盘预算；可重试。",ex));
+            Classified(ex);
             throw;
         }
         finally { deadline.DisposeAsync().AsTask().GetAwaiter().GetResult(); }

@@ -27,7 +27,7 @@
         "properties": {
           "action": { "enum": ["include", "exclude", "keep"] },
           "target": { "enum": ["name", "path"] },
-          "match": { "enum": ["equals", "contains", "startsWith", "regex"] },
+          "match": { "enum": ["equals", "contains", "startsWith", "wildcard", "regex"] },
           "pattern": { "type": "string", "minLength": 1, "maxLength": 512 },
           "includeChildren": { "type": "boolean", "default": true },
           "enabled": { "type": "boolean", "default": true }

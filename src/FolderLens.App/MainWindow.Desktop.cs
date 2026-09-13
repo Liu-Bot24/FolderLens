@@ -115,7 +115,6 @@ public sealed partial class MainWindow
         if(!controlsReady||suppressFilters)return;
         if(ReferenceEquals(sender,Category))
         {
-            if(e.RemovedItems.OfType<ComboBoxItem>().FirstOrDefault()?.Tag is string previous)categoryDetailViews[previous]=DetailsMode.IsChecked==true;
             string category=Tag(Category);
             bool details=categoryDetailViews.TryGetValue(category,out bool preferred)?preferred:category is not ("image" or "video" or "media");
             if((DetailsMode.IsChecked==true)!=details){DetailsMode.IsChecked=details;ToggleView(this,new());}

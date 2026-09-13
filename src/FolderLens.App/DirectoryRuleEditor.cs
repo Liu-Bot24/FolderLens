@@ -13,7 +13,7 @@ internal sealed class DirectoryRuleEditor
     private readonly TextBlock feedback=new(){TextWrapping=TextWrapping.Wrap};
     private readonly ComboBox action=Options("操作",("排除","exclude"),("仅查看","include"),("例外保留","keep"));
     private readonly ComboBox target=Options("匹配内容",("文件夹名称","name"),("相对路径","path"));
-    private readonly ComboBox match=Options("匹配方式",("完全相同","equals"),("包含","contains"),("开头是","startsWith"),("正则表达式（高级）","regex"));
+    private readonly ComboBox match=Options("匹配方式",("完全相同","equals"),("包含","contains"),("开头是","startsWith"),("通配符","wildcard"),("正则表达式（高级）","regex"));
     private readonly TextBox pattern=new(){Header="名称或规则",PlaceholderText="例如：仅预览"};
     private readonly CheckBox children=new(){Content="包括匹配文件夹的子文件夹",IsChecked=true};
     private int editingIndex=-1;
@@ -36,6 +36,7 @@ internal sealed class DirectoryRuleEditor
             add.Content="保存规则";cancelEdit.Visibility=Visibility.Visible;pattern.Focus(FocusState.Programmatic);
         };
         View.Children.Add(action);View.Children.Add(target);View.Children.Add(match);View.Children.Add(pattern);View.Children.Add(children);
+        View.Children.Add(new TextBlock{Text="通配符：* 匹配任意长度，? 匹配一个字符，都不跨越文件夹层级。例如 cache* 匹配 cache 和 cache01。子文件夹由上方勾选项控制。",TextWrapping=TextWrapping.Wrap});
         var browse=new Button{Content="选择文件夹…"};browse.Click+=async(_,_)=>
         {
             try{string? path=await pick();if(path is null||cancellation.IsCancellationRequested)return;target.SelectedIndex=1;match.SelectedIndex=0;pattern.Text=path;}
@@ -76,9 +77,9 @@ internal sealed class DirectoryRuleEditor
         for(int i=0;i<rules.Count;i++)
         {
             int index=i;var rule=rules[index];
-            var label=new TextBlock{Text=$"{(rule.Action=="include"?"仅查看":rule.Action=="keep"?"例外保留":"排除")} · {(rule.Target=="name"?"名称":"路径")} · {rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是",_=>"正则"}}：{rule.Pattern}",TextWrapping=TextWrapping.Wrap};
+            var label=new TextBlock{Text=$"{(rule.Action=="include"?"仅查看":rule.Action=="keep"?"例外保留":"排除")} · {(rule.Target=="name"?"名称":"路径")} · {rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是","wildcard"=>"通配符",_=>"正则"}}：{rule.Pattern}",TextWrapping=TextWrapping.Wrap};
             var box=new CheckBox{IsChecked=rule.Enabled,Content=label};
-            ToolTipService.SetToolTip(box,$"{rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是",_=>"正则表达式"}}；{(rule.IncludeChildren?"包括子文件夹":"仅本层文件")}");
+            ToolTipService.SetToolTip(box,$"{rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是","wildcard"=>"通配符",_=>"正则表达式"}}；{(rule.IncludeChildren?"包括子文件夹":"仅本层文件")}");
             box.Checked+=(_,_)=>{rules[index]=rules[index] with{Enabled=true};list.SelectedIndex=index;feedback.Text="";};
             box.Unchecked+=(_,_)=>{rules[index]=rules[index] with{Enabled=false};list.SelectedIndex=index;feedback.Text="";};list.Items.Add(box);
         }
