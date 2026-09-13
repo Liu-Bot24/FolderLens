@@ -7,6 +7,19 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private TreeViewNode? activeTreeRoot;
+    private TreeViewNode? computerTreeRoot;
+    private sealed record NavigationGroup(string Label){public override string ToString()=>Label;}
+    private async Task InitializeNavigationTree()
+    {
+        var locations=await Task.Run(NavigationLocations.Read,lifetime.Token);
+        if(closing)return;
+        foreach(var place in locations.Places)
+            FolderTree.RootNodes.Add(new TreeViewNode{Content=new FolderNode(place.Path,place.Label),HasUnrealizedChildren=true});
+        computerTreeRoot=new TreeViewNode{Content=new NavigationGroup("此电脑"),IsExpanded=true};
+        foreach(string drive in locations.Drives)
+            computerTreeRoot.Children.Add(new TreeViewNode{Content=new FolderNode(drive,drive.TrimEnd('\\')),HasUnrealizedChildren=true});
+        FolderTree.RootNodes.Add(computerTreeRoot);
+    }
     private Task? treeRefreshTask;
     private bool treeRefreshPending;
     private long nextTreeRefresh;
@@ -25,29 +38,36 @@ public sealed partial class MainWindow
     {
         physicalTreeStop.Cancel();physicalTreeStop.Dispose();physicalTreeStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var existing=new Queue<TreeViewNode>(FolderTree.RootNodes);
+        TreeViewNode? closest=null;int closestLength=0;
         while(existing.TryDequeue(out var candidate))
         {
-            if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.Ordinal))
+            if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.OrdinalIgnoreCase))
             {
                 activeTreeRoot=candidate;
                 for(var ancestor=candidate;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
                 FolderTree.SelectedNode=candidate;nextTreeRefresh=0;physicalTreeTask=RefreshAncestors(candidate,rootChangeVersion,physicalTreeStop.Token);return;
             }
+            if(candidate.Content is FolderNode {PageOffset:null} ancestorFolder&&ancestorFolder.Path.Length>closestLength&&
+                path.StartsWith(ancestorFolder.Path.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))
+            {closest=candidate;closestLength=ancestorFolder.Path.Length;}
             foreach(var child in candidate.Children)existing.Enqueue(child);
         }
-        FolderTree.RootNodes.Clear();
-        TreeViewNode? parent=null;
+        TreeViewNode? parent=closest;
         var ancestors=new Stack<string>();
-        for(string? current=path;current is not null;current=Path.GetDirectoryName(current))ancestors.Push(current);
+        string? stopAt=(closest?.Content as FolderNode)?.Path;
+        for(string? current=path;current is not null&&!string.Equals(current,stopAt,StringComparison.OrdinalIgnoreCase);current=Path.GetDirectoryName(current))ancestors.Push(current);
         foreach(string ancestor in ancestors)
         {
             var node=new TreeViewNode{Content=new FolderNode(ancestor,FolderLabel(ancestor)),HasUnrealizedChildren=true};
-            if(parent is null)FolderTree.RootNodes.Add(node);else parent.Children.Add(node);
+            if(parent is null)
+            {
+                if(computerTreeRoot is not null)computerTreeRoot.Children.Add(node);else FolderTree.RootNodes.Add(node);
+            }
+            else parent.Children.Add(node);
             node.IsExpanded=true;parent=node;
         }
         activeTreeRoot=parent;FolderTree.SelectedNode=parent;
-        foreach(string location in new[]{Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"Downloads")}.Where(p=>p.Length>0&&!string.Equals(p,path,StringComparison.OrdinalIgnoreCase)).Distinct())
-            FolderTree.RootNodes.Add(new TreeViewNode{Content=new FolderNode(location,FolderLabel(location)),HasUnrealizedChildren=true});
+        for(var ancestor=parent;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
         nextTreeRefresh=0;
         if(parent is not null)physicalTreeTask=RefreshAncestors(parent,rootChangeVersion,physicalTreeStop.Token);
     }

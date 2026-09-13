@@ -21,6 +21,7 @@ public sealed partial class MainWindow
             if(range.Value.Max is {} maximum)parts.Add($"{label} ≤ {Format(maximum)}");
         }
         if(filter.Formats.Length>0)parts.Add("格式："+string.Join("、",filter.Formats));
+        if(filter.FileExtensions.Length>0)parts.Add("扩展名："+string.Join("、",filter.FileExtensions.Select(value=>new ExtensionOption(value).Label)));
         if(filter.Raw!="any")parts.Add(filter.Raw=="only"?"仅 RAW":"排除 RAW");
         if(filter.Animation!="any")parts.Add(filter.Animation=="animated"?"仅动图":"仅静态图");
         if(!filter.Recursive)parts.Add("不穿透子目录");

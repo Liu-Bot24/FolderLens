@@ -15,6 +15,11 @@
     "sort"
   ],
   "properties": {
+    "fileExtensions": {
+      "type": "array", "maxItems": 64, "uniqueItems": true,
+      "items": { "type": "string", "maxLength": 255 },
+      "description": "Explicit extension choices, intersected with category extensions. Empty array means unrestricted; an empty string selects files without an extension. Runtime rejects path characters and requires lowercase."
+    },
     "extensions": {
       "type": "array", "maxItems": 64, "uniqueItems": true,
       "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._+-]{0,31}$" }
