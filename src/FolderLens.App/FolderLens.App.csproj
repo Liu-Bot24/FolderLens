@@ -8,4 +8,19 @@
  </PropertyGroup>
  <ItemGroup><ProjectReference Include="../FolderLens.Infrastructure/FolderLens.Infrastructure.csproj"/><PackageReference Include="Microsoft.WindowsAppSDK"/><PackageReference Include="Microsoft.Graphics.Win2D"/><PackageReference Include="CommunityToolkit.Mvvm"/></ItemGroup>
  <ItemGroup><Content Include="Assets\FolderLens.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/></ItemGroup>
+ <ItemGroup>
+  <ProjectReference Include="../FolderLens.Content.Worker/FolderLens.Content.Worker.csproj" ReferenceOutputAssembly="false" />
+  <ProjectReference Include="../FolderLens.Media.Worker/FolderLens.Media.Worker.csproj" ReferenceOutputAssembly="false" />
+  <ProjectReference Include="../FolderLens.Scan.Worker/FolderLens.Scan.Worker.csproj" ReferenceOutputAssembly="false" />
+ </ItemGroup>
+ <Target Name="StageMatchingWorkers" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+  <ItemGroup>
+   <ContentWorkerFiles Include="../FolderLens.Content.Worker/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/**/*" Exclude="**/*.pdb" />
+   <MediaWorkerFiles Include="../FolderLens.Media.Worker/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/**/*" Exclude="**/*.pdb" />
+   <ScanWorkerFiles Include="../FolderLens.Scan.Worker/bin/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/**/*" Exclude="**/*.pdb" />
+  </ItemGroup>
+  <Copy SourceFiles="@(ContentWorkerFiles)" DestinationFiles="@(ContentWorkerFiles->'$(TargetDir)content-worker/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  <Copy SourceFiles="@(MediaWorkerFiles)" DestinationFiles="@(MediaWorkerFiles->'$(TargetDir)workers/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  <Copy SourceFiles="@(ScanWorkerFiles)" DestinationFiles="@(ScanWorkerFiles->'$(TargetDir)scan-worker/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+ </Target>
 </Project>

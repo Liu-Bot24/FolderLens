@@ -93,7 +93,8 @@ public sealed partial class MainWindow
         PreviewFilePath.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
         bool video=selected?.Kind=="video",picture=selected?.Kind=="image";
         UpdateViewerLockToggle();
-        PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=video?Visibility.Collapsed:Visibility.Visible;
+        PreviewReturn.Visibility=immersive&&!fullScreen?Visibility.Visible:Visibility.Collapsed;
+        PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=picture?Visibility.Visible:Visibility.Collapsed;
         PreviewExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
         foreach(var item in viewerActionButtons)
         {

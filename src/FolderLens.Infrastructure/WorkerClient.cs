@@ -163,7 +163,8 @@ public sealed class WorkerClient(string executable,string tempRoot,WorkerPriorit
         try
         {
             await pipe.WaitForConnectionAsync(startup.Token).ConfigureAwait(false);var hello=await WorkerProtocol.Read(pipe,startup.Token).ConfigureAwait(false);
-            if(hello.Type!="hello"||hello.Nonce!=nonce||hello.WorkerInstanceId!=instance||hello.BuildId!=WorkerProtocol.BuildId)throw new InvalidDataException("Worker handshake failed.");
+            if(hello.Type!="hello"||hello.Nonce!=nonce||hello.WorkerInstanceId!=instance)throw new InvalidDataException("预览组件身份验证失败。");
+            if(hello.BuildId!=WorkerProtocol.BuildId)throw new InvalidDataException("预览组件与主程序版本不一致，请更新完整程序。");
         }
         catch{await Stop().ConfigureAwait(false);throw;}
     }
