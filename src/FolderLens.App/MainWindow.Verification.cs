@@ -61,6 +61,8 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-keyboard-completion")){await VerifyKeyboardCompletion(source,report);return;}
             if(arguments.Contains("--verify-tree-current-folder")){await VerifyTreeCurrentFolder(source,png,report);return;}
             if(arguments.Contains("--verify-press-gesture")){await VerifyPressGesture(source,report);return;}
+            if(arguments.Contains("--verify-fit-lock")){await VerifyFitLock(source,report);return;}
+            if(arguments.Contains("--verify-filmstrip")){await VerifyFilmstrip(report);return;}
             if(arguments.Contains("--verify-group-collapse")){await VerifyGroupCollapse(source,png,report);return;}
             if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}
             if(arguments.Contains("--verify-browser-status")){await VerifyBrowserStatusBar(source,report);return;}
