@@ -663,7 +663,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 await media!.Cover(path,output,info,token,edge,WorkerPriority.Foreground);
-                var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,output);
+                var bitmap=await LoadLocalBitmap(output);
                 if(current!=selection||token.IsCancellationRequested||resources!=imageResourceRevision){bitmap.Dispose();return;}
                 fitBitmap?.Dispose();fitBitmap=bitmap;
                 sourceWidth=bitmap.SizeInPixels.Width;sourceHeight=bitmap.SizeInPixels.Height;
@@ -676,15 +676,26 @@ public sealed partial class MainWindow : Window
     }
     private async Task<CanvasBitmap> LoadRenderedBitmap(ImageReply reply)
     {
+        CanvasBitmap? bitmap=null;
         try
         {
             // This is the worker-owned local output, never the original source.
-            // In the same-asset native comparison, path loading avoids the measured
-            // overhead of the managed Stream -> WinRT adapter.
+            // Close the native stream before releasing the worker asset. The path
+            // overload retains a file lock; the managed adapter adds measured cost.
             verifyPreviewStage?.Invoke("bitmapLoadStart");
-            var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,reply.AssetPath!);verifyPreviewStage?.Invoke("bitmapLoadDone");return bitmap;
+            bitmap=await LoadLocalBitmap(reply.AssetPath!);verifyPreviewStage?.Invoke("bitmapLoadDone");
+            return bitmap;
         }
-        finally{if(previewWorker is not null)await previewWorker.ReleaseAsset(reply);verifyPreviewStage?.Invoke("assetReleased");}
+        finally
+        {
+            try{if(previewWorker is not null)await previewWorker.ReleaseAsset(reply);verifyPreviewStage?.Invoke("assetReleased");}
+            catch{bitmap?.Dispose();throw;}
+        }
+    }
+    private async Task<CanvasBitmap> LoadLocalBitmap(string path)
+    {
+        using var stream=await Windows.Storage.Streams.FileRandomAccessStream.OpenAsync(path,Windows.Storage.FileAccessMode.Read);
+        return await CanvasBitmap.LoadAsync(ImageCanvas,stream);
     }
     private async Task PresentFit(ImageReply reply,long current,CancellationToken cancellation)
     {
