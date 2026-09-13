@@ -165,12 +165,13 @@ public sealed partial class MainWindow
     private void ResizePane(object sender,PointerRoutedEventArgs e){if(resizingPane&&!immersive)PreviewColumn.Width=new GridLength(Math.Clamp(e.GetCurrentPoint(BodyGrid).Position.X,220,Math.Max(220,Math.Min(650,BodyGrid.ActualWidth*.5))));}
     private void EndPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=false;PaneDivider.ReleasePointerCapture(e.Pointer);}
     private async void TogglePreview(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.ToggleWindowViewer);
+    private async void CloseExpandedPreview(object sender,RoutedEventArgs e)=>await ReturnToBrowser();
     private async Task SetImmersive(bool enabled)
     {
         if(enabled&&selected is null||!enabled&&!immersive)return;if(enabled&&!immersive)CaptureBrowserPosition();immersive=enabled;
         TreePane.Visibility=BrowserPane.Visibility=PaneDivider.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         Grid.SetRow(PreviewPane,enabled?0:1);Grid.SetRowSpan(PreviewPane,enabled?2:1);Grid.SetColumnSpan(PreviewPane,enabled?3:1);
-        PreviewPane.UpdateLayout();ImageCanvas.Invalidate();
+        UpdateViewerInformation();PreviewPane.UpdateLayout();ImageCanvas.Invalidate();
         if(!enabled){RestoreBrowserPosition();return;}
         if(selected is not null&&!previewLoading&&selected.Kind=="image")
         {
