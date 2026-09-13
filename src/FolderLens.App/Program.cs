@@ -10,6 +10,7 @@ public partial class LensApplication : Application
         var command=Environment.GetCommandLineArgs();
         if(command.Contains("--verify-refresh"))
         {
+            UnhandledException+=(_,error)=>Console.Error.WriteLine(error.Exception.ToString());
             if(command.Contains("--verify-dark"))RequestedTheme=ApplicationTheme.Dark;
             else if(command.Contains("--verify-light"))RequestedTheme=ApplicationTheme.Light;
         }

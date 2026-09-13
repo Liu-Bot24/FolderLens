@@ -19,6 +19,9 @@ public sealed partial class MainWindow
         await File.WriteAllTextAsync(Path.Combine(source,"document.pdf"),"fixture");
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         long previousCount=resultHandle!.Count;long beforeEpoch=epoch;
+        var legacy=Enumerable.Range(0,65).Select(i=>new ExclusionSpec("legacy-"+i,"hideView"))
+            .Concat([new(new string('a',513),"hideView"),new("legacy/A","hideView"),new("legacy/a","hideView")]).ToArray();
+        advanced=CurrentFilter() with{Exclusions=legacy};
         AdvancedFilters(this,new RoutedEventArgs());
         await WaitUntil(()=>advancedFilterDialog is {IsLoaded:true},TimeSpan.FromSeconds(3));
         var dialog=advancedFilterDialog!;
@@ -53,6 +56,7 @@ public sealed partial class MainWindow
         ((IInvokeProvider)new ButtonAutomationPeer(apply).GetPattern(PatternInterface.Invoke)).Invoke();
         await WaitUntil(()=>advancedFilterDialog is null&&!queryBusy&&resultHandle!.Count==previousCount-1,TimeSpan.FromSeconds(5));
         if(epoch!=beforeEpoch||advanced?.DirectoryRules.Length!=1)throw new InvalidOperationException("应用文件夹规则重新扫描或丢失规则。");
+        if(!advanced.Exclusions.SequenceEqual(legacy))throw new InvalidOperationException("旧版路径排除在编辑器往返时被改写或丢失。");
         var saved=CaptureView();ApplySavedFilter(saved.Filter);
         if(CurrentFilter().DirectoryRules.Length!=1)throw new InvalidOperationException("保存视图丢失文件夹规则。");
         long previousGeneration=generation;SelectTag(Category,"pdf");
@@ -62,7 +66,7 @@ public sealed partial class MainWindow
         var widthColumn=detailColumns.Single(c=>c.Field=="pixelCount");widthColumn.Resize(197);
         await SaveDetailWidths();await RestoreDetailWidths();
         if(widthColumn.SavedWidth!=197||widthColumn.Width.Value!=0)throw new InvalidOperationException("隐藏列丢失列宽或仍占据空间。");
-        var pdfRow=new FileRow(0);pdfRow.Fill((await catalog.ReadFirstPage(CurrentFilter())).Items.Single());
+        var pdfRow=new FileRow(0);pdfRow.Fill((await catalog!.ReadFirstPage(CurrentFilter())).Items.Single());
         if(pdfRow.FileIconVisibility!=Visibility.Visible||pdfRow.FileTypeBadge!="PDF")throw new InvalidOperationException("文档没有格式图标。");
         DetailsMode.IsChecked=false;ToggleView(this,new());previousGeneration=generation;SelectTag(Category,"image");
         await WaitUntil(()=>generation>previousGeneration&&!queryBusy,TimeSpan.FromSeconds(5));
@@ -87,6 +91,23 @@ public sealed partial class MainWindow
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,(uint)capture.PixelWidth,(uint)capture.PixelHeight,96,96,pixels);await encoder.FlushAsync();
         }
         report["documentCardVisible"]=true;report["columnVisibilityAndWidth"]=true;report["editSaveCancel"]=true;
+        var originalAdvanced=advanced;
+        advanced=CurrentFilter() with{DirectoryRules=Enumerable.Range(0,64).Select(i=>new DirectoryRule("exclude","name","equals","rule-"+i)).ToArray()};
+        var full=advanced;bool rejected=false;
+        try{ApplyDirectoryHideRule("new-folder");}catch(ArgumentException){rejected=true;}
+        if(!rejected||!ReferenceEquals(advanced,full))throw new InvalidOperationException("第65条隐藏规则污染了当前筛选。");
+        CurrentFilter().Validate();advanced=originalAdvanced;report["invalidHideDoesNotMutateFilter"]=true;
+        var prior=advanced;rejected=false;
+        try{ApplyDirectoryHideRule(new string('a',513));}catch(ArgumentException){rejected=true;}
+        if(!rejected||!ReferenceEquals(prior,advanced))throw new InvalidOperationException("超长隐藏路径污染了当前筛选。");
+        var ruleEditor=new DirectoryRuleEditor([new("exclude","name","equals","cache",Enabled:false),new("exclude","name","equals","cache")],()=>Task.FromResult<string?>(null),(_,_)=>throw new NotSupportedException(),lifetime.Token);
+        var ruleList=ruleEditor.View.Children.OfType<ListView>().Single();((CheckBox)ruleList.Items[1]).IsChecked=false;
+        ruleEditor.View.Children.OfType<TextBox>().Single().Text="another";
+        ((IInvokeProvider)new ButtonAutomationPeer(ruleEditor.View.Children.OfType<Button>().Single(b=>b.Content as string=="添加规则")).GetPattern(PatternInterface.Invoke)).Invoke();
+        ((CheckBox)ruleList.Items[1]).IsChecked=true;
+        if(ruleEditor.Read()[0].Enabled||!ruleEditor.Read()[1].Enabled)throw new InvalidOperationException("重复规则的勾选修改了其他行。");
+        DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());ApplySavedFilter(CurrentFilter() with{Kinds=["image"],Extensions=[]});
+        if(!categoryDetailViews.TryGetValue("pdf",out bool preference)||preference)throw new InvalidOperationException("恢复收藏前的用户网格偏好未记录。");
         report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;report["status"]="PASS";
     }
 }

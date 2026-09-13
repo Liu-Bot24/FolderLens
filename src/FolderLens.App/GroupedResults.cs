@@ -36,7 +36,13 @@ public sealed class BrowserFileGroup:ObservableObject
     public void Update(VirtualResults source,SnapshotGroup info,IReadOnlyList<RangeEdit> changes)
     {
         var previous=Info;this.source=source;Info=info;
-        if(!IsCollapsed)items.UpdateRanges(changes,index=>(FileRow)source[checked((int)info.Start)+index]!,value=>source.IndexOf(value) is var position&&position>=0?checked(position-(int)info.Start):-1);
+        if(!IsCollapsed)
+        {
+            FileRow Read(int index)=>(FileRow)source[checked((int)info.Start)+index]!;
+            int Locate(object? value)=>source.IndexOf(value) is var position&&position>=0?checked(position-(int)info.Start):-1;
+            if(changes.Sum(change=>(long)change.Added+change.Removed)>4096)items.Replace(checked((int)info.Count),Read,Locate);
+            else items.UpdateRanges(changes,Read,Locate);
+        }
         if(previous.RelativePath!=info.RelativePath)OnPropertyChanged(nameof(Title));
         if(previous.Bytes!=info.Bytes||previous.MatchCount!=info.MatchCount||previous.Count!=info.Count||previous.ScanState!=info.ScanState)OnPropertyChanged(nameof(Summary));
     }

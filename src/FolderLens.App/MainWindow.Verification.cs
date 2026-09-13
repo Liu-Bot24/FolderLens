@@ -230,6 +230,7 @@ public sealed partial class MainWindow
             report["cacheWriteFailureStillDisplaysImage"]=true;
             folderGrouping=new(true);sortDescending=false;await OpenRoot(source);
             if(metadataTask is not null)await metadataTask;await RefreshQuery();
+            FilesGrid.ScrollIntoView(results![0],ScrollIntoViewAlignment.Leading);Shell.UpdateLayout();
             await WaitUntil(()=>visible.Count>0&&visible.All(item=>item.Thumbnail is not null),TimeSpan.FromSeconds(10));
             var stableRows=visible.Where(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)).Select(item=>(Row:item,Container:FilesGrid.ContainerFromItem(item),Thumbnail:item.Thumbnail)).ToArray();
             await File.WriteAllBytesAsync(Path.Combine(first,"image-02a.png"),png);await File.WriteAllBytesAsync(Path.Combine(first,"image-08a.png"),png);

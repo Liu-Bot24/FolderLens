@@ -29,6 +29,17 @@ public sealed partial class MainWindow
         first=browserGroups!.Single(group=>group.Info.Id==first.Info.Id);second=browserGroups.Single(group=>group.Info.Id==second.Info.Id);
         source=results!;row=(FileRow)source[(int)second.Info.Start]!;await source.EnsureLoaded(row,lifetime.Token);
         if(!first.IsCollapsed||first.Items.Count!=0||ActiveBrowser.Items.Count!=second.Info.Count)throw new InvalidOperationException($"后台更新后折叠状态={first.IsCollapsed};组内={first.Items.Count};可见={ActiveBrowser.Items.Count};期望={second.Info.Count}。");
+        await WaitUntil(()=>row.Thumbnail is not null,TimeSpan.FromSeconds(8));
+        var retainedBinding=ActiveBrowser.ItemsSource;var retainedContainer=ActiveBrowser.ContainerFromItem(row);var retainedThumbnail=row.Thumbnail;
+        string addedDirectory=Path.Combine(directory,"C");Directory.CreateDirectory(addedDirectory);string addedFile=Path.Combine(addedDirectory,"third.png");
+        await File.WriteAllBytesAsync(addedFile,png);
+        await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);
+        if(browserGroups.Count!=3)throw new InvalidOperationException("折叠期间新增的组未发布。");
+        File.Delete(addedFile);
+        await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);Shell.UpdateLayout();
+        if(browserGroups.Count!=2||!ReferenceEquals(first,browserGroups[0])||!ReferenceEquals(second,browserGroups[1])||!ReferenceEquals(retainedBinding,ActiveBrowser.ItemsSource)||!ReferenceEquals(retainedContainer,ActiveBrowser.ContainerFromItem(row))||!ReferenceEquals(retainedThumbnail,row.Thumbnail))
+            throw new InvalidOperationException("存在折叠组时，增删其他组重建了未变化的可见图片。");
+        report["collapsedNeighborInsertRemoveRetainsVisibleCard"]=true;source=results!;
         ActiveBrowser.SelectedIndex=0;
         var ranges=SelectedOrdinals(ActiveBrowser);
         if(ranges.Count!=1||ranges[0].Start!=second.Info.Start||!ReferenceEquals(SelectionPreview(ActiveBrowser),row))throw new InvalidOperationException("折叠后选择映射到错误文件。");
@@ -36,11 +47,14 @@ public sealed partial class MainWindow
         if(ActiveBrowser.Items.Count!=second.Info.Count||!ReferenceEquals(ActiveBrowser.SelectedItem,row))throw new InvalidOperationException("详情视图未保留折叠与选择。");
         ToggleFolderGroup(second);Shell.UpdateLayout();await Task.Delay(60);
         if(ActiveBrowser.Items.Count!=0||browserGroups.Count!=2||!Children(ActiveBrowser).OfType<TextBlock>().Any(text=>text.Text==second.Title))throw new InvalidOperationException("全部折叠后标题未保留。");
+        UpdateBrowserEmptyState();if(BrowserEmptyState.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("全部折叠时空状态覆盖了分组标题。");
         ToggleFolderGroup(first);ToggleFolderGroup(second);Shell.UpdateLayout();
         if(ActiveBrowser.Items.Count!=source.Count)throw new InvalidOperationException("展开后数量不正确。");
         for(int i=0;i<source.Count;i++)if(((FileRow)ActiveBrowser.Items[i]).Ordinal!=i)throw new InvalidOperationException("展开后顺序改变。");
         ToggleFolderGroup(first);
-        UpdateBrowserResults(source,[first.Info],new Dictionary<string,IReadOnlyList<RangeEdit>>());Shell.UpdateLayout();
+        var priorView=ActiveBrowser.ItemsSource;
+        UpdateBrowserResults(source,[first.Info],new Dictionary<string,IReadOnlyList<RangeEdit>>{{first.Info.Id,Array.Empty<RangeEdit>()}});Shell.UpdateLayout();
+        if(!ReferenceEquals(priorView,ActiveBrowser.ItemsSource)||!ReferenceEquals(first,browserGroups[0]))throw new InvalidOperationException("移除分组替换了当前视图或保留分组。");
         if(browserGroups.Count!=1||!browserGroups[0].IsCollapsed||ActiveBrowser.Items.Count!=0)throw new InvalidOperationException("后台移除其他组时折叠状态丢失。");
         using var large=new VirtualResults(100000,(_,_)=>throw new InvalidOperationException("折叠不应读取文件。"));
         var info=new SnapshotGroup("large","large",0,100000,0,100000,"ready","all");

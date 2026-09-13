@@ -85,6 +85,7 @@ public sealed partial class MainWindow
             var editor=new AdvancedFilterEditor(CurrentFilter());
             using var dialogStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             var rules=CurrentFilter().Exclusions.Where(r=>r.Mode=="skipScan").ToList();
+            var legacyRules=CurrentFilter().Exclusions.Where(r=>r.Mode=="hideView").ToList();
             async Task<string?> PickDirectory()
             {
                 var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -96,9 +97,19 @@ public sealed partial class MainWindow
             var exclusions=editor.Section("文件夹筛选",true);
             var folderSection=editor.View.Children.Last();editor.View.Children.Remove(folderSection);editor.View.Children.Insert(0,folderSection);
             var previewCatalog=catalog!;string previewRootId=rootId;
-            var directoryEditor=new DirectoryRuleEditor(CurrentFilter().DirectoryRules.Concat(CurrentFilter().Exclusions.Where(r=>r.Mode=="hideView").Select(r=>new DirectoryRule("exclude","path","equals",r.RelativePath))).ToArray(),PickDirectory,
+            var directoryEditor=new DirectoryRuleEditor(CurrentFilter().DirectoryRules,PickDirectory,
                 (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token),dialogStop.Token);
             exclusions.Children.Add(directoryEditor.View);
+            if(legacyRules.Count>0)
+            {
+                var legacySection=editor.Section("已保存的路径排除",false);
+                legacySection.Children.Add(new TextBlock{Text="这些路径继续生效。选择一条路径并点击删除即可取消排除。上方预览不包含这里的路径排除。",TextWrapping=TextWrapping.Wrap});
+                var legacyList=new ListView{MaxHeight=180,ItemsSource=legacyRules.Select(r=>r.RelativePath).ToArray()};legacySection.Children.Add(legacyList);
+                var removeLegacy=new Button{Content="删除选中路径",IsEnabled=false};
+                legacyList.SelectionChanged+=(_,_)=>removeLegacy.IsEnabled=legacyList.SelectedIndex>=0;
+                removeLegacy.Click+=(_,_)=>{if(legacyList.SelectedIndex is var i&&i>=0){legacyRules.RemoveAt(i);legacyList.ItemsSource=legacyRules.Select(r=>r.RelativePath).ToArray();}};
+                legacySection.Children.Add(removeLegacy);
+            }
             var skipSection=editor.Section("不扫描的文件夹（高级）",rules.Count>0);
             skipSection.Children.Add(new TextBlock{Text="这些文件夹不进入索引，例外保留不能恢复其内容。修改后需要重新扫描。通常请使用上面的文件夹筛选。",TextWrapping=TextWrapping.Wrap});
             var list=new ListView{MaxHeight=144};
@@ -121,7 +132,7 @@ public sealed partial class MainWindow
                 try
                 {
                     if(closing||revision!=rootChangeVersion)throw new InvalidOperationException("当前目录已变化，请重新打开筛选。");
-                    candidate=editor.Read(rules.ToArray()) with{DirectoryRules=directoryEditor.Read()};candidate.Validate();error.Visibility=Visibility.Collapsed;
+                    candidate=editor.Read(rules.Concat(legacyRules).ToArray()) with{DirectoryRules=directoryEditor.Read()};candidate.Validate();error.Visibility=Visibility.Collapsed;
                 }
                 catch(Exception ex){candidate=null;args.Cancel=true;error.Text=ex.Message;error.Visibility=Visibility.Visible;}
             };

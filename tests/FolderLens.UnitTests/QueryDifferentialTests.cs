@@ -112,7 +112,7 @@ public sealed class QueryDifferentialTests
         if(f.Raw=="only"){Known(r.Kind=="image");Test("raw",v=>(bool)v,"identity");}
         if(f.Raw=="exclude"&&r.Kind=="image")Test("raw",v=>!(bool)v,"identity");
         if(f.Animation!="any"){Known(r.Kind=="image");Test("animation",v=>(bool)v==(f.Animation=="animated"),"animation");}
-        bool GeometryApplicable()=>r.Kind=="image"||(r.Kind=="video"&&f.Kinds.Contains("video"));
+        bool GeometryApplicable()=>r.Kind is "image" or "video";
         foreach(var range in f.Ranges)
         {
             string group=range.Key=="allocatedBytes"?"allocation":range.Key=="durationMs"?"media":"imageGeometry";

@@ -30,6 +30,7 @@ public sealed partial class MainWindow
             if(TextContent.FontSize!=18)failures.Add("放大文字没有更新字号");
             if(name.EndsWith("md"))
             {
+                if(markdown?.CoreWebView2 is null)throw new InvalidOperationException("Markdown 尚未就绪："+QualityLabel.Text+"；"+string.Join("；",failures));
                 string zoomValue=await markdown!.CoreWebView2.ExecuteScriptAsync("document.body.style.zoom");
                 if(zoomValue!="\"1.125\"")failures.Add("Markdown 字号没有跟随阅读按钮");
                 if(markdown.CoreWebView2.Settings.IsScriptEnabled)failures.Add("阅读字号意外允许文档脚本执行");
@@ -41,6 +42,8 @@ public sealed partial class MainWindow
             if(ReaderNextPage.IsEnabled||ReaderPreviousPage.IsEnabled)failures.Add("单页文档仍允许翻到空白页");
             var list=FilesGrid.ItemsSource;string beforeRoot=root;var current=selected;
             await SetImmersive(true);
+            Shell.UpdateLayout();
+            if(PreviewReturn.ActualWidth<96)failures.Add("返回文件列表文字被图标按钮宽度裁切");
             var exit=PreviewActions.Children.OfType<Button>().FirstOrDefault(b=>b.Content as string=="返回文件列表");
             if(exit is null||exit.Visibility!=Visibility.Visible)failures.Add("阅读页没有返回文件列表入口");
             else
