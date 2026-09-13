@@ -29,6 +29,7 @@ public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorker
                     if(packet.State is "failed" or "excluded"){availability="unknown";break;}
                 }
             }
+            catch(ScanWorkerUnavailableException){throw;}
             catch(TimeoutException){availability="offline";}
             catch(IOException){availability="offline";}
         }

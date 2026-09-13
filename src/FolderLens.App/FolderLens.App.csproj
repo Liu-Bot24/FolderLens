@@ -17,6 +17,9 @@
       SDK publish list. Use this build's TargetDir, including custom OutDir. -->
  <Target Name="PublishCompiledXaml" AfterTargets="ComputeFilesToPublish">
   <ItemGroup>
+   <!-- Non-reference executable projects leak apphosts/configs into the SDK
+        publish list without their assemblies. Workers are published separately. -->
+   <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Scan.Worker.exe' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Scan.Worker.deps.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Scan.Worker.runtimeconfig.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Content.Worker.exe' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Content.Worker.deps.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Content.Worker.runtimeconfig.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Media.Worker.exe' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Media.Worker.deps.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'FolderLens.Media.Worker.runtimeconfig.json'" />
    <CompiledXamlResource Include="$(TargetDir)**/*.xbf;$(TargetDir)$(TargetName).pri" />
    <ResolvedFileToPublish Include="@(CompiledXamlResource)" RelativePath="%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="Always" />
   </ItemGroup>

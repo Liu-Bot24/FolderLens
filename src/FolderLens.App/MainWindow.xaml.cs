@@ -178,14 +178,14 @@ public sealed partial class MainWindow : Window
             if(!preserveDirectoryScope&&!string.Equals(root,path,StringComparison.Ordinal)&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
             DirectoryScopePanel.Visibility=Visibility.Collapsed;
             RootPath.Text=path;ShowTreeRoot(path);UpdateNavigationButtons();
-            browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
+            browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
             FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在打开文件夹…";
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
             monitor?.Dispose();monitor=null;
             await RootTaskRetirement.Wait(scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
             if(requested!=rootChangeVersion)return;
-            scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var opened=await new RootIdentityResolver(catalog).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;
+            scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,FolderLabel(path),rootId,"",path);
             QueueTreeRefresh();
             if(resultHandle is {} oldHandle)await catalog.ReleaseSnapshot(oldHandle.Id);
@@ -218,7 +218,7 @@ public sealed partial class MainWindow : Window
             if(reconcilePending)_=Reconcile();
         }
         catch(OperationCanceledException){}
-        catch(Exception ex){if(requested==rootChangeVersion)ShowBrowserError(ex);}
+        catch(Exception ex){if(requested==rootChangeVersion)ShowScanError(ex);}
         finally{if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}if(requested==rootChangeVersion)UpdateBrowserEmptyState();}
     }
     private async Task Reconcile(bool force=false)
@@ -229,7 +229,7 @@ public sealed partial class MainWindow : Window
         var rootToken=scanStop.Token;long rootVersion=rootChangeVersion;
         try{if(force)Status.Text="正在核对目录，保留已有结果…";var task=Task.Run(()=>force?new DirectoryIndexer(catalog).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken,true):new DirectoryIndexer(catalog).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken));scanTask=task;var report=await task;if(rootVersion==rootChangeVersion&&activeId==rootId&&!closing&&!rootToken.IsCancellationRequested)_=StartMetadataRefresh();if(rootVersion==rootChangeVersion&&activeId==rootId)Status.Text=report.State=="ready"?"目录变化已核对。当前浏览顺序保持不变。":"部分目录尚未就绪，将自动重试；已保留当前结果。";}
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
-        catch(Exception ex){if(rootVersion==rootChangeVersion)ShowError(ex);}
+        catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}
         finally{if(reconcilePending&&!closing&&rootVersion==rootChangeVersion&&!rootToken.IsCancellationRequested)_=Reconcile();}
     }
     private async void ApplyFilters(object sender,RoutedEventArgs e){FilterFlyout?.Hide();searchTimer?.Stop();await ApplyBrowserFilters();}
@@ -238,6 +238,7 @@ public sealed partial class MainWindow : Window
     private async Task RefreshQuery(bool preserveViewport=false,bool scanPreview=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
+        if(browserScanError is not null&&!string.Equals(root,RootPath.Text,StringComparison.Ordinal))return;
         long previewSelection=selection;string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
