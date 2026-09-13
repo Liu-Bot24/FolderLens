@@ -18,7 +18,7 @@ public sealed partial class MainWindow
 {
     private enum ViewerAction { Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
     private enum ViewerSizing { Automatic,Locked }
-    private enum ViewerScaleIntent { Fit,Width,Height,Custom }
+    private enum ViewerScaleIntent { Default,Fit,Width,Height,Custom }
     private enum ViewerGesture { None,Pressed,Dragging,Magnifier }
     private sealed record ViewerBinding(VirtualKey Key,VirtualKeyModifiers Modifiers,ViewerAction Action);
     private static readonly ViewerBinding[] ViewerBindings=
@@ -38,7 +38,7 @@ public sealed partial class MainWindow
         new(VirtualKey.R,0,ViewerAction.Rotate),new(VirtualKey.F10,VirtualKeyModifiers.Shift,ViewerAction.ContextMenu),new(VirtualKey.Application,0,ViewerAction.ContextMenu)
     ];
     private ViewerSizing viewerSizing=ViewerSizing.Automatic;
-    private ViewerScaleIntent viewerScaleIntent=ViewerScaleIntent.Fit;
+    private ViewerScaleIntent viewerScaleIntent=ViewerScaleIntent.Default,viewerLockedIntent=ViewerScaleIntent.Custom;
     private double viewerLockedPhysicalScale=1,viewerCustomPhysicalScale=1;
     private long viewerSizedSelection=-1,viewerGestureSelection,viewerGestureRevision;
     private ViewerGesture viewerGesture;
@@ -54,7 +54,7 @@ public sealed partial class MainWindow
     private Vector2 lensNativeCenter;
     private readonly SemaphoreSlim viewerPreferencesGate=new(1,1);
     private MenuFlyout? viewerContextMenu;
-    private sealed record ViewerPreferences(string Wheel="next",string Sizing="auto",double LockedPhysicalScale=1,PressZoomOptions? PressZoom=null,int PressZoomVersion=0);
+    private sealed record ViewerPreferences(string Wheel="next",string Sizing="auto",double LockedPhysicalScale=1,PressZoomOptions? PressZoom=null,int PressZoomVersion=0,string LockedIntent="Custom");
 
     private void InitializeViewerInput()
     {
@@ -199,8 +199,8 @@ public sealed partial class MainWindow
                 case ViewerAction.FitHeight: viewerScaleIntent=ViewerScaleIntent.Height;ApplyViewerScaleIntent();PanViewerToStart(vertical:false);break;
                 case ViewerAction.LockSizing:
                     viewerSizing=viewerSizing==ViewerSizing.Locked?ViewerSizing.Automatic:ViewerSizing.Locked;
-                    if(viewerSizing==ViewerSizing.Locked){viewerLockedPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;viewerScaleIntent=ViewerScaleIntent.Custom;viewerCustomPhysicalScale=viewerLockedPhysicalScale;}
-                    await SaveViewerPreferences();break;
+                    if(viewerSizing==ViewerSizing.Locked){viewerLockedIntent=viewerScaleIntent;viewerLockedPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;viewerCustomPhysicalScale=viewerLockedPhysicalScale;}
+                    await RefreshViewerPixels();await SaveViewerPreferences();return;
                 case ViewerAction.Rotate: case ViewerAction.RotateCounterclockwise: if(selected?.Kind!="image")return;rotation=(rotation+(action==ViewerAction.Rotate?1:3))%4;if(viewerScaleIntent is ViewerScaleIntent.Width or ViewerScaleIntent.Height)ApplyViewerScaleIntent();break;
             }
             RememberViewerScale();ClampPan();await RefreshViewerPixels();
@@ -223,19 +223,19 @@ public sealed partial class MainWindow
         pan=offset-(offset-pan)*(float)(zoom/old);viewerScaleIntent=ViewerScaleIntent.Custom;RememberViewerScale();ClampPan();await RefreshViewerPixels();
     }
     private void RememberViewerScale()
-    {viewerCustomPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;if(viewerSizing==ViewerSizing.Locked){viewerLockedPhysicalScale=viewerCustomPhysicalScale;_=SaveViewerPreferences();}}
+    {viewerCustomPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;if(viewerSizing==ViewerSizing.Locked){viewerLockedIntent=viewerScaleIntent;viewerLockedPhysicalScale=viewerCustomPhysicalScale;_=SaveViewerPreferences();}}
     private async Task RefreshViewerPixels()
     {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"相机内嵌预览 · 原始开发未完成":"清晰适应屏幕";}
     private void ApplyViewerScaleIntent()
     {
-        zoom=viewerScaleIntent switch{ViewerScaleIntent.Fit=>0,ViewerScaleIntent.Width=>ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ViewerScaleIntent.Height=>ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth),_=>viewerCustomPhysicalScale/Shell.XamlRoot.RasterizationScale};
+        zoom=viewerScaleIntent switch{ViewerScaleIntent.Default or ViewerScaleIntent.Fit=>0,ViewerScaleIntent.Width=>ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ViewerScaleIntent.Height=>ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth),_=>viewerCustomPhysicalScale/Shell.XamlRoot.RasterizationScale};
     }
     private void ApplyViewerSizing()
     {
         if(sourceWidth<=0||sourceHeight<=0)return;
-        if(selected?.Kind=="video"){zoom=0;pan=Vector2.Zero;rotation=0;ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();return;}
+        if(selected?.Kind=="video"){viewerScaleIntent=ViewerScaleIntent.Fit;zoom=0;pan=Vector2.Zero;rotation=0;ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();return;}
         if(viewerSizedSelection!=selection)
-        {viewerSizedSelection=selection;ResetViewerGesture();rotation=0;pan=Vector2.Zero;viewerScaleIntent=viewerSizing==ViewerSizing.Locked?ViewerScaleIntent.Custom:ViewerScaleIntent.Fit;viewerCustomPhysicalScale=viewerLockedPhysicalScale;}
+        {viewerSizedSelection=selection;ResetViewerGesture();rotation=0;pan=Vector2.Zero;viewerScaleIntent=viewerSizing==ViewerSizing.Locked?viewerLockedIntent:ViewerScaleIntent.Default;viewerCustomPhysicalScale=viewerLockedPhysicalScale;}
         ApplyViewerScaleIntent();ClampPan();ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(zoom>0&&!previewLoading)_=LoadVisibleTiles();
     }
     private void UpdateViewerCursor()=>PreviewSurface.SetViewerCursor(selected?.Kind=="image"&&(viewerGesture==ViewerGesture.Dragging||ViewerHasOverflow())?ViewerCursorFeedback.Pan:ViewerCursorFeedback.Arrow);
@@ -425,6 +425,7 @@ public sealed partial class MainWindow
             // A fitted tiny image can exceed the manual zoom range. Preserve its
             // locked physical scale across restart, with finite defensive bounds.
             viewerLockedPhysicalScale=double.IsFinite(state.LockedPhysicalScale)?Math.Clamp(state.LockedPhysicalScale,.000001,65536):1;
+            viewerLockedIntent=Enum.TryParse<ViewerScaleIntent>(state.LockedIntent,out var intent)&&Enum.IsDefined(intent)?intent:ViewerScaleIntent.Custom;
             viewerPressZoom=(state.PressZoom??new PressZoomOptions()).Normalize();
             if(state.PressZoomVersion==0&&viewerPressZoom.Percent==100)viewerPressZoom=viewerPressZoom with{Percent=250};
             SyncPressZoomSelector();
@@ -435,7 +436,7 @@ public sealed partial class MainWindow
     private async Task SaveViewerPreferences()
     {
         if(settings is null||viewerPreferencesLoading)return;await viewerPreferencesGate.WaitAsync();
-        try{await settings.Save("viewer.json",new ViewerPreferences(wheelBehavior,viewerSizing==ViewerSizing.Locked?"locked":"auto",viewerLockedPhysicalScale,viewerPressZoom,1));}
+        try{await settings.Save("viewer.json",new ViewerPreferences(wheelBehavior,viewerSizing==ViewerSizing.Locked?"locked":"auto",viewerLockedPhysicalScale,viewerPressZoom,1,viewerLockedIntent.ToString()));}
         catch(Exception ex){ShowError(ex);}finally{viewerPreferencesGate.Release();}
     }
     [DllImport("user32.dll")]private static extern uint GetDoubleClickTime();

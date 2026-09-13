@@ -261,6 +261,7 @@ public sealed partial class MainWindow : Window
                 }
                 var initial=first.Items.Select(item=>{var row=new FileRow(item.Ordinal);row.SetPresentation(GridCardWidth,ShowPaths.IsChecked==true);row.Fill(item);return row;}).ToArray();AttachBrowserView(initial);
                 ResultSummary.Text=$"首批 {first.Items.Count:N0} 项 · 正在固定完整浏览顺序…";
+                if(verifyFirstPageBarrier is not null)await verifyFirstPageBarrier(queryToken);
             }
             var handle=await catalog.CreateSnapshot(filter,epoch,gen,queryToken);
             if(!IsCurrent() || closing){await catalog.ReleaseSnapshot(handle.Id);return;}
@@ -602,7 +603,12 @@ public sealed partial class MainWindow : Window
         foreach(var pair in tiles){var size=pair.Value.SizeInPixels;args.DrawingSession.DrawImage(pair.Value,new Rect(origin.X+pair.Key.Item1*1024*scale,origin.Y+pair.Key.Item2*1024*scale,size.Width*scale,size.Height*scale));}
         args.DrawingSession.Transform=Matrix3x2.Identity;
     }
-    private double EffectiveScale()=>zoom>0?zoom:Math.Min(ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth));
+    private double EffectiveScale()
+    {
+        if(zoom>0)return zoom;
+        double fit=Math.Min(ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth));
+        return viewerScaleIntent==ViewerScaleIntent.Default?Math.Min(1/(Shell.XamlRoot?.RasterizationScale??1),fit):fit;
+    }
     private async Task LoadVisibleTiles()
     {
         if(selected?.Item is null || selected.Kind!="image"||sourceWidth<=0 || zoom<=0||previewLoading||offlinePreview)return;long current=selection;var token=selectionStop.Token;
@@ -640,7 +646,7 @@ public sealed partial class MainWindow : Window
             BindVisibleContainer(sender,e.ItemContainer,null);
             return;
         }
-        if(closing||e.Item is not FileRow row||results is not {} source||source.IndexOf(row)<0)return;
+        if(closing||e.Item is not FileRow row||(!firstPageRows.Contains(row)&&(results is not {} source||source.IndexOf(row)<0)))return;
         BindVisibleContainer(sender,e.ItemContainer,row);await LoadThumbnail(sender,row);
     }
     private void BindVisibleContainer(ListViewBase view,DependencyObject container,FileRow? row)
@@ -770,6 +776,7 @@ public sealed partial class MainWindow : Window
     }
     private void CancelThumbnails()
     {
+        firstPageRows.Clear();
         foreach(var token in thumbnailRequests.Values){token.Cancel();token.Dispose();}
         thumbnailRequests.Clear();
         foreach(var row in visible)row.Thumbnail=null;
