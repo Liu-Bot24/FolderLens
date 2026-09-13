@@ -25,10 +25,10 @@ public sealed partial class MainWindow
     }
     private void PreparePreview()
     {
-        foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;ImageCanvas.Opacity=fitBitmap is null?1:.4;
+        foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();ImageCanvas.Opacity=fitBitmap is null?1:.4;
         if(loadingBadge is not null){loadingText!.Text="正在打开 "+selected?.Name;loadingText.MaxWidth=Math.Max(120,PreviewSurface.ActualWidth-48);loadingBadge.Visibility=Visibility.Visible;}
     }
-    private void FinishPreview(){previewLoading=false;ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;}
+    private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;}
     private void ClearResultSelection()
     {
         pendingPreviewRestore=null;previewReadySelection=-1;
@@ -44,7 +44,8 @@ public sealed partial class MainWindow
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(fitBitmap is null||rawPreviewOnly||!animationNeedsOpen||sourceWidth<=0||sourceHeight<=0||zoom>0||row.Kind!="image")return;
         double raster=Shell.XamlRoot.RasterizationScale,scale=EffectiveScale()*raster;var actual=fitBitmap.SizeInPixels;
-        if(actual.Width+1>=sourceWidth*scale&&actual.Height+1>=sourceHeight*scale)return;
+        // Upscaling cannot reveal more detail than the original pixels.
+        if(actual.Width+1>=Math.Min(sourceWidth,sourceWidth*scale)&&actual.Height+1>=Math.Min(sourceHeight,sourceHeight*scale))return;
         int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*raster)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*raster));
         if(rotation%2!=0)(width,height)=(height,width);int heldRotation=rotation;
         var reply=await previewWorker!.Request(Path.Combine(root,row.RelativePath),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}

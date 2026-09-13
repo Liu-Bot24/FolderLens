@@ -115,7 +115,7 @@
         <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Click="ToggleFullScreen" />
         <MenuFlyoutItem Text="幻灯片  Ctrl+Space" Click="ToggleSlideshow" />
         <MenuFlyoutSeparator />
-        <MenuFlyoutItem Text="适合窗口" Click="Fit" />
+        <MenuFlyoutItem Text="适应屏幕" Click="Fit" />
         <MenuFlyoutItem Text="原图 100%" Click="Actual" />
         <MenuFlyoutItem Text="顺时针旋转  R" Click="Rotate" />
         <MenuFlyoutItem Text="逆时针旋转  Shift+R" Click="RotateCounterclockwise" />
@@ -318,7 +318,7 @@
           <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource PreviewActionButtonStyle}" /></StackPanel.Resources>
           <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
           <Button Click="Next" ToolTipService.ToolTip="下一个文件（PageDown）" AutomationProperties.Name="下一个文件"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
-          <Button x:Name="PreviewFit" Content="适屏" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
+          <Button x:Name="PreviewFit" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
           <Button x:Name="PreviewActual" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
           <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
           <Button x:Name="PreviewExternalPlayer" Content="播放" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用本地播放器打开当前视频" />

@@ -16,7 +16,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
-    private enum ViewerAction { Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,AutomaticSizing,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
+    private enum ViewerAction { Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
     private enum ViewerSizing { Automatic,Locked }
     private enum ViewerScaleIntent { Fit,Width,Height,Custom }
     private enum ViewerGesture { None,Pressed,Dragging,Magnifier }
@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         new(VirtualKey.Subtract,0,ViewerAction.ZoomOut),new((VirtualKey)189,0,ViewerAction.ZoomOut),new(VirtualKey.Number8,VirtualKeyModifiers.Shift,ViewerAction.Fit),
         new(VirtualKey.Number0,VirtualKeyModifiers.Control,ViewerAction.Actual),new(VirtualKey.NumberPad0,VirtualKeyModifiers.Control,ViewerAction.Actual),
         new(VirtualKey.W,VirtualKeyModifiers.Shift,ViewerAction.FitWidth),new(VirtualKey.H,VirtualKeyModifiers.Shift,ViewerAction.FitHeight),
-        new(VirtualKey.K,VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift,ViewerAction.AutomaticSizing),new(VirtualKey.L,VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift,ViewerAction.LockSizing),
+        new(VirtualKey.L,VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift,ViewerAction.LockSizing),
         new(VirtualKey.F1,0,ViewerAction.Help),new(VirtualKey.C,VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift,ViewerAction.CopyFilePath),new(VirtualKey.R,VirtualKeyModifiers.Shift,ViewerAction.RotateCounterclockwise),
         new(VirtualKey.R,0,ViewerAction.Rotate),new(VirtualKey.F10,VirtualKeyModifiers.Shift,ViewerAction.ContextMenu),new(VirtualKey.Application,0,ViewerAction.ContextMenu)
     ];
@@ -197,8 +197,10 @@ public sealed partial class MainWindow
                 case ViewerAction.ZoomOut: await ZoomViewerAt(EffectiveScale()/1.2,new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
                 case ViewerAction.FitWidth: viewerScaleIntent=ViewerScaleIntent.Width;ApplyViewerScaleIntent();PanViewerToStart(vertical:true);break;
                 case ViewerAction.FitHeight: viewerScaleIntent=ViewerScaleIntent.Height;ApplyViewerScaleIntent();PanViewerToStart(vertical:false);break;
-                case ViewerAction.AutomaticSizing: viewerSizing=ViewerSizing.Automatic;viewerScaleIntent=ViewerScaleIntent.Fit;zoom=0;pan=Vector2.Zero;await SaveViewerPreferences();break;
-                case ViewerAction.LockSizing: viewerSizing=ViewerSizing.Locked;viewerLockedPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;viewerScaleIntent=ViewerScaleIntent.Custom;viewerCustomPhysicalScale=viewerLockedPhysicalScale;await SaveViewerPreferences();break;
+                case ViewerAction.LockSizing:
+                    viewerSizing=viewerSizing==ViewerSizing.Locked?ViewerSizing.Automatic:ViewerSizing.Locked;
+                    if(viewerSizing==ViewerSizing.Locked){viewerLockedPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;viewerScaleIntent=ViewerScaleIntent.Custom;viewerCustomPhysicalScale=viewerLockedPhysicalScale;}
+                    await SaveViewerPreferences();break;
                 case ViewerAction.Rotate: case ViewerAction.RotateCounterclockwise: if(selected?.Kind!="image")return;rotation=(rotation+(action==ViewerAction.Rotate?1:3))%4;if(viewerScaleIntent is ViewerScaleIntent.Width or ViewerScaleIntent.Height)ApplyViewerScaleIntent();break;
             }
             RememberViewerScale();ClampPan();await RefreshViewerPixels();
@@ -223,7 +225,7 @@ public sealed partial class MainWindow
     private void RememberViewerScale()
     {viewerCustomPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;if(viewerSizing==ViewerSizing.Locked){viewerLockedPhysicalScale=viewerCustomPhysicalScale;_=SaveViewerPreferences();}}
     private async Task RefreshViewerPixels()
-    {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"相机内嵌预览 · 原始开发未完成":"清晰适屏";}
+    {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"相机内嵌预览 · 原始开发未完成":"清晰适应屏幕";}
     private void ApplyViewerScaleIntent()
     {
         zoom=viewerScaleIntent switch{ViewerScaleIntent.Fit=>0,ViewerScaleIntent.Width=>ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ViewerScaleIntent.Height=>ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth),_=>viewerCustomPhysicalScale/Shell.XamlRoot.RasterizationScale};
@@ -388,10 +390,16 @@ public sealed partial class MainWindow
         viewerContextMenu=new();
         viewerContextMenu.Opened+=(_,_)=>SetViewerMenuNotice(true);
         viewerContextMenu.Closed+=(_,_)=>SetViewerMenuNotice(false);
-        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适屏 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("自动适应 · Ctrl+Shift+K",ViewerAction.AutomaticSizing),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("只读旋转 · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
+        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适应屏幕 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("只读旋转 · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
         {
             if(IsImageViewerAction(option.Item2)&&selected?.Kind!="image")continue;
             string label=selected?.Kind!="image"&&option.Item2==ViewerAction.Previous?"上一个文件 · PageUp":selected?.Kind!="image"&&option.Item2==ViewerAction.Next?"下一个文件 · PageDown":option.Item1;
+            if(option.Item2==ViewerAction.LockSizing)
+            {
+                var toggle=new ToggleMenuFlyoutItem{Text="锁定缩放",KeyboardAcceleratorTextOverride="Ctrl+Shift+L",IsChecked=viewerSizing==ViewerSizing.Locked,IsEnabled=fitBitmap is not null&&!previewLoading};
+                toggle.Click+=async(_,_)=>{await RunViewerAction(ViewerAction.LockSizing);toggle.IsChecked=viewerSizing==ViewerSizing.Locked;};
+                viewerContextMenu.Items.Add(toggle);continue;
+            }
             var item=new MenuFlyoutItem{Text=label};item.Click+=async(_,_)=>await RunViewerAction(option.Item2);viewerContextMenu.Items.Add(item);
         }
         viewerContextMenu.Items.Add(new MenuFlyoutSeparator());
@@ -399,7 +407,7 @@ public sealed partial class MainWindow
         var open=new MenuFlyoutItem{Text=FileCommandLabels.ExternalOpen};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
         var copy=new MenuFlyoutItem{Text=FileCommandLabels.CopyPath};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text=FileCommandLabels.Reveal};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
     }
-    private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.AutomaticSizing or ViewerAction.LockSizing or ViewerAction.Slideshow;
+    private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.LockSizing or ViewerAction.Slideshow;
     private void ShowViewerContextMenu(Point at){PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();BuildViewerContextMenu();viewerContextMenu!.ShowAt(ImageCanvas,new FlyoutShowOptions{Position=at});}
     private void SetViewerWheelBehavior(string mode)
     {
@@ -414,9 +422,12 @@ public sealed partial class MainWindow
         {
             if(await settings.Load<ViewerPreferences>("viewer.json") is not {} state)return;
             viewerPreferencesLoading=true;wheelBehavior=state.Wheel is "next" or "pan" or "zoom"?state.Wheel:"next";viewerSizing=state.Sizing=="locked"?ViewerSizing.Locked:ViewerSizing.Automatic;
-            viewerLockedPhysicalScale=double.IsFinite(state.LockedPhysicalScale)?Math.Clamp(state.LockedPhysicalScale,.01,16):1;
+            // A fitted tiny image can exceed the manual zoom range. Preserve its
+            // locked physical scale across restart, with finite defensive bounds.
+            viewerLockedPhysicalScale=double.IsFinite(state.LockedPhysicalScale)?Math.Clamp(state.LockedPhysicalScale,.000001,65536):1;
             viewerPressZoom=(state.PressZoom??new PressZoomOptions()).Normalize();
             if(state.PressZoomVersion==0&&viewerPressZoom.Percent==100)viewerPressZoom=viewerPressZoom with{Percent=250};
+            SyncPressZoomSelector();
             if(viewerWheelSelector is not null)SelectTag(viewerWheelSelector,wheelBehavior);
         }
         catch(Exception ex){ShowError(ex);}finally{viewerPreferencesLoading=false;}

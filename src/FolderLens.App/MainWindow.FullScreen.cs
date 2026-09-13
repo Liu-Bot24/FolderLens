@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
@@ -22,6 +23,7 @@ public sealed partial class MainWindow
     private ListView? viewerStrip;
     private ComboBox? viewerWheelSelector;
     private Button? viewerExternalPlayer;
+    private ToggleButton? viewerLockToggle;
     private long viewerModeRevision;
     private readonly List<(Button Button,ViewerAction Action)> viewerActionButtons=[];
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? viewerIdleTimer;
@@ -33,18 +35,19 @@ public sealed partial class MainWindow
         viewerStrip.ItemsPanel=(ItemsPanelTemplate)XamlReader.Load("<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><ItemsStackPanel Orientation='Horizontal'/></ItemsPanelTemplate>");
         viewerStrip.ItemTemplate=(DataTemplate)XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Width='108' Spacing='3'><Image Source='{Binding Thumbnail}' Height='76' Stretch='Uniform'/><TextBlock Text='{Binding Name}' FontSize='10' TextTrimming='CharacterEllipsis'/></StackPanel></DataTemplate>");
         ScrollViewer.SetHorizontalScrollBarVisibility(viewerStrip,ScrollBarVisibility.Auto);ScrollViewer.SetVerticalScrollBarVisibility(viewerStrip,ScrollBarVisibility.Disabled);
+        ScrollViewer.SetHorizontalScrollMode(viewerStrip,ScrollMode.Enabled);ScrollViewer.SetVerticalScrollMode(viewerStrip,ScrollMode.Disabled);
         viewerStrip.SelectionChanged+=SelectFile;viewerStrip.ContainerContentChanging+=ContainerChanged;
         var topContent=new StackPanel();topContent.Children.Add(viewerCaption);topContent.Children.Add(viewerStrip);viewerTop=ViewerPanel(topContent,HorizontalAlignment.Stretch,VerticalAlignment.Top);
         viewerPosition=new TextBlock{VerticalAlignment=VerticalAlignment.Center,MinWidth=100,FontSize=12};
         var controls=new StackPanel{Orientation=Orientation.Horizontal,Spacing=8,Padding=new Thickness(12,8,12,8)};
         AddViewerActionButton(controls,"◀ 上一张",ViewerAction.Previous);AddViewerActionButton(controls,"幻灯片",ViewerAction.Slideshow);AddViewerActionButton(controls,"下一张 ▶",ViewerAction.Next);viewerExternalPlayer=AddViewerButton(controls,"使用本地播放器打开",ExternalOpen);controls.Children.Add(viewerPosition);
         AddAnimationMirror(controls,AnimationButton,ToggleAnimation);AddAnimationMirror(controls,ReplayAnimationButton,ReplayAnimation);
-        AddViewerActionButton(controls,"适屏",ViewerAction.Fit);AddViewerActionButton(controls,"100%",ViewerAction.Actual);AddViewerActionButton(controls,"适合宽度",ViewerAction.FitWidth);AddViewerActionButton(controls,"适合高度",ViewerAction.FitHeight);AddViewerActionButton(controls,"旋转",ViewerAction.Rotate);
+        AddViewerActionButton(controls,"适应屏幕",ViewerAction.Fit);AddViewerActionButton(controls,"100%",ViewerAction.Actual);AddViewerActionButton(controls,"适合宽度",ViewerAction.FitWidth);AddViewerActionButton(controls,"适合高度",ViewerAction.FitHeight);AddViewerActionButton(controls,"旋转",ViewerAction.Rotate);
         viewerWheelSelector=new ComboBox{MinWidth=148,SelectedIndex=-1};foreach(var option in new[]{("滚轮：切图 / 长图平移","next"),("滚轮：上下平移","pan"),("滚轮：缩放","zoom")})viewerWheelSelector.Items.Add(new ComboBoxItem{Content=option.Item1,Tag=option.Item2});viewerWheelSelector.SelectedIndex=0;
-        viewerWheelSelector.SelectionChanged+=(_,_)=>{if(!viewerPreferencesLoading)SetViewerWheelBehavior(Tag(viewerWheelSelector));};controls.Children.Add(viewerWheelSelector);AddViewerButton(controls,"返回列表 · Esc",ExitFullScreen);
+        viewerWheelSelector.SelectionChanged+=(_,_)=>{if(!viewerPreferencesLoading)SetViewerWheelBehavior(Tag(viewerWheelSelector));};controls.Children.Add(viewerWheelSelector);InitializePressZoomSelector(controls);AddViewerButton(controls,"返回列表 · Esc",ExitFullScreen);
         viewerBottom=ViewerPanel(new ScrollViewer{Content=controls,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled},HorizontalAlignment.Stretch,VerticalAlignment.Bottom);
         viewerInformation=new TextBlock{TextWrapping=TextWrapping.Wrap,FontSize=13,Width=270,Margin=new Thickness(16)};viewerRight=ViewerPanel(new ScrollViewer{Content=viewerInformation,MaxHeight=720},HorizontalAlignment.Right,VerticalAlignment.Center);
-        var commands=new StackPanel{Spacing=8,Padding=new Thickness(12),Width=170};AddViewerActionButton(commands,"自动适应",ViewerAction.AutomaticSizing);AddViewerActionButton(commands,"锁定缩放比例",ViewerAction.LockSizing);AddViewerButton(commands,FileCommandLabels.CopyPath,CopyPath);AddViewerButton(commands,FileCommandLabels.CopyFileReference,CopyFileReference);AddViewerButton(commands,FileCommandLabels.Reveal,Reveal);AddViewerButton(commands,FileCommandLabels.ExternalOpen,ExternalOpen);AddViewerActionButton(commands,"窗口查看 · F11",ViewerAction.ToggleFullScreen);AddViewerButton(commands,"返回列表",ExitFullScreen);viewerLeft=ViewerPanel(commands,HorizontalAlignment.Left,VerticalAlignment.Center);
+        var commands=new StackPanel{Spacing=8,Padding=new Thickness(12),Width=170};viewerLockToggle=new ToggleButton{Content="锁定缩放比例",HorizontalAlignment=HorizontalAlignment.Stretch};viewerLockToggle.Click+=async(_,_)=>await RunViewerAction(ViewerAction.LockSizing);commands.Children.Add(viewerLockToggle);AddViewerButton(commands,FileCommandLabels.CopyPath,CopyPath);AddViewerButton(commands,FileCommandLabels.CopyFileReference,CopyFileReference);AddViewerButton(commands,FileCommandLabels.Reveal,Reveal);AddViewerButton(commands,FileCommandLabels.ExternalOpen,ExternalOpen);AddViewerActionButton(commands,"窗口查看 · F11",ViewerAction.ToggleFullScreen);AddViewerButton(commands,"返回列表",ExitFullScreen);viewerLeft=ViewerPanel(commands,HorizontalAlignment.Left,VerticalAlignment.Center);
         Shell.PointerMoved+=ViewerPointerMoved;
         InitializeViewerInput();
         InitializeGroupNotice();
@@ -77,12 +80,19 @@ public sealed partial class MainWindow
         if(top&&!viewerPanelsVisible&&selected is not null&&viewerStrip is not null){viewerStrip.SelectedItem=selected;viewerStrip.ScrollIntoView(selected);}
         viewerPanelsVisible=top||bottom||left||right;if(!viewerPanelsVisible)viewerIdleTimer?.Start();
     }
+    private void UpdateViewerLockToggle()
+    {
+        if(viewerLockToggle is null)return;viewerLockToggle.IsChecked=viewerSizing==ViewerSizing.Locked;
+        viewerLockToggle.Visibility=selected?.Kind=="image"?Visibility.Visible:Visibility.Collapsed;
+        viewerLockToggle.IsEnabled=selected?.Kind=="image"&&fitBitmap is not null&&!previewLoading;
+    }
     private void UpdateViewerInformation()
     {
-        UpdateGroupNotice();
+        UpdateGroupNotice();SyncPressZoomSelector();
         PreviewFilePath.Text=selected?.RelativePath??"";
         PreviewFilePath.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
         bool video=selected?.Kind=="video",picture=selected?.Kind=="image";
+        UpdateViewerLockToggle();
         PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=video?Visibility.Collapsed:Visibility.Visible;
         PreviewExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
         foreach(var item in viewerActionButtons)
@@ -102,7 +112,7 @@ public sealed partial class MainWindow
         if(viewerCaption is not null)viewerCaption.Text=$"{position}    {selected.Name}    {selected.Detail}{groupCaption}";
         if(viewerPosition is not null)viewerPosition.Text=position;
         string help=video?"视频封面预览\n滚轮 / ← → / PageUp、PageDown：切换文件\n双击：使用本地播放器打开\nEsc：返回列表\nF11：全屏 / 窗口查看"
-            :$"滚轮：{(EffectiveViewerWheelBehavior()=="next"?"切换图片":EffectiveViewerWheelBehavior()=="pan"?"平移阅读":"缩放")}\n短击：100% / 适屏\n按住：{(viewerPressZoom.UsesWholeImage(immersive||fullScreen)?"整图临时放大":"局部放大镜")} · {viewerPressZoom.Percent}%\n放大后拖动：平移\n双击 / Esc：返回列表\nF11：全屏 / 窗口查看\n缩放：{(viewerSizing==ViewerSizing.Locked?"锁定比例":"自动适应")}";
+            :$"滚轮：{(EffectiveViewerWheelBehavior()=="next"?"切换图片":EffectiveViewerWheelBehavior()=="pan"?"平移阅读":"缩放")}\n短击：100% / 适应屏幕\n按住：{(viewerPressZoom.UsesWholeImage(immersive||fullScreen)?"整图临时放大":"局部放大镜")} · {viewerPressZoom.Percent}%\n放大后拖动：平移\n双击 / Esc：返回列表\nF11：全屏 / 窗口查看\n锁定缩放：{(viewerSizing==ViewerSizing.Locked?"已开启":"已关闭")}";
         string exif=selected.Kind=="image"&&selectedProperties?.EntryId==selected.Item?.EntryId&&selectedProperties?.Version==selected.Item?.Version?FormatViewerExif(selectedProperties?.Details):"";
         if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}{(exif.Length>0?"\n\n"+exif:"")}\n\n{help}";
     }

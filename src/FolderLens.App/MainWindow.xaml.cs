@@ -466,7 +466,7 @@ public sealed partial class MainWindow : Window
             catch(Exception ex) when(raw&&rawPreviewOnly&&current==selection&&CanRetainRawPreview(ex))
             {QualityLabel.Text="相机内嵌预览 · 原始开发未完成："+ex.Message;SchedulePrefetch(current);return;}
         }
-        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(message!.Quality=="rawDeveloped"?"RAW 开发适屏":"清晰适屏")}";}
+        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(message!.Quality=="rawDeveloped"?"RAW 开发适应屏幕":"清晰适应屏幕")}";}
         if(current==selection)
         {
             var metadata=message!.Metadata!.Value;bool animated=metadata.GetProperty("isAnimated").GetBoolean();imagePageCount=animated?1:metadata.GetProperty("pages").GetInt32();FrameTools.Visibility=animated||imagePageCount>1?Visibility.Visible:Visibility.Collapsed;AnimationButton.Visibility=ReplayAnimationButton.Visibility=animated?Visibility.Visible:Visibility.Collapsed;PreviousPageButton.Visibility=NextPageButton.Visibility=ImagePageLabel.Visibility=animated?Visibility.Collapsed:Visibility.Visible;ImagePageLabel.Text=$"1 / {imagePageCount}";
@@ -602,7 +602,7 @@ public sealed partial class MainWindow : Window
         foreach(var pair in tiles){var size=pair.Value.SizeInPixels;args.DrawingSession.DrawImage(pair.Value,new Rect(origin.X+pair.Key.Item1*1024*scale,origin.Y+pair.Key.Item2*1024*scale,size.Width*scale,size.Height*scale));}
         args.DrawingSession.Transform=Matrix3x2.Identity;
     }
-    private double EffectiveScale()=>zoom>0?zoom:Math.Min(selected?.Kind=="video"?double.PositiveInfinity:1/Shell.XamlRoot.RasterizationScale,Math.Min(ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth)));
+    private double EffectiveScale()=>zoom>0?zoom:Math.Min(ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth));
     private async Task LoadVisibleTiles()
     {
         if(selected?.Item is null || selected.Kind!="image"||sourceWidth<=0 || zoom<=0||previewLoading||offlinePreview)return;long current=selection;var token=selectionStop.Token;
