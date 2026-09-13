@@ -8,6 +8,56 @@ namespace FolderLens.UnitTests;
 
 public sealed class ScannerRegressionTests
 {
+    private sealed class RecordingContext : SynchronizationContext
+    {
+        public int Posts;
+        public override void Post(SendOrPostCallback callback,object? state)
+        {Interlocked.Increment(ref Posts);ThreadPool.QueueUserWorkItem(_=>callback(state));}
+    }
+    [Fact] public void MediaProcessLifecycleDoesNotRunOnTheCallingUiContext()
+    {
+        var previous=SynchronizationContext.Current;var context=new RecordingContext();
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            // With no scan request the worker exits with a protocol error; exercise
+            // the process-exit/error path as well as its asynchronous stream reads.
+            Assert.Throws<InvalidDataException>(()=>BoundedProcess.Run(Worker(),[],TimeSpan.FromSeconds(5),4096,CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult());
+        }
+        finally{SynchronizationContext.SetSynchronizationContext(previous);}
+        Assert.Equal(0,context.Posts);
+    }
+    [Fact] public async Task ReconciliationUsesDirectoryIndexesAndPreservesUnrelatedFiles()
+    {
+        string fixture=Fixture(),source=Path.Combine(fixture,"source"),other=Path.Combine(fixture,"other");
+        Directory.CreateDirectory(Path.Combine(source,"removed","deep"));Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(source,"removed","deep","gone.mp3"),"scan fixture");
+        File.WriteAllText(Path.Combine(source,"kept.mp4"),"scan fixture");File.WriteAllText(Path.Combine(other,"kept.mp3"),"scan fixture");
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();
+        long epoch=await catalog.OpenRoot("root",source),otherEpoch=await catalog.OpenRoot("other",other);
+        var scanner=new DirectoryIndexer(catalog,Worker());
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        await scanner.Scan("other",other,otherEpoch,true,[],null,CancellationToken.None);
+        var plan=await catalog.Read(c=>
+        {
+            using var cmd=c.CreateCommand();cmd.CommandText="EXPLAIN QUERY PLAN "+DirectoryIndexer.ReconcileRemovedFilesSql;
+            cmd.Parameters.AddWithValue("$root","root");cmd.Parameters.AddWithValue("$dir",DirectoryIndexer.StablePathId("root",""));cmd.Parameters.AddWithValue("$scan","next");
+            using var rows=cmd.ExecuteReader();var steps=new List<string>();while(rows.Read())steps.Add(rows.GetString(3));return steps;
+        });
+        Assert.DoesNotContain(plan,step=>step.Contains("SCAN Files")||step.Contains("AUTOMATIC"));
+        Assert.Contains(plan,step=>step.Contains("IX_Files_Directory")&&step.Contains("directory_id=?"));
+        Assert.Contains(plan,step=>step.Contains("SEARCH d")&&step.Contains("root_id=? AND parent_id=?"));
+        Directory.Move(Path.Combine(source,"removed"),Path.Combine(fixture,"outside-scan"));
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        var entries=await catalog.Read(c=>
+        {
+            using var cmd=c.CreateCommand();cmd.CommandText="SELECT name,entry_state,file_version FROM Files";using var rows=cmd.ExecuteReader();
+            var values=new Dictionary<string,(string State,long Version)>();while(rows.Read())values.Add(rows.GetString(0),(rows.GetString(1),rows.GetInt64(2)));return values;
+        });
+        Assert.Equal(("missing",2L),entries["gone.mp3"]);
+        Assert.Equal(("present",1L),entries["kept.mp4"]);Assert.Equal(("present",1L),entries["kept.mp3"]);
+    }
     [Fact] public async Task ScanProgressDoesNotWaitBehindSnapshotReader()
     {
         string source=Fixture();for(int i=0;i<12;i++)File.WriteAllText(Path.Combine(source,$"image{i}.jpg"),"scan metadata only");

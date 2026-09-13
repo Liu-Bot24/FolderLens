@@ -29,7 +29,9 @@ public sealed partial class MainWindow
         {
             if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.Ordinal))
             {
-                activeTreeRoot=candidate;candidate.IsExpanded=true;FolderTree.SelectedNode=candidate;nextTreeRefresh=0;physicalTreeTask=RefreshAncestors(candidate,rootChangeVersion,physicalTreeStop.Token);return;
+                activeTreeRoot=candidate;
+                for(var ancestor=candidate;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
+                FolderTree.SelectedNode=candidate;nextTreeRefresh=0;physicalTreeTask=RefreshAncestors(candidate,rootChangeVersion,physicalTreeStop.Token);return;
             }
             foreach(var child in candidate.Children)existing.Enqueue(child);
         }
@@ -176,6 +178,7 @@ public sealed partial class MainWindow
     }
     private void ApplyTreePage(TreeViewNode node,TreeListing state,IReadOnlyList<string> paths)
     {
+        var selectedBefore=FolderTree.SelectedNode;
         // Keep the selected ancestor chain reachable even while browsing another sibling page.
         TreeViewNode? pinned=activeTreeRoot;
         while(pinned?.Parent is {} parent&&!ReferenceEquals(parent,node))pinned=parent;
@@ -197,6 +200,14 @@ public sealed partial class MainWindow
         {
             Button($"下一页 →（当前 {start+1:N0}–{Math.Min(start+DirectoryListing.PageSize,count):N0} / {count:N0}）",start+DirectoryListing.PageSize);
             Button("最后一页 ⏭",(count-1)/DirectoryListing.PageSize*DirectoryListing.PageSize);
+        }
+        // Updating children can clear WinUI's single selection, even if the selected
+        // parent itself was retained. Preserve selection across this synchronous edit;
+        // do not select a removed node or move the user's viewport during scan refresh.
+        if(selectedBefore is not null&&FolderTree.SelectedNode!=selectedBefore)
+        {
+            var top=selectedBefore;while(!FolderTree.RootNodes.Contains(top)&&top.Parent is {} ancestor)top=ancestor;
+            if(FolderTree.RootNodes.Contains(top))FolderTree.SelectedNode=selectedBefore;
         }
     }
     private async Task ChangeTreePage(TreeViewNode node,long start)

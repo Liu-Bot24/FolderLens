@@ -15,9 +15,37 @@ public sealed partial class MainWindow
     private VirtualRangeCollection<FileRow>? flatBrowserItems;
     private void UpdateGroupingButton()
     {
-        GroupingButton.Content=folderGrouping.Enabled?$"文件夹分组：{(folderGrouping.Levels=="all"?"全部层级":"仅下一级")} ▾":"按文件夹分组 ▾";
+        GroupingButton.Content=folderGrouping.Enabled?$"文件夹分组：{(folderGrouping.Levels=="all"?"全部层级":"仅下一级")} ▾":"文件夹分组：未启用 ▾";
         ToolTipService.SetToolTip(GroupingButton,folderGrouping.Enabled?"先按文件夹顺序，再按组内文件顺序浏览；点击修改或关闭分组":"开启文件夹分组，分别设置文件夹顺序和组内文件顺序");
         ToolTipService.SetToolTip(SortField,folderGrouping.Enabled?"组内文件排序":"全部文件排序");
+    }
+    private void ToggleFolderGroup(object sender,RoutedEventArgs args)
+    {
+        if(sender is FrameworkElement{DataContext:BrowserFileGroup group})ToggleFolderGroup(group);
+    }
+    private void ToggleFolderGroup(BrowserFileGroup group)
+    {
+        if(browserGroups is null)return;int index=browserGroups.IndexOf(group);if(index<0)return;
+        var retained=ActiveBrowser.SelectedItem;double offset=FindScrollViewer(ActiveBrowser)?.VerticalOffset??0;
+        bool previous=syncingBrowserSelection;syncingBrowserSelection=true;
+        try
+        {
+            // WinUI's flattened view can crash removing the final nonempty group
+            // beside empty groups. Rebuild only the view projection on this explicit
+            // user action; the snapshot, lazy rows and scan remain unchanged.
+            AttachBrowserView(null);if(groupedBrowserSource is not null)groupedBrowserSource.Source=null;
+            groupedBrowserSource=null;group.ToggleCollapsed();
+            groupedBrowserSource=new CollectionViewSource{IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(BrowserFileGroup.Items)),Source=browserGroups};
+            AttachBrowserView(groupedBrowserSource.View);
+            ActiveBrowser.SelectedItem=retained is not null&&ActiveBrowser.Items.Contains(retained)?retained:null;
+            ActiveBrowser.UpdateLayout();FindScrollViewer(ActiveBrowser)?.ChangeView(null,offset,null,true);
+        }
+        finally{syncingBrowserSelection=previous;}
+    }
+    private void RevealBrowserRow(FileRow row)
+    {
+        if(browserGroups?.FirstOrDefault(group=>group.IsCollapsed&&row.Ordinal>=group.Info.Start&&row.Ordinal<group.Info.Start+group.Info.Count) is {} hidden)
+            ToggleFolderGroup(hidden);
     }
     private async void ConfigureGrouping(object sender,RoutedEventArgs args)
     {
@@ -30,7 +58,7 @@ public sealed partial class MainWindow
                 foreach(var (text,value) in values)box.Items.Add(new ComboBoxItem{Content=text,Tag=value});SelectTag(box,selected);return box;
             }
             var levels=Choice("分组层级",[("全部层级：保留目录层级，逐层分组","all"),("仅下一级：每组汇集所有深层文件","first")],folderGrouping.Levels);
-            var field=Choice("文件夹排序",[("容量","logicalBytes"),("自然名称","name"),("匹配文件数","matchCount")],folderGrouping.Field);
+            var field=Choice("文件夹排序",[("容量","logicalBytes"),("名称","name"),("匹配文件数","matchCount")],folderGrouping.Field);
             var direction=Choice("文件夹顺序",[("↓ 降序：从高到低","desc"),("↑ 升序：从低到高","asc")],folderGrouping.Direction);
             var scope=Choice("用于排名的容量",[("整个已扫描目录（所有文件类型）","all"),("当前筛选匹配文件","matches")],folderGrouping.CapacityScope);
             var options=new StackPanel{Spacing=12};options.Children.Add(levels);options.Children.Add(field);options.Children.Add(direction);options.Children.Add(scope);
@@ -59,6 +87,14 @@ public sealed partial class MainWindow
         if(browserGroups is null)
         {
             flatBrowserItems!.UpdateRanges(changes[""],index=>(FileRow)source[index]!,source.IndexOf);return;
+        }
+        if(browserGroups.Any(group=>group.IsCollapsed)&&!browserGroups.Select(group=>group.Info.Id).SequenceEqual(groups.Select(group=>group.Id)))
+        {
+            var collapsed=browserGroups.Where(group=>group.IsCollapsed).Select(group=>group.Info.Id).ToHashSet();
+            AttachBrowserView(null);if(groupedBrowserSource is not null)groupedBrowserSource.Source=null;
+            browserGroups=new(groups.Select(info=>{var group=new BrowserFileGroup(source,info);if(collapsed.Contains(info.Id))group.ToggleCollapsed();return group;}));
+            groupedBrowserSource=new CollectionViewSource{IsSourceGrouped=true,ItemsPath=new PropertyPath(nameof(BrowserFileGroup.Items)),Source=browserGroups};
+            AttachBrowserView(groupedBrowserSource.View);return;
         }
         var wanted=groups.Select(group=>group.Id).ToHashSet();
         for(int i=browserGroups.Count-1;i>=0;i--)if(!wanted.Contains(browserGroups[i].Info.Id))browserGroups.RemoveAt(i);

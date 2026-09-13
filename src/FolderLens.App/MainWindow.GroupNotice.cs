@@ -11,6 +11,7 @@ public sealed partial class MainWindow
     private Border? viewerGroupNotice;
     private TextBlock? viewerGroupPath;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? viewerGroupTimer;
+    private bool viewerMenuOpen;
 
     private void InitializeGroupNotice()
     {
@@ -33,7 +34,13 @@ public sealed partial class MainWindow
         viewerGroupTimer = DispatcherQueue.CreateTimer();
         viewerGroupTimer.Interval = TimeSpan.FromSeconds(2.5);
         viewerGroupTimer.IsRepeating = false;
-        viewerGroupTimer.Tick += (_, _) => viewerGroupNotice.Visibility = Visibility.Collapsed;
+        viewerGroupTimer.Tick += (_, _) => {if(!viewerMenuOpen)viewerGroupNotice.Visibility = Visibility.Collapsed;};
+    }
+
+    private void SetViewerMenuNotice(bool open)
+    {
+        viewerMenuOpen=open;viewerGroupTimer?.Stop();
+        if(open)UpdateGroupNotice();else if(viewerGroupNotice is not null)viewerGroupNotice.Visibility=Visibility.Collapsed;
     }
 
     private void UpdateGroupNotice()
@@ -50,17 +57,18 @@ public sealed partial class MainWindow
         }
         bool changed = viewerGroupBoundary.Observe(active, resultHandle?.Id, group?.Id);
         if (viewerGroupNotice is null) return;
-        if (!active || group is null || resultHandle is null)
+        if (!active || (!viewerMenuOpen&&(group is null || resultHandle is null)))
         {
             viewerGroupTimer?.Stop();
             viewerGroupNotice.Visibility = Visibility.Collapsed;
             return;
         }
-        if (!changed) return;
-        viewerGroupPath!.Text = "文件夹：" + (group.RelativePath.Length == 0 ? "本目录文件" : group.RelativePath);
+        if (!changed&&!viewerMenuOpen) return;
+        string directory=group?.RelativePath??Path.GetDirectoryName(selected!.RelativePath)??"";
+        viewerGroupPath!.Text = "文件夹：" + (directory.Length == 0 ? "本目录文件" : directory);
         viewerGroupNotice.MaxWidth = Math.Max(120, Math.Min(720, PreviewSurface.ActualWidth - 48));
         viewerGroupNotice.Visibility = Visibility.Visible;
         viewerGroupTimer!.Stop();
-        viewerGroupTimer.Start();
+        if(!viewerMenuOpen)viewerGroupTimer.Start();
     }
 }

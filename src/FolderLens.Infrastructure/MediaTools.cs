@@ -18,8 +18,11 @@ public sealed record MediaMetadata(long? DurationMs,int? Width,int? Height,strin
 
 public static class BoundedProcess
 {
-    public static async Task<string> Run(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation)
+    public static Task<string> Run(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation)
+        =>Task.Run(()=>RunCore(executable,arguments,timeout,maxOutputBytes,cancellation),cancellation);
+    private static async Task<string> RunCore(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation)
     {
+        cancellation.ThrowIfCancellationRequested();
         var start=new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=Path.GetDirectoryName(executable)!};foreach(var arg in arguments)start.ArgumentList.Add(arg);
         using var process=Process.Start(start)??throw new IOException("Unable to start media tool.");using var job=new WorkerJob(1024L*1024*1024);job.Assign(process);
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeout);

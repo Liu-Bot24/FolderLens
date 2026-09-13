@@ -30,7 +30,7 @@ internal sealed class AdvancedFilterEditor
         bool audio = video || filter.Kinds.Contains("audio");
         View.Children.Add(new TextBlock { Text = "只显示适用于当前类型的条件；已设置的其他条件仍会保留。", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var size = Section("文件占用", true);
-        AddRange(size, "allocatedBytes", "磁盘占用（字节）");
+        AddRange(size, "allocatedBytes", "占用空间（字节）");
 
         string[] dimensions = ["width", "height", "longEdge", "shortEdge", "pixelCount"];
         if (visual || dimensions.Any(filter.Ranges.ContainsKey) || filter.AspectRatio is not null || filter.Orientation != "any")
@@ -167,7 +167,7 @@ internal sealed class AdvancedFilterEditor
                 if (string.IsNullOrWhiteSpace(box.Text)) return null;
                 // Integer bounds never pass through NumberBox.Value (double), including display.
                 if (long.TryParse(box.Text, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out long value)) return value;
-                throw new ArgumentException("文件大小、像素和毫秒必须是有效整数，且不要超过支持的最大值。");
+                throw new ArgumentException("大小、像素和毫秒必须是有效整数，且不要超过支持的最大值。");
             }
             var min = Integral(boxes.Min); var max = Integral(boxes.Max);
             if (min is null && max is null) values.Remove(key); else values[key] = new(min, max);

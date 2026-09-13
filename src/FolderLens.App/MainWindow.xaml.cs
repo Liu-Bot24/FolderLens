@@ -288,6 +288,8 @@ public sealed partial class MainWindow : Window
             }
             var nextResults=new VirtualResults(catalog,handle,DispatcherQueue);nextResults.SetPresentation(GridCardWidth,ShowPaths.IsChecked==true);
             bool adopted=false;
+            var publicationAnchor=incremental?CapturePublicationViewport(activeList):null;
+            if(incremental)publicationRows=visible.ToHashSet();
             updatingBrowser=true;
             long publicationStart=Stopwatch.GetTimestamp();
             Dictionary<string,double>? publicationStages=verifyPublicationStages is null?null:[];
@@ -321,6 +323,7 @@ public sealed partial class MainWindow : Window
                     long notificationAllocated=publicationStages is null?0:GC.GetAllocatedBytesForCurrentThread();
                     int notificationGc0=publicationStages is null?0:GC.CollectionCount(0),notificationGc1=publicationStages is null?0:GC.CollectionCount(1),notificationGc2=publicationStages is null?0:GC.CollectionCount(2);
                     UpdateBrowserResults(nextResults,groups,stableChanges,publicationStages);
+                    RestorePublicationViewport(activeList,publicationAnchor);
                     Stage("notifications");
                     if(publicationStages is not null)
                     {
@@ -356,6 +359,7 @@ public sealed partial class MainWindow : Window
                 verifyPublicationDuration?.Invoke(Stopwatch.GetElapsedTime(publicationStart).TotalMilliseconds);
                 if(publicationStages is not null)verifyPublicationStages?.Invoke(publicationStages);
                 updatingBrowser=false;
+                ReleasePublicationRows();
                 UpdateBrowserEmptyState();
                 if(adopted){previousResults?.Dispose();if(previousHandle is not null)await catalog.ReleaseSnapshot(previousHandle.Id);}
                 else nextResults.Dispose();
@@ -365,7 +369,7 @@ public sealed partial class MainWindow : Window
             if(!IsCurrent()||closing||!ReferenceEquals(results,nextResults)||!ReferenceEquals(resultHandle,handle))return;
             UpdateDirectoryScopeBanner(filter);
             ResultSummary.Text=$"{(handle.IsPendingView?"待判断视图 · ":"")}已符合 {handle.ConfirmedMatchCount:N0} · 待判断 {handle.Pending:N0} · 无法判断 {handle.Unresolvable:N0}{(handle.Count==0?(scanTask is {IsCompleted:false}?" · 仍在扫描子目录，发现匹配文件后自动显示":" · 当前条件无匹配文件，请检查上方筛选条件"):"")}";
-            if(previousPath is not null&&await catalog.FindOrdinal(handle.Id,previousPath,queryToken) is {} ordinal&&IsCurrent()&&!closing){if(DetailsMode.IsChecked==true)FilesList.SelectedIndex=(int)ordinal;else FilesGrid.SelectedIndex=(int)ordinal;}
+            if(previousPath is not null&&await catalog.FindOrdinal(handle.Id,previousPath,queryToken) is {} ordinal&&IsCurrent()&&!closing){var restored=(FileRow)results[(int)ordinal]!;RevealBrowserRow(restored);ActiveBrowser.SelectedItem=restored;}
             else if(!incremental&&!string.IsNullOrEmpty(viewportPath)&&await catalog.FindOrdinal(handle.Id,viewportPath,queryToken) is {} anchor&&IsCurrent())
                 activeList.ScrollIntoView(results[(int)anchor],ScrollIntoViewAlignment.Leading);
             if(IsCurrent()&&!closing)await TryRestoreBrowserView();
@@ -401,7 +405,7 @@ public sealed partial class MainWindow : Window
             if(animationIdle is {} retiringAnimation)await retiringAnimation.Task.WaitAsync(token);
             var rowSource=results;await ResetTextSession();if(row.Item is null)await (rowSource??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);if(current!=selection)return;
             UpdateViewerInformation();
-            selectedProperties=await ResolveRow(row,rootId,token);if(current!=selection)return;FileTitle.Text=row.Name;offlinePreview=false;
+            var properties=await ResolveRow(row,rootId,token);if(current!=selection)return;selectedProperties=properties;FileTitle.Text=row.Name;offlinePreview=false;
             bool cloud=selectedProperties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row));cloudPreviewButton!.Visibility=cloud?Visibility.Visible:Visibility.Collapsed;
             if(cloud){QualityLabel.Text="此文件仅在线，读取前需要确认。";ClearImage();return;}
             await RenderSelectedContent(row,current,token);
@@ -411,6 +415,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception ex){if(current==selection&&!closing){ClearImage();ShowPreviewError(ex);}}
         finally{if(current==selection&&!closing)FinishPreview();}
+        if(current==selection&&!closing&&!offlinePreview&&row.Kind=="image")await LoadSelectedExif(row,current,token);
     }
     private async Task RenderSelectedContent(FileRow row,long current,CancellationToken token)
     {
@@ -649,8 +654,13 @@ public sealed partial class MainWindow : Window
             {
                 verifyRowRecycling?.Invoke(old,"last-consumer");
                 visibleConsumerCounts.Remove(old);visible.Remove(old);
-                if(thumbnailRequests.Remove(old,out var request)){request.Cancel();request.Dispose();}
-                old.Thumbnail=null;
+                // A group move temporarily recycles containers before the same
+                // visible rows are realized at their restored scroll position.
+                if(publicationRows?.Contains(old)!=true)
+                {
+                    if(thumbnailRequests.Remove(old,out var request)){request.Cancel();request.Dispose();}
+                    old.Thumbnail=null;
+                }
             }
         }
         if(row is null)return;
@@ -854,7 +864,7 @@ public sealed partial class MainWindow : Window
         finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
-    private void Navigate(int delta){if(results is null || results.Count==0)return;int index=selected is null?(delta<0?results.Count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,results.Count-1);if(DetailsMode.IsChecked==true){FilesList.SelectedIndex=index;if(!immersive)FilesList.ScrollIntoView(results[index]);}else{FilesGrid.SelectedIndex=index;if(!immersive)FilesGrid.ScrollIntoView(results[index]);}if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(results[index]);}}
+    private void Navigate(int delta){if(results is null || results.Count==0)return;int index=selected is null?(delta<0?results.Count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,results.Count-1);var row=(FileRow)results[index]!;RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(results[index]);}}
     private void Previous(object sender,RoutedEventArgs e)=>Navigate(-1);private void Next(object sender,RoutedEventArgs e)=>Navigate(1);
     private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;var data=new DataPackage();data.SetText(Path.Combine(root,selected.RelativePath));Clipboard.SetContent(data);}
     private void Reveal(object sender,RoutedEventArgs e){if(selected is null)return;var start=new ProcessStartInfo("explorer.exe"){UseShellExecute=false};start.ArgumentList.Add("/select,"+Path.Combine(root,selected.RelativePath));try{Process.Start(start);}catch(Exception ex){ShowError(ex);}}

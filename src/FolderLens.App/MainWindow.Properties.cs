@@ -21,7 +21,7 @@ public sealed partial class MainWindow
         foreach(var list in new ListViewBase[]{FilesGrid,FilesList})
         {
             var menu=new MenuFlyout();void Add(string title,RoutedEventHandler action){var item=new MenuFlyoutItem{Text=title};item.Click+=action;menu.Items.Add(item);}
-            Add("查看文件属性",ShowProperties);Add("复制路径",CopyPath);Add("复制文件引用",CopyFileReference);Add("定位文件",Reveal);Add("外部打开",ExternalOpen);list.ContextFlyout=menu;
+            Add(FileCommandLabels.Properties,ShowProperties);Add(FileCommandLabels.CopyPath,CopyPath);Add(FileCommandLabels.CopyFileReference,CopyFileReference);Add(FileCommandLabels.Reveal,Reveal);Add(FileCommandLabels.ExternalOpen,ExternalOpen);list.ContextFlyout=menu;
             list.RightTapped+=(_,e)=>{if((e.OriginalSource as FrameworkElement)?.DataContext is FileRow row)list.SelectedItem=row;};
         }
     }
@@ -38,7 +38,7 @@ public sealed partial class MainWindow
             var file=await ResolveRow(selected,rootId,selectionStop.Token);selectedProperties=file;var panel=new StackPanel{Spacing=8,MinWidth=460,MaxWidth=680};
             void Row(string name,string? value){if(string.IsNullOrWhiteSpace(value))value="未知";var line=new Grid{ColumnSpacing=16};line.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(110)});line.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});line.Children.Add(new TextBlock{Text=name,Opacity=.65});var text=new TextBlock{Text=value,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true};Grid.SetColumn(text,1);line.Children.Add(text);panel.Children.Add(line);}
             string Date(long? ticks,bool utc)=>ticks is {} value?new DateTime(value,utc?DateTimeKind.Utc:DateTimeKind.Unspecified).ToString("yyyy-MM-dd HH:mm:ss",CultureInfo.InvariantCulture):"未知";
-            Row("名称",file.Name);Row("相对路径",file.RelativePath);Row("格式",file.Format);Row("文件大小",FileRow.FormatBytes(file.LogicalBytes));Row("磁盘占用",file.AllocatedBytes is {} allocated?FileRow.FormatBytes(allocated):"未知");
+            Row("名称",file.Name);Row("相对路径",file.RelativePath);Row("格式",file.Format);Row("大小",FileRow.FormatBytes(file.LogicalBytes));Row("占用空间",file.AllocatedBytes is {} allocated?FileRow.FormatBytes(allocated):"未知");
             Row("显示尺寸",file.Width is {} w&&file.Height is {} h?$"{w:N0} × {h:N0}":null);Row("编码尺寸",file.EncodedWidth is {} ew&&file.EncodedHeight is {} eh?$"{ew:N0} × {eh:N0}":null);Row("位深",file.BitDepth is {} depth?$"{depth} bit":null);
             Row("修改时间",Date(file.ModifiedUtcTicks,true)+" UTC");Row("创建时间",Date(file.CreatedUtcTicks,true)+" UTC");
             string offset=file.CaptureOffsetMinutes is {} minutes&&file.CaptureWallTicks is {} wall?new DateTimeOffset(new DateTime(wall,DateTimeKind.Unspecified),TimeSpan.FromMinutes(minutes)).ToString("zzz"):"时区未知";

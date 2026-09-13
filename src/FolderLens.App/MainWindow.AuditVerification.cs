@@ -134,9 +134,11 @@ public sealed partial class MainWindow
             foreach(string kind in new[]{"image","video"})
             {
             selected=new FileRow(0);selected.Fill(new(0,"layout",1,kind=="image"?"图片预览.png":"视频预览.mp4","",0,null,kind));UpdateViewerInformation();
+            if(PreviewFilePath.Text!=selected.RelativePath||PreviewFilePath.Visibility!=Visibility.Visible)errors.Add("预览底部未显示选中文件的相对路径");
             foreach(int width in new[]{220,300,650})
             {
                 PreviewPane.Width=width;Shell.UpdateLayout();await Task.Delay(30);
+                if(PreviewFilePath.FontSize!=FileTitle.FontSize||PreviewFilePath.ActualWidth>PreviewPane.ActualWidth)errors.Add("路径字号或窄栏布局不正确");
                 foreach(var button in PreviewActions.Children.OfType<Button>().Where(button=>button.Visibility==Visibility.Visible))
                 {
                     var bounds=button.TransformToVisual(PreviewPane).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));

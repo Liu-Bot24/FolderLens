@@ -45,7 +45,8 @@ public sealed partial class MainWindow
     private uint? viewerPointerId;
     private Point viewerDownPoint,viewerLastPoint,viewerTapPoint;
     private bool viewerDownOverflow,viewerPreferencesLoading,lensLoading,lensPending,viewerFindPending;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? viewerTapTimer;
+    private static readonly TimeSpan ViewerHoldDelay=TimeSpan.FromMilliseconds(200);
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? viewerTapTimer,viewerHoldTimer;
     private long viewerPressedAt;
     private bool viewerPointerMoved;
     private CancellationTokenSource? lensStop;
@@ -68,7 +69,13 @@ public sealed partial class MainWindow
             };
             Shell.KeyboardAccelerators.Add(accelerator);
         }
-        // Double-click disambiguation applies to a released click, never to press feedback.
+        viewerHoldTimer=DispatcherQueue.CreateTimer();viewerHoldTimer.IsRepeating=false;viewerHoldTimer.Interval=ViewerHoldDelay;
+        viewerHoldTimer.Tick+=(_,_)=>
+        {
+            if(!closing&&viewerPointerId is not null&&viewerGesture==ViewerGesture.Pressed&&viewerGestureSelection==selection)
+                StartViewerMagnifier();
+        };
+        // A released short click also waits for double-click disambiguation.
         viewerTapTimer=DispatcherQueue.CreateTimer();viewerTapTimer.IsRepeating=false;viewerTapTimer.Interval=TimeSpan.FromMilliseconds(Math.Max(200,GetDoubleClickTime()));
         viewerTapTimer.Tick+=async(_,_)=>
         {
@@ -260,9 +267,13 @@ public sealed partial class MainWindow
         if(!IsInViewerSurface(e.OriginalSource as DependencyObject))return;
         if(!point.Properties.IsLeftButtonPressed||selected?.Kind!="image"||fitBitmap is null||previewLoading)return;
         e.Handled=true;viewerTapTimer?.Stop();ResetViewerGesture(cancelTap:false,keepDetails:true);ImageInput.Focus(FocusState.Pointer);
-        viewerPointerId=e.Pointer.PointerId;viewerGesture=ViewerGesture.Pressed;viewerGestureSelection=selection;viewerDownPoint=viewerLastPoint=point.Position;viewerDownOverflow=ViewerHasOverflow();
+        ImageInput.CapturePointer(e.Pointer);WakeViewerCursor(point.Position);BeginViewerPress(e.Pointer.PointerId,point.Position);
+    }
+    private void BeginViewerPress(uint pointerId,Point position)
+    {
+        viewerPointerId=pointerId;viewerGesture=ViewerGesture.Pressed;viewerGestureSelection=selection;viewerDownPoint=viewerLastPoint=position;viewerDownOverflow=ViewerHasOverflow();
         viewerPressedAt=System.Diagnostics.Stopwatch.GetTimestamp();viewerPointerMoved=false;
-        ImageInput.CapturePointer(e.Pointer);WakeViewerCursor(point.Position);StartViewerMagnifier();
+        viewerHoldTimer?.Start();
     }
     private void ViewerPointerMove(object sender,PointerRoutedEventArgs e)
     {
@@ -275,7 +286,7 @@ public sealed partial class MainWindow
             {
                 viewerPointerMoved=true;
                 if(viewerDownOverflow)
-                {lensStop?.Cancel();lensPending=false;PreviewSurface.HideMagnifier();viewerGesture=ViewerGesture.Dragging;}
+                {viewerHoldTimer?.Stop();lensStop?.Cancel();lensPending=false;PreviewSurface.HideMagnifier();viewerGesture=ViewerGesture.Dragging;}
             }
         }
         if(viewerGesture==ViewerGesture.Dragging){PanViewerScreen(new((float)(point.Position.X-viewerLastPoint.X),(float)(point.Position.Y-viewerLastPoint.Y)));ImageCanvas.Invalidate();UpdateViewerCursor();}
@@ -283,10 +294,14 @@ public sealed partial class MainWindow
     }
     private async void ViewerPointerUp(object sender,PointerRoutedEventArgs e)
     {
-        if(viewerPointerId!=e.Pointer.PointerId)return;e.Handled=true;var completed=viewerGesture;viewerTapPoint=e.GetCurrentPoint(ImageCanvas).Position;
-        bool tap=!viewerPointerMoved&&System.Diagnostics.Stopwatch.GetElapsedTime(viewerPressedAt)<TimeSpan.FromMilliseconds(200);
+        if(viewerPointerId!=e.Pointer.PointerId)return;e.Handled=true;await CompleteViewerPress(e.GetCurrentPoint(ImageCanvas).Position);
+    }
+    private async Task CompleteViewerPress(Point position)
+    {
+        var completed=viewerGesture;viewerTapPoint=position;
+        bool tap=completed==ViewerGesture.Pressed&&!viewerPointerMoved&&System.Diagnostics.Stopwatch.GetElapsedTime(viewerPressedAt)<ViewerHoldDelay;
         ResetViewerGesture(cancelTap:false,keepDetails:true);
-        if(completed==ViewerGesture.Pressed||completed==ViewerGesture.Magnifier&&tap){viewerGestureSelection=selection;viewerTapTimer?.Start();}
+        if(tap){viewerGestureSelection=selection;viewerTapTimer?.Start();}
         else if(completed==ViewerGesture.Dragging)await RefreshViewerPixels();
     }
     private async void ViewerDoubleTapped(object sender,DoubleTappedRoutedEventArgs e)
@@ -295,7 +310,7 @@ public sealed partial class MainWindow
     {if(selected is null)return;e.Handled=true;ResetViewerGesture();ShowViewerContextMenu(e.GetPosition(ImageCanvas));}
     private void ResetViewerGesture(bool cancelTap=true,bool keepDetails=false)
     {
-        if(cancelTap)viewerTapTimer?.Stop();viewerGestureRevision++;
+        viewerHoldTimer?.Stop();if(cancelTap)viewerTapTimer?.Stop();viewerGestureRevision++;
         viewerGesture=ViewerGesture.None;viewerPointerId=null;ImageInput.ReleasePointerCaptures();
         lensStop?.Cancel();lensStop?.Dispose();lensStop=null;lensPending=false;PreviewSurface.HideMagnifier();if(!keepDetails){foreach(var tile in lensTiles.Values)tile.Dispose();lensTiles.Clear();}UpdateViewerCursor();
     }
@@ -371,6 +386,8 @@ public sealed partial class MainWindow
     private void BuildViewerContextMenu()
     {
         viewerContextMenu=new();
+        viewerContextMenu.Opened+=(_,_)=>SetViewerMenuNotice(true);
+        viewerContextMenu.Closed+=(_,_)=>SetViewerMenuNotice(false);
         foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适屏 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("自动适应 · Ctrl+Shift+K",ViewerAction.AutomaticSizing),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("只读旋转 · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
         {
             if(IsImageViewerAction(option.Item2)&&selected?.Kind!="image")continue;
@@ -379,8 +396,8 @@ public sealed partial class MainWindow
         }
         viewerContextMenu.Items.Add(new MenuFlyoutSeparator());
         if(selected?.Kind=="image"){var settingsItem=new MenuFlyoutItem{Text="图片查看设置…"};settingsItem.Click+=ConfigureImageViewing;viewerContextMenu.Items.Add(settingsItem);}
-        var open=new MenuFlyoutItem{Text=selected?.Kind=="video"?"使用本地播放器打开":"外部打开"};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
-        var copy=new MenuFlyoutItem{Text="复制路径"};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text="定位原文件"};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
+        var open=new MenuFlyoutItem{Text=FileCommandLabels.ExternalOpen};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
+        var copy=new MenuFlyoutItem{Text=FileCommandLabels.CopyPath};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text=FileCommandLabels.Reveal};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
     }
     private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.AutomaticSizing or ViewerAction.LockSizing or ViewerAction.Slideshow;
     private void ShowViewerContextMenu(Point at){PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();BuildViewerContextMenu();viewerContextMenu!.ShowAt(ImageCanvas,new FlyoutShowOptions{Position=at});}

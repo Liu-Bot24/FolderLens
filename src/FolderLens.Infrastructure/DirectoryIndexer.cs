@@ -215,13 +215,16 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         }
         t.Commit();return true;
     },cancellation);
+    // Keep the recursive working set first so every descendant lookup binds both
+    // columns of IX_Directories_Parent, even in a large multi-root catalog.
+    internal const string RemovedDirectoriesSql="WITH RECURSIVE removed(id) AS (SELECT directory_id FROM Directories WHERE root_id=$root AND parent_id=$dir AND entry_state='present' AND (last_seen_scan_id IS NULL OR last_seen_scan_id<>$scan) UNION ALL SELECT d.directory_id FROM removed r CROSS JOIN Directories d ON d.parent_id=r.id WHERE d.root_id=$root) ";
+    internal const string ReconcileRemovedFilesSql=RemovedDirectoriesSql+"UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE root_id=$root AND entry_state='present' AND directory_id IN (SELECT id FROM removed)";
     private Task<bool> Reconcile(string root,long epoch,string scan,string directory,long count,CancellationToken cancellation)=>catalog.Write(c=>
     {
         using var t=c.BeginTransaction();EnsureEpoch(c,t,root,epoch);
         Execute(c,t,"UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE root_id=$root AND directory_id=$dir AND entry_state<>'missing' AND (last_seen_scan_id IS NULL OR last_seen_scan_id<>$scan)",("$root",root),("$dir",directory),("$scan",scan));
-        const string removed="WITH RECURSIVE removed(id) AS (SELECT directory_id FROM Directories WHERE root_id=$root AND parent_id=$dir AND entry_state='present' AND (last_seen_scan_id IS NULL OR last_seen_scan_id<>$scan) UNION ALL SELECT d.directory_id FROM Directories d JOIN removed r ON d.parent_id=r.id) ";
-        Execute(c,t,removed+"UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE entry_state='present' AND directory_id IN (SELECT id FROM removed)",("$root",root),("$dir",directory),("$scan",scan));
-        Execute(c,t,removed+"UPDATE Directories SET entry_state='missing' WHERE directory_id IN (SELECT id FROM removed)",("$root",root),("$dir",directory),("$scan",scan));
+        Execute(c,t,ReconcileRemovedFilesSql,("$root",root),("$dir",directory),("$scan",scan));
+        Execute(c,t,RemovedDirectoriesSql+"UPDATE Directories SET entry_state='missing' WHERE directory_id IN (SELECT id FROM removed)",("$root",root),("$dir",directory),("$scan",scan));
         Execute(c,t,"UPDATE DirectoryScans SET state='completed',entry_count=$count,error_code=NULL WHERE scan_id=$scan AND directory_id=$dir",("$count",count),("$scan",scan),("$dir",directory));t.Commit();return true;
     },cancellation);
     private Task<bool> SetDirectoryState(string root,long epoch,string scan,string directory,string state,string? error,long count,CancellationToken cancellation)=>catalog.Write(c=>
