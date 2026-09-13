@@ -7,18 +7,15 @@ namespace FolderLens.UnitTests;
 public sealed class PlaylistTests
 {
     [Fact]
-    public async Task SelectedRangesAreMergedAndStreamedInSnapshotOrderAcrossSegments()
+    public async Task SelectedRangesAreMergedAndStreamedInSnapshotOrder()
     {
         string directory=Temp();await using var catalog=new CatalogStore(Path.Combine(directory,"data"));await catalog.Initialize();await catalog.SeedBenchmark(7);
         await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET kind='video' WHERE entry_id<>'000000000002'";return command.ExecuteNonQuery();});
         var handle=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=[],Grouping=new(true)},1,1);
         OrdinalRange[] selection=[new(5,2),new(1,3),new(0,2)];
         string output=Path.Combine(directory,"lists");
-        var first=await MediaTools.Playlist(catalog,handle,directory,output,0,CancellationToken.None,2,selection);
-        var second=await MediaTools.Playlist(catalog,handle,directory,output,first.NextOrdinal!.Value,CancellationToken.None,2,selection);
-        var third=await MediaTools.Playlist(catalog,handle,directory,output,second.NextOrdinal!.Value,CancellationToken.None,2,selection);
-        Assert.Equal(3,first.NextOrdinal);Assert.Equal(6,second.NextOrdinal);Assert.Null(third.NextOrdinal);
-        var actual=new List<string>();foreach(var batch in new[]{first,second,third})actual.AddRange((await File.ReadAllLinesAsync(batch.Path)).Skip(2));
+        var batch=await MediaTools.Playlist(catalog,handle,directory,output,0,CancellationToken.None,selection:selection);
+        var actual=(await File.ReadAllLinesAsync(batch.Path)).Skip(2).ToArray();
         Assert.Equal(new[]{1,3,4,6,7}.Select(index=>Path.Combine(directory,$"file{index}.jpg")),actual);
         Assert.DoesNotContain(Path.Combine(directory,"file5.jpg"),actual);
         await Assert.ThrowsAsync<InvalidOperationException>(()=>MediaTools.Playlist(catalog,handle,directory,output,0,CancellationToken.None,selection:[]));
@@ -51,19 +48,19 @@ public sealed class PlaylistTests
         Assert.Equal(new[]{Path.Combine(directory,"actual-video.bin")},(await File.ReadAllLinesAsync(batch.Path)).Skip(2));
     }
     [Fact]
-    public async Task SegmentsFixedOrderWithoutDroppingVideosAndSupportsCurrentRange()
+    public async Task RejectsOverLimitWithoutPublishingAndAcceptsExactlyTenThousandInFixedOrder()
     {
         string directory=Temp(),root=Path.Combine(directory,"中文 源目录");
         await using var catalog=new CatalogStore(Path.Combine(directory,"data"));await catalog.Initialize();await catalog.SeedBenchmark(10004);
         await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET relative_path=replace(relative_path,'.jpg','.mp4'),kind='video' WHERE entry_id<>'000000000002'";return cmd.ExecuteNonQuery();});
         var handle=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=[]},1,1);
         string output=Path.Combine(directory,"lists");
-        var first=await MediaTools.Playlist(catalog,handle,root,output,0,CancellationToken.None);
-        Assert.Equal(10000,first.Count);Assert.Equal(0,first.FirstOrdinal);Assert.Equal(10000,first.LastOrdinal);Assert.Equal(10001,first.NextOrdinal);
-        var second=await MediaTools.Playlist(catalog,handle,root,output,first.NextOrdinal!.Value,CancellationToken.None);
-        Assert.Equal(3,second.Count);Assert.Null(second.NextOrdinal);
-        var lines=(await File.ReadAllLinesAsync(first.Path)).Skip(2).Concat((await File.ReadAllLinesAsync(second.Path)).Skip(2)).ToArray();
-        Assert.Equal(10003,lines.Distinct().Count());Assert.Equal(Path.Combine(root,"file1.mp4"),lines[0]);Assert.Equal(Path.Combine(root,"file10004.mp4"),lines[^1]);Assert.DoesNotContain(lines,line=>line.EndsWith(".jpg"));
+        var error=await Assert.ThrowsAsync<InvalidOperationException>(()=>MediaTools.Playlist(catalog,handle,root,output,0,CancellationToken.None));
+        Assert.Contains("10,000",error.Message);Assert.Empty(Directory.GetFiles(output));
+        var exact=await MediaTools.Playlist(catalog,handle,root,output,0,CancellationToken.None,selection:[new(0,10001)]);
+        Assert.Equal(10000,exact.Count);
+        var lines=(await File.ReadAllLinesAsync(exact.Path)).Skip(2).ToArray();
+        Assert.Equal(10000,lines.Distinct().Count());Assert.Equal(Path.Combine(root,"file1.mp4"),lines[0]);Assert.Equal(Path.Combine(root,"file10001.mp4"),lines[^1]);Assert.DoesNotContain(lines,line=>line.EndsWith(".jpg"));
         var current=await MediaTools.Playlist(catalog,handle,root,output,10002,CancellationToken.None);
         Assert.Equal(2,current.Count);Assert.Equal(Path.Combine(root,"file10003.mp4"),(await File.ReadAllLinesAsync(current.Path))[2]);
         Assert.Empty(Directory.GetFiles(output,"*.tmp"));
