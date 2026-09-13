@@ -23,6 +23,12 @@ public sealed partial class MainWindow
         Check(!editor.Ranges.ContainsKey("durationMs") && !editor.View.Children.OfType<Expander>().Any(x => (string)x.Header == "播放信息"), "图片不提供时长和编码条件");
         Check(new AdvancedFilterEditor(source with { Kinds = ["video"] }).Ranges.ContainsKey("durationMs"), "视频提供时长条件");
         Check(!new AdvancedFilterEditor(source with { Kinds = ["audio"], Dates = [] }).Ranges.ContainsKey("width"), "音频不提供画面尺寸条件");
+        var documents=new AdvancedFilterEditor(source with{Kinds=[],Extensions=["pdf"],Dates=[]});
+        Check(!documents.Ranges.ContainsKey("width")&&!documents.Ranges.ContainsKey("durationMs")&&!documents.Dates.ContainsKey("captured"),"PDF 不提供图片和媒体专用条件");
+        var presetPeer=new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(documents.DatePresetButtons["modified:最近 7 天"]);
+        ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)presetPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+        var recent=documents.Read([]).Dates.Single();
+        Check(DateTimeOffset.Parse(recent.StartInclusive).LocalDateTime.Date==DateTime.Today.AddDays(-6)&&DateTimeOffset.Parse(recent.EndExclusive).LocalDateTime.Date==DateTime.Today.AddDays(1),"最近 7 天按本地日历包含今天且排除明天");
         var inherited = new AdvancedFilterEditor(source with { Ranges = new() { ["durationMs"] = new(100, 1000) } });
         Check(inherited.Read([]).Ranges.ContainsKey("durationMs"), "跨类型已有条件保持可编辑并保留");
         inherited.Ranges["durationMs"].Min.Text = ""; inherited.Ranges["durationMs"].Max.Text = "";

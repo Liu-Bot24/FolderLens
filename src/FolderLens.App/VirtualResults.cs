@@ -14,7 +14,7 @@ public sealed class FileRow : ObservableObject
     private string name="加载中…",path="",detail="";
     private ImageSource? thumbnail;
     private string thumbnailError="";
-    public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
+    public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
     public string ThumbnailErrorLabel=>Kind=="video"?"视频封面不可用":"缩略图不可用";
     public Visibility ThumbnailErrorVisibility=>ThumbnailError.Length==0?Visibility.Collapsed:Visibility.Visible;
     public void FailThumbnail(Exception error)
@@ -43,7 +43,7 @@ public sealed class FileRow : ObservableObject
     public long? ModifiedUtcTicks {get;private set;}
     public string? HydrationState {get;private set;}
     private string kind="other";
-    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));}}}
+    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));}}}
     public string SizeText=>FormatBytes(Item?.Bytes??0);
     private double cardWidth=144;
     private Visibility pathVisibility=Visibility.Collapsed;
@@ -54,11 +54,14 @@ public sealed class FileRow : ObservableObject
     public string Name {get=>name;private set=>SetProperty(ref name,value);}
     public string RelativePath {get=>path;private set=>SetProperty(ref path,value);}
     public string Detail {get=>detail;private set=>SetProperty(ref detail,value);}
-    public ImageSource? Thumbnail {get=>thumbnail;set=>SetProperty(ref thumbnail,value);}
+    public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value))OnPropertyChanged(nameof(FileIconVisibility));}}
+    public Visibility FileIconVisibility=>Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
+    public string FileTypeLabel=>FileTypeDisplay.Label(Name,Kind);
+    public string FileTypeBadge=>FileTypeDisplay.Badge(Name,Kind);
     public SnapshotItem? Item {get;private set;}
     public FileRow(long ordinal)=>Ordinal=ordinal;
     public void Relocate(long ordinal,SnapshotGroup? group){Ordinal=ordinal;if(Item is not null)Item=Item with{Ordinal=ordinal,Group=group};}
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced)DurationText="";Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";}
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced)DurationText="";Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";Detail=error.Message;}
     public void DescribeImage(int width,int height,string format)=>Detail=$"{width} × {height}  {format.ToUpperInvariant()}";
     public void UpdateProperties(FileProperties file)

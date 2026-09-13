@@ -18,6 +18,10 @@
           <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="6">
             <Grid>
               <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+              <StackPanel Visibility="{x:Bind FileIconVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="5" ToolTipService.ToolTip="{x:Bind FileTypeLabel, Mode=OneWay}">
+                <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" />
+                <TextBlock Text="{x:Bind FileTypeBadge, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" />
+              </StackPanel>
               <StackPanel Visibility="{x:Bind ThumbnailErrorVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" ToolTipService.ToolTip="{x:Bind ThumbnailError, Mode=OneWay}" AutomationProperties.Name="{x:Bind ThumbnailError, Mode=OneWay}">
                 <FontIcon Glyph="&#xE783;" FontSize="22" Foreground="{ThemeResource BrowserWarningBrush}" />
                 <TextBlock Text="{x:Bind ThumbnailErrorLabel, Mode=OneWay}" FontSize="11" />
@@ -374,6 +378,16 @@
           </StackPanel>
           <StackPanel x:Name="TextTools" Visibility="Collapsed" Spacing="3">
             <TextBlock x:Name="TextSelectionStatus" TextWrapping="Wrap" />
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button x:Name="ReaderPreviousPage" Content="上一页" Click="TextPrevious" />
+                <Button x:Name="ReaderNextPage" Content="下一页" Click="TextNext" />
+                <Button x:Name="ReaderRenderMode" Content="查看原文" Click="ToggleMarkdown" Visibility="Collapsed" />
+                <Button Content="查找" Click="OpenReaderSearch" ToolTipService.ToolTip="在整个文档中查找（Ctrl+F）" />
+                <Button Content="A−" Click="DecreaseReaderFont" ToolTipService.ToolTip="缩小文字" AutomationProperties.Name="缩小文字" />
+                <Button Content="A+" Click="IncreaseReaderFont" ToolTipService.ToolTip="放大文字" AutomationProperties.Name="放大文字" />
+              </StackPanel>
+            </ScrollViewer>
             <Button Content="阅读工具 ▾">
               <Button.Flyout>
                 <Flyout x:Name="TextToolsFlyout">
@@ -393,7 +407,6 @@
                       <ComboBoxItem Content="GB18030" Tag="gb18030" />
                       <ComboBoxItem Content="GBK" Tag="gb2312" />
                     </ComboBox>
-                    <Button Content="原文 / Markdown 排版" Click="ToggleMarkdown" />
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Button Content="全选文档" Click="SelectWholeText" />
                       <Button Content="复制所选" Click="CopyTextSelection" />

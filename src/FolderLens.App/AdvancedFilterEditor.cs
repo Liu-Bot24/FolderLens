@@ -14,6 +14,7 @@ internal sealed class AdvancedFilterEditor
     internal Dictionary<string, (TextBox Min, TextBox Max)> Ranges { get; } = [];
     internal Dictionary<string, (CalendarDatePicker From, CalendarDatePicker To)> Dates { get; } = [];
     internal Dictionary<string, Button> ClearDateButtons { get; } = [];
+    internal Dictionary<string, Button> DatePresetButtons { get; } = [];
     private readonly Dictionary<string, (DateTimeOffset? From, DateTimeOffset? To)> initialDates = [];
     private readonly NumberBox ratioMin = Number("最小宽高比"), ratioMax = Number("最大宽高比");
     private readonly NumberBox fpsMin = Number("最低帧率"), fpsMax = Number("最高帧率");
@@ -24,7 +25,7 @@ internal sealed class AdvancedFilterEditor
     internal AdvancedFilterEditor(FilterSpec filter)
     {
         original = filter;
-        bool all = filter.Kinds.Length == 0;
+        bool all = filter.Kinds.Length == 0 && filter.Extensions.Length == 0;
         bool visual = all || filter.Kinds.Any(k => k is "image" or "video");
         bool video = all || filter.Kinds.Contains("video");
         bool audio = video || filter.Kinds.Contains("audio");
@@ -59,6 +60,7 @@ internal sealed class AdvancedFilterEditor
             if (audio || filter.AudioCodecs.Length > 0) playback.Children.Add(audioCodec);
         }
         var datePanel = Section("日期", false);
+        datePanel.Children.Add(new TextBlock{Text="修改日期与创建日期来自文件属性；拍摄日期来自图片元数据。导出文件名中的日期不会自动当作上述日期。",TextWrapping=TextWrapping.Wrap,FontSize=12});
         foreach (var field in new[] { ("modified", "修改日期"), ("created", "创建日期"), ("captured", "拍摄日期") })
         {
             var saved = filter.Dates.SingleOrDefault(d => d.Field == field.Item1);
@@ -72,6 +74,18 @@ internal sealed class AdvancedFilterEditor
                 to.Date = CalendarValue(saved.EndExclusive, saved.Clock, endExclusive: true);
             }
             Dates[field.Item1] = (from, to); initialDates[field.Item1] = (from.Date, to.Date);
+            var presets=new Grid{ColumnSpacing=6,RowSpacing=6};
+            presets.ColumnDefinitions.Add(new());presets.ColumnDefinitions.Add(new());presets.RowDefinitions.Add(new());presets.RowDefinitions.Add(new());
+            int presetIndex=0;
+            foreach(var preset in new[]{("今天",0),("最近 7 天",6),("最近 30 天",29),("本月",-1)})
+            {
+                var button=new Button{Content=preset.Item1,Padding=new(8,2,8,2),MinHeight=28};
+                AutomationProperties.SetName(button,field.Item2+"："+preset.Item1);
+                button.Click+=(_,_)=>{var today=DateTimeOffset.Now.Date;from.Date=preset.Item2<0?new DateTime(today.Year,today.Month,1):today.AddDays(-preset.Item2);to.Date=today;};
+                Grid.SetColumn(button,presetIndex%2);Grid.SetRow(button,presetIndex/2);presetIndex++;DatePresetButtons[field.Item1+":"+preset.Item1]=button;
+                presets.Children.Add(button);
+            }
+            datePanel.Children.Add(presets);
             var line = Pair(field.Item2, from, to);
             var heading = new Grid(); heading.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); heading.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
             heading.Children.Add(new TextBlock { Text = field.Item2, VerticalAlignment = VerticalAlignment.Center });
