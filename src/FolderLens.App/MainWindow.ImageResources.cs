@@ -29,7 +29,7 @@ public sealed partial class MainWindow
         if(row?.Kind=="audio")
         {
             long audioSelection=selection;
-            try{await LoadMedia(Path.Combine(root,row.RelativePath),"audio",audioSelection,selectionStop.Token);}
+            try{await LoadMedia(SourcePath(row),"audio",audioSelection,selectionStop.Token);}
             catch(OperationCanceledException){}
             catch(Exception error){if(audioSelection==selection&&!closing)ShowPreviewError(error);}
             return;

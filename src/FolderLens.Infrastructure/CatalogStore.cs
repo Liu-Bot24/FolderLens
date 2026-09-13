@@ -8,12 +8,16 @@ namespace FolderLens.Infrastructure;
 public sealed record FileRecord(string EntryId,string RootId,string DirectoryId,string RelativePath,string Name,string Kind,long Version,long Bytes,long? Allocated,long Modified,string? Format,long? Width,long? Height,bool? Raw,bool? Animated);
 public sealed record ResultHandle(string Id,string RootId,long Epoch,long Generation,long Count,long Pending,long Unresolvable)
 {
+    public string? CollectionId {get;init;}
     public long ConfirmedMatchCount { get; init; } = Count;
     public bool IsPendingView { get; init; }
 }
 public sealed record SnapshotItem(long Ordinal,string EntryId,long Version,string RelativePath,string DirectoryId,long Bytes,long? Allocated,string Kind)
 {
     public SnapshotGroup? Group {get;init;}
+    public string? SourceRootId {get;init;}
+    public string? SourceRootPath {get;init;}
+    public long? SourceRootEpoch {get;init;}
 }
 public sealed record SnapshotGroup(string Id,string RelativePath,long Bytes,long MatchCount,long Start,long Count,string ScanState,string CapacityScope);
 public sealed record FirstResultPage(IReadOnlyList<SnapshotItem> Items, long CatalogRevision, bool IsPendingView);
@@ -62,7 +66,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private static bool InitializeSchema(SqliteConnection c,string name)
     {
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";long version=(long)cmd.ExecuteScalar()!;
-        long supported=3;
+        long supported=4;
         if(version>supported)throw new InvalidDataException("数据库由较新版本创建，请使用匹配版本。");
         bool existing=version!=0;
         if(version==0)
@@ -130,8 +134,9 @@ public sealed partial class CatalogStore : IAsyncDisposable
                     PRIMARY KEY(session_id,group_id),UNIQUE(session_id,start_ordinal)
                 ) STRICT;
                 PRAGMA user_version=3;
-                """;cmd.ExecuteNonQuery();migration.Commit();
+                """;cmd.ExecuteNonQuery();migration.Commit();version=3;
         }
+        if(version==3)MigrateCollections(c,name,existing);
         return true;
     }
     public Task<long> OpenRoot(string rootId,string path,CancellationToken cancellation=default)=>writer.Execute(c=>
@@ -162,10 +167,10 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var grouping=filter.Grouping.Enabled?new FolderGroupingQuery(c,transaction,filter,cancellation):null;
         using var cmd=c.CreateCommand();cmd.Transaction=transaction;
         string predicate=filter.IncludePending ? $"({query.CandidateExpression}) AND ({query.StateExpression})='Pending'" : query.MatchExpression;
-        cmd.CommandText=$"SELECT f.entry_id,f.file_version,f.relative_path,f.directory_id,f.logical_bytes,f.allocated_bytes,f.kind FROM Files f {(grouping is null?"":FolderGroupingQuery.Join)} WHERE {predicate} ORDER BY {(grouping is null?"":FolderGroupingQuery.OrderPrefix)}{query.OrderBy} LIMIT 256";
+        cmd.CommandText=$"SELECT f.entry_id,f.file_version,f.relative_path,f.directory_id,f.logical_bytes,f.allocated_bytes,f.kind,f.root_id,r.display_path,r.root_epoch FROM Files f JOIN Roots r ON r.root_id=f.root_id {(grouping is null?"":FolderGroupingQuery.Join)} WHERE {predicate} ORDER BY {(grouping is null?"":FolderGroupingQuery.OrderPrefix)}{query.OrderBy} LIMIT 256";
         foreach(var p in query.Parameters)cmd.Parameters.AddWithValue(p.Key,p.Value);
         using var rows=cmd.ExecuteReader();var items=new List<SnapshotItem>(256);
-        while(rows.Read()){cancellation.ThrowIfCancellationRequested();items.Add(new(items.Count,rows.GetString(0),rows.GetInt64(1),rows.GetString(2),rows.GetString(3),rows.GetInt64(4),rows.IsDBNull(5)?null:rows.GetInt64(5),rows.GetString(6)));}
+        while(rows.Read()){cancellation.ThrowIfCancellationRequested();items.Add(new(items.Count,rows.GetString(0),rows.GetInt64(1),rows.GetString(2),rows.GetString(3),rows.GetInt64(4),rows.IsDBNull(5)?null:rows.GetInt64(5),rows.GetString(6)){SourceRootId=rows.GetString(7),SourceRootPath=rows.GetString(8),SourceRootEpoch=rows.GetInt64(9)});}
         rows.Close();transaction.Commit();return new FirstResultPage(items,rev,filter.IncludePending);
     },cancellation);
 
@@ -178,7 +183,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
 
     public Task<long?> FindOrdinal(string snapshotId,string relativePath,CancellationToken cancellation=default)=>sessionReader.Execute<long?>(c=>
     {
-        using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND snapshot_relative_path=$path ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
+        using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND (snapshot_relative_path=$path OR lens_location(source_root_path,snapshot_relative_path,'sensitive')=$path) ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
     },cancellation);
 
     private static void RegisterFunctions(SqliteConnection connection)
@@ -284,11 +289,11 @@ public sealed partial class CatalogStore : IAsyncDisposable
             }
             using var read=c.CreateCommand();read.Transaction=readTransaction;
             string groupColumns=grouping is null?"NULL,NULL,NULL,NULL":"owner.id,owner.path,CASE WHEN owner.depth=0 THEN owner.direct_bytes ELSE owner.bytes END,CASE WHEN owner.depth=0 THEN owner.direct_matches ELSE owner.matches END";
-            read.CommandText=$"SELECT f.entry_id,f.file_version,f.path_revision,f.directory_id,f.relative_path,f.logical_bytes,f.allocated_bytes,f.physical_identity,f.kind,{query.StateExpression} AS match_state,{groupColumns} FROM Files f {(grouping is null?"":FolderGroupingQuery.Join)} WHERE {query.CandidateExpression} ORDER BY {(grouping is null?"":FolderGroupingQuery.OrderPrefix)}{query.OrderBy}";
+            read.CommandText=$"SELECT f.entry_id,f.file_version,f.path_revision,f.directory_id,f.relative_path,f.logical_bytes,f.allocated_bytes,f.physical_identity,f.kind,{query.StateExpression} AS match_state,{groupColumns},f.root_id,r.display_path,r.root_epoch FROM Files f JOIN Roots r ON r.root_id=f.root_id {(grouping is null?"":FolderGroupingQuery.Join)} WHERE {query.CandidateExpression} ORDER BY {(grouping is null?"":FolderGroupingQuery.OrderPrefix)}{query.OrderBy}";
             foreach(var p in query.Parameters)read.Parameters.AddWithValue(p.Key,p.Value);
             using var source=read.ExecuteReader();
-            using var add=session.CreateCommand();add.CommandText="INSERT INTO ResultItems(session_id,ordinal,entry_id,observed_version,observed_path_revision,directory_id,snapshot_relative_path,snapshot_logical_bytes,snapshot_allocated_bytes,snapshot_physical_identity,snapshot_kind,group_id) VALUES($id,$ordinal,$entry,$version,$pathrev,$dir,$path,$bytes,$allocated,$physical,$kind,$group)";
-            foreach(string key in new[]{"$id","$ordinal","$entry","$version","$pathrev","$dir","$path","$bytes","$allocated","$physical","$kind","$group"})add.Parameters.Add(new SqliteParameter(key,DBNull.Value));
+            using var add=session.CreateCommand();add.CommandText="INSERT INTO ResultItems(session_id,ordinal,entry_id,observed_version,observed_path_revision,directory_id,snapshot_relative_path,snapshot_logical_bytes,snapshot_allocated_bytes,snapshot_physical_identity,snapshot_kind,group_id,source_root_id,source_root_path,source_root_epoch) VALUES($id,$ordinal,$entry,$version,$pathrev,$dir,$path,$bytes,$allocated,$physical,$kind,$group,$sourceId,$sourcePath,$sourceEpoch)";
+            foreach(string key in new[]{"$id","$ordinal","$entry","$version","$pathrev","$dir","$path","$bytes","$allocated","$physical","$kind","$group","$sourceId","$sourcePath","$sourceEpoch"})add.Parameters.Add(new SqliteParameter(key,DBNull.Value));
             string? previousGroup=null;
             using var scan=c.CreateCommand();scan.Transaction=readTransaction;scan.CommandText="SELECT scan_state FROM Roots WHERE root_id=$root";scan.Parameters.AddWithValue("$root",filter.RootId);string scanState=scan.ExecuteScalar()?.ToString()??"unknown";
             add.Prepare();SqliteTransaction? transaction=null;long batchBytes=0;
@@ -313,7 +318,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
                     transaction??=session.BeginTransaction();add.Transaction=transaction;
                     add.Parameters[0].Value=id;add.Parameters[1].Value=count;
                     for(int i=0;i<9;i++)add.Parameters[i+2].Value=source.GetValue(i);
-                    add.Parameters[11].Value=source.GetValue(10);
+                    add.Parameters[11].Value=source.GetValue(10);for(int i=0;i<3;i++)add.Parameters[12+i].Value=source.GetValue(14+i);
                     if(grouping is not null&&source.GetString(10)!=previousGroup)
                     {
                         previousGroup=source.GetString(10);
@@ -351,7 +356,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
             // A cancellation racing the Ready commit is still terminally Cancelled.
             stop.Token.ThrowIfCancellationRequested();
             activeSessionId=id;
-            return new(id,filter.RootId,epoch,generation,count,pending,unresolvable){ConfirmedMatchCount=matched,IsPendingView=filter.IncludePending};
+            return new(id,filter.RootId,epoch,generation,count,pending,unresolvable){ConfirmedMatchCount=matched,IsPendingView=filter.IncludePending,CollectionId=filter.CollectionId};
         }
         catch(Exception ex)
         {
@@ -382,10 +387,10 @@ public sealed partial class CatalogStore : IAsyncDisposable
         if(ordinal<0 || count is <1 or >256)throw new ArgumentOutOfRangeException(nameof(ordinal));
         return sessionReader.Execute<IReadOnlyList<SnapshotItem>>(c=>
         {
-            using var cmd=c.CreateCommand();cmd.CommandText="SELECT i.ordinal,i.entry_id,i.observed_version,i.snapshot_relative_path,i.directory_id,i.snapshot_logical_bytes,i.snapshot_allocated_bytes,i.snapshot_kind,g.group_id,g.relative_path,g.logical_bytes,g.match_count,g.start_ordinal,g.item_count,g.scan_state,g.capacity_scope FROM ResultItems i LEFT JOIN ResultGroups g ON g.session_id=i.session_id AND g.group_id=i.group_id WHERE i.session_id=$s AND i.ordinal >= $i AND EXISTS(SELECT 1 FROM ResultSessions WHERE session_id=$s AND state IN('building','ready')) ORDER BY i.ordinal LIMIT $n";
+            using var cmd=c.CreateCommand();cmd.CommandText="SELECT i.ordinal,i.entry_id,i.observed_version,i.snapshot_relative_path,i.directory_id,i.snapshot_logical_bytes,i.snapshot_allocated_bytes,i.snapshot_kind,g.group_id,g.relative_path,g.logical_bytes,g.match_count,g.start_ordinal,g.item_count,g.scan_state,g.capacity_scope,i.source_root_id,i.source_root_path,i.source_root_epoch FROM ResultItems i LEFT JOIN ResultGroups g ON g.session_id=i.session_id AND g.group_id=i.group_id WHERE i.session_id=$s AND i.ordinal >= $i AND EXISTS(SELECT 1 FROM ResultSessions WHERE session_id=$s AND state IN('building','ready')) ORDER BY i.ordinal LIMIT $n";
             cmd.Parameters.AddWithValue("$s",sessionId);cmd.Parameters.AddWithValue("$i",ordinal);cmd.Parameters.AddWithValue("$n",count);
             using var rows=cmd.ExecuteReader();var result=new List<SnapshotItem>(count);
-            while(rows.Read())result.Add(new(rows.GetInt64(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetString(4),rows.GetInt64(5),rows.IsDBNull(6)?null:rows.GetInt64(6),rows.GetString(7)){Group=rows.IsDBNull(8)?null:ReadGroup(rows,8)});
+            while(rows.Read())result.Add(new(rows.GetInt64(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetString(4),rows.GetInt64(5),rows.IsDBNull(6)?null:rows.GetInt64(6),rows.GetString(7)){Group=rows.IsDBNull(8)?null:ReadGroup(rows,8),SourceRootId=rows.IsDBNull(16)?null:rows.GetString(16),SourceRootPath=rows.IsDBNull(17)?null:rows.GetString(17),SourceRootEpoch=rows.IsDBNull(18)?null:rows.GetInt64(18)});
             return result;
         },cancellation);
     }

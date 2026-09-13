@@ -73,6 +73,7 @@ public sealed partial class MainWindow
     private void ToggleView(object sender,RoutedEventArgs args)
     {
         bool details=DetailsMode.IsChecked==true;
+        UpdatePathPresentationControl();
         if(controlsReady&&!suppressFilters&&ReferenceEquals(sender,DetailsMode))categoryDetailViews[Tag(Category)]=details;
         var previous=details?(ListViewBase)FilesGrid:FilesList;
         var next=details?(ListViewBase)FilesList:FilesGrid;

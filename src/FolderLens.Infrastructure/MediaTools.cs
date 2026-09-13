@@ -130,7 +130,6 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         if(firstOrdinal<0 || firstOrdinal>handle.Count)throw new ArgumentOutOfRangeException(nameof(firstOrdinal));
         cancellation.ThrowIfCancellationRequested();
         var ranges=selection is null?(handle.Count==0?Array.Empty<OrdinalRange>():new[]{new OrdinalRange(0,handle.Count)}):OrdinalSelection.Normalize(selection,handle.Count);
-        string basePath=Path.GetFullPath(root).TrimEnd('\\','/')+Path.DirectorySeparatorChar;
         Directory.CreateDirectory(directory);string path=Path.Combine(directory,Guid.NewGuid().ToString("N")+".m3u8");
         string temporary=path+".tmp";int written=0;long first=-1,last=-1;
         try
@@ -151,6 +150,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
                             cancellation.ThrowIfCancellationRequested();
                             if(row.Kind!="video")continue;
                             if(written==10_000)throw new InvalidOperationException("一次最多播放 10,000 个视频，请缩小筛选或选择范围。");
+                            string basePath=Path.GetFullPath(handle.CollectionId is null?root:row.SourceRootPath??throw new InvalidDataException("收藏快照缺少源目录。")).TrimEnd('\\','/')+Path.DirectorySeparatorChar;
                             string file=Path.GetFullPath(Path.Combine(basePath,row.RelativePath));
                             if(file.Any(char.IsControl)||!file.StartsWith(basePath,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("播放列表包含无效或越界路径。");
                             if(first<0)first=row.Ordinal;last=row.Ordinal;written++;

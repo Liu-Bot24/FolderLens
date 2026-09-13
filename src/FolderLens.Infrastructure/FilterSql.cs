@@ -38,7 +38,15 @@ public static class FilterSql
             string condition = $"{column} IN ({string.Join(',', values.Select(v => Param(v)))})";
             if (group is null) Known(condition); else Nullable(column, condition, group);
         }
-        Known($"f.root_id={Param(filter.RootId)} AND f.entry_state='present'");
+        string Membership(IEnumerable<string> ids)=>$"f.location_key IN(SELECT location_key FROM CollectionMembers WHERE collection_id IN({string.Join(',',ids.Select(id=>Param(id))) }))";
+        if(filter.CollectionId is {} collection)
+        {
+            Known(Membership([collection]));
+            Known("f.entry_id=(SELECT pick.entry_id FROM Files pick WHERE pick.location_key=f.location_key ORDER BY (pick.entry_state='present') DESC,pick.entry_id LIMIT 1)");
+        }
+        else Known($"f.root_id={Param(filter.RootId)} AND f.entry_state='present'");
+        if(filter.IncludeCollections.Length>0)Known(Membership(filter.IncludeCollections));
+        if(filter.ExcludeCollections.Length>0)Known("NOT ("+Membership(filter.ExcludeCollections)+")");
         string directory=filter.DirectoryScope.Replace('/','\\');
         string? directoryPrefix=directory.Length==0?null:Param(directory+"\\");
         if(directoryPrefix is not null)Known($"substr(f.relative_path,1,length({directoryPrefix}))={directoryPrefix}");
@@ -50,7 +58,7 @@ public static class FilterSql
         if(filter.DirectoryRules.Any(r=>r.Enabled))
         {
             string rules=Param(System.Text.Json.JsonSerializer.Serialize(filter.DirectoryRules));
-            Known($"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))");
+            Known(filter.CollectionId is null?$"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))":$"f.directory_id IN(SELECT d.directory_id FROM Directories d WHERE d.directory_id IN(SELECT source.directory_id FROM CollectionMembers member JOIN Files source ON source.location_key=member.location_key WHERE member.collection_id={Param(filter.CollectionId)}) AND lens_directory_visible(d.relative_path,{rules}))");
         }
         Set("f.format_id",filter.Formats,"identity");
         if (filter.Raw == "only") { Known("f.kind='image'"); Nullable("f.is_raw","f.is_raw=1","identity"); }

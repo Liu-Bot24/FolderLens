@@ -15,7 +15,7 @@ public sealed partial class MainWindow
     private void PublishFirstPage(FilterSpec filter,IReadOnlyList<SnapshotItem> items)
     {
         CancelThumbnails();
-        firstPageSequence=items.Select(item=>{var row=new FileRow(item.Ordinal);row.SetPresentation(GridCardWidth,ShowPaths.IsChecked==true);row.Fill(item);return row;}).ToArray();
+        firstPageSequence=items.Select(item=>{var row=new FileRow(item.Ordinal);row.SetPresentation(GridCardWidth,gridShowPaths);row.SetCollectionView(filter.CollectionId is not null);row.Fill(item);return row;}).ToArray();
         firstPageFilter=JsonSerializer.Serialize(filter);firstPageRows=new(firstPageSequence);
         groupedBrowserSource?.Dispose();groupedBrowserSource=null;browserGroups=null;
         var sequence=firstPageSequence;

@@ -81,7 +81,7 @@ public sealed partial class MainWindow
     }
     private async Task<PrefetchedImage?> FindPrefetched(FileRow row,int width,int height,CancellationToken token)
     {
-        string path=Path.Combine(root,row.RelativePath);
+        string path=SourcePath(row);
         if(CanAdoptPrefetch(row)&&pendingImagePrefetch is {} pending&&pending.Width>=width&&pending.Height>=height)
         {
             try{await pending.Completed.Task.WaitAsync(TimeSpan.FromMilliseconds(200),token);}
@@ -147,7 +147,7 @@ public sealed partial class MainWindow
                 if(Stamp(row) is not {} expectedStamp)continue;
                 if(await FindPrefetched(row,width,height,token) is {} ready)
                 {await PreparePrefetchedImage(ready,token);detailTargets.Add((row,ready.Message.Metadata!.Value.GetProperty("width").GetInt32(),ready.Message.Metadata.Value.GetProperty("height").GetInt32()));continue;}
-                string path=Path.Combine(sourceRoot,row.RelativePath);ImageReply? reply=null;
+                string path=SourcePath(row);ImageReply? reply=null;
                 var pending=new PendingImagePrefetch(row,sourceRootId,sourceEpoch,sourceGeneration,width,height,token);pendingImagePrefetch=pending;
                 try
                 {
@@ -192,7 +192,7 @@ public sealed partial class MainWindow
     private async Task WarmPressDetails(FileRow row,int width,int height,long current,CancellationToken token)
     {
         if(width<=0||height<=0||Stamp(row) is not {} stamp||FileKinds.Raw.Contains(Path.GetExtension(row.RelativePath)))return;
-        string path=Path.Combine(root,row.RelativePath),id=rootId;long activeEpoch=epoch;
+        string path=SourcePath(row),id=rootId;long activeEpoch=epoch;
         for(int y=Math.Max(0,height/2-512)/1024;y<=Math.Min(height-1,height/2+511)/1024;y++)
         for(int x=Math.Max(0,width/2-512)/1024;x<=Math.Min(width-1,width/2+511)/1024;x++)
         {
@@ -212,7 +212,7 @@ public sealed partial class MainWindow
     }
     private async Task<CanvasBitmap?> ReadPrefetchedDetail(FileRow row,(int X,int Y) key,CancellationToken token)
     {
-        if(Stamp(row) is not {} stamp)return null;string path=Path.Combine(root,row.RelativePath);
+        if(Stamp(row) is not {} stamp)return null;string path=SourcePath(row);
         var cached=prefetchedDetails.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Modified==stamp.ModifiedUtcTicks&&item.Length==stamp.Length&&item.X==key.X&&item.Y==key.Y);
         if(cached is null)return null;token.ThrowIfCancellationRequested();
         using var stream=new MemoryStream(cached.Png,false);using var random=stream.AsRandomAccessStream();

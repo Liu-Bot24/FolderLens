@@ -48,6 +48,6 @@ public sealed partial class MainWindow
         if(actual.Width+1>=Math.Min(sourceWidth,sourceWidth*scale)&&actual.Height+1>=Math.Min(sourceHeight,sourceHeight*scale))return;
         int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*raster)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*raster));
         if(rotation%2!=0)(width,height)=(height,width);int heldRotation=rotation;
-        var reply=await previewWorker!.Request(Path.Combine(root,row.RelativePath),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}
+        var reply=await previewWorker!.Request(SourcePath(row),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}
     }
 }

@@ -5,6 +5,13 @@ namespace FolderLens.UnitTests;
 
 public sealed class ExternalFileLaunchTests
 {
+    [Theory]
+    [InlineData("结案.pptx",true)]
+    [InlineData("report.PDF",true)]
+    [InlineData("letter.docx",true)]
+    [InlineData("unknown.exe",false)]
+    [InlineData("script.cmd",false)]
+    public void KnownDocumentsCanUseExplicitExternalOpen(string name,bool expected)=>Assert.Equal(expected,FolderLens.Core.FileCategories.SupportsExternalOpen(name,"other"));
     [Fact]
     public void CustomPlayerReceivesOneLiteralPathWithoutShellParsing()
     {

@@ -371,7 +371,7 @@ public sealed partial class MainWindow
                     var bitmap=!animated&&imagePage==0?await ReadPrefetchedDetail(selected,key,token):null;
                     if(bitmap is null)
                     {
-                        var reply=await previewWorker!.Request(Path.Combine(root,selected.RelativePath),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?animationFrameIndex:0,TileX:key.X,TileY:key.Y,PageIndex:imagePage),token,Stamp(selected));
+                        var reply=await previewWorker!.Request(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?animationFrameIndex:0,TileX:key.X,TileY:key.Y,PageIndex:imagePage),token,Stamp(selected));
                         bitmap=await LoadRenderedBitmap(reply);
                     }
                     if(token.IsCancellationRequested||revision!=viewerGestureRevision||current!=selection){bitmap.Dispose();return;}

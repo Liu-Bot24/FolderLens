@@ -9,7 +9,7 @@ public static class ExternalFileLaunch
     public static async Task<ExternalFileTarget> Resolve(CatalogStore catalog,SourceFileProbe probe,string root,string rootId,string entryId,long version,bool allowCloud,CancellationToken cancellation)
     {
         var file=await catalog.ReadFileProperties(rootId,entryId,version,cancellation).ConfigureAwait(false)??throw new IOException("文件已变化，请刷新后重新打开。");
-        if(file.EntryState!="present"||file.Kind=="other")throw new IOException("此文件当前不可打开，请刷新或定位原文件。");
+        if(file.EntryState!="present"||!FileCategories.SupportsExternalOpen(file.Name,file.Kind))throw new IOException("此文件当前不可打开，请刷新或定位原文件。");
         string basePath=Path.GetFullPath(root).TrimEnd('\\','/')+Path.DirectorySeparatorChar;
         string path=PathRules.ValidateSource(Path.GetFullPath(Path.Combine(basePath,file.RelativePath)));
         if(!path.StartsWith(basePath,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("文件路径已超出当前根目录。");

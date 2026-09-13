@@ -14,7 +14,7 @@ public sealed class SnapshotKindTests
         await using(var catalog=new CatalogStore(directory))
         {await catalog.Initialize();await catalog.SeedBenchmark(2);handle=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark"},1,1);}
         using(var connection=Open(Path.Combine(directory,"sessions.sqlite")))
-        {using var command=connection.CreateCommand();command.CommandText="DROP TABLE ResultGroups; ALTER TABLE ResultItems DROP COLUMN group_id; PRAGMA user_version=2;";command.ExecuteNonQuery();}
+        {using var command=connection.CreateCommand();LegacyCollectionSchema.Sessions(connection);command.CommandText="DROP TABLE ResultGroups; ALTER TABLE ResultItems DROP COLUMN group_id; PRAGMA user_version=2;";command.ExecuteNonQuery();}
         await using(var reopened=new CatalogStore(directory))
         {
             await reopened.Initialize();var items=await reopened.ReadPage(handle.Id,0);Assert.Equal(2,items.Count);Assert.All(items,item=>Assert.Null(item.Group));Assert.Empty(await reopened.ReadGroups(handle.Id));
@@ -54,7 +54,7 @@ public sealed class SnapshotKindTests
         using(var connection=Open(Path.Combine(directory,"sessions.sqlite")))
         {
             using var command=connection.CreateCommand();
-            command.CommandText="DROP TABLE ResultGroups; ALTER TABLE ResultItems DROP COLUMN group_id; ALTER TABLE ResultItems DROP COLUMN snapshot_kind; PRAGMA user_version=1;";command.ExecuteNonQuery();
+            LegacyCollectionSchema.Sessions(connection);command.CommandText="DROP TABLE ResultGroups; ALTER TABLE ResultItems DROP COLUMN group_id; ALTER TABLE ResultItems DROP COLUMN snapshot_kind; PRAGMA user_version=1;";command.ExecuteNonQuery();
         }
         await using(var upgraded=new CatalogStore(directory))
         {
@@ -69,7 +69,7 @@ public sealed class SnapshotKindTests
         check.CommandText="SELECT count(*) FROM ResultItems";Assert.Equal(2L,check.ExecuteScalar());
         check.CommandText="SELECT state FROM ResultSessions";Assert.Equal("ready",check.ExecuteScalar());
         using var current=Open(Path.Combine(directory,"sessions.sqlite"));using var version=current.CreateCommand();
-        version.CommandText="PRAGMA user_version";Assert.Equal(3L,version.ExecuteScalar());
+        version.CommandText="PRAGMA user_version";Assert.Equal(4L,version.ExecuteScalar());
     }
 
     private static SqliteConnection Open(string path)

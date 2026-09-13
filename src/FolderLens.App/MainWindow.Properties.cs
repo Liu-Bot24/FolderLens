@@ -21,13 +21,19 @@ public sealed partial class MainWindow
         foreach(var list in new ListViewBase[]{FilesGrid,FilesList})
         {
             var menu=new MenuFlyout();void Add(string title,RoutedEventHandler action){var item=new MenuFlyoutItem{Text=title};item.Click+=action;menu.Items.Add(item);}
+            Add("收藏所选文件…",CollectSelected);menu.Items.Add(new MenuFlyoutSeparator());
             Add(FileCommandLabels.Properties,ShowProperties);Add(FileCommandLabels.CopyPath,CopyPath);Add(FileCommandLabels.CopyFileReference,CopyFileReference);Add(FileCommandLabels.Reveal,Reveal);Add(FileCommandLabels.ExternalOpen,ExternalOpen);list.ContextFlyout=menu;
-            list.RightTapped+=(_,e)=>{if((e.OriginalSource as FrameworkElement)?.DataContext is FileRow row)list.SelectedItem=row;};
+            list.RightTapped+=(_,e)=>
+            {
+                if((e.OriginalSource as FrameworkElement)?.DataContext is not FileRow row)return;
+                int index=list.Items.IndexOf(row);
+                if(!list.SelectedRanges.Any(range=>index>=range.FirstIndex&&index<(long)range.FirstIndex+range.Length))list.SelectedItem=row;
+            };
         }
     }
     private async Task<FileProperties> ResolveRow(FileRow row,string id,CancellationToken token)
     {
-        var file=await catalog!.ReadFileProperties(id,row.Item!.EntryId,row.Item.Version,token)??throw new IOException("文件已改变，请刷新当前结果。");
+        var file=await catalog!.ReadFileProperties(SourceRootId(row),row.Item!.EntryId,row.Item.Version,token)??throw new IOException("文件已改变，请刷新当前结果。");
         row.UpdateProperties(file);return file;
     }
     private async void ShowProperties(object sender,RoutedEventArgs e)

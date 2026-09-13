@@ -40,6 +40,7 @@ public sealed partial class MainWindow
 
     private void InitializeDetails()
     {
+        detailColumns.Single(c=>c.Field=="path").PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(DetailColumn.Visibility))UpdatePathPresentationControl();};
         BindDetailColumns(DetailsHeader);
         for(int i=0;i<detailColumns.Length;i++)
         {
@@ -129,7 +130,8 @@ public sealed partial class MainWindow
         for(int i=0;i<detailSortButtons.Count;i++)
         {
             detailSortButtons[i].IsEnabled=FolderLens.Core.BrowserSortOptions.IsApplicable(Tag(Category),detailColumns[i].Field);
-            detailSortButtons[i].Content=detailColumns[i].Title+(Tag(SortField)==detailColumns[i].Field?(sortDescending?" ↓":" ↑"):"");
+            string title=detailColumns[i].Field=="path"&&activeCollectionId is not null?"原文件路径":detailColumns[i].Title;
+            detailSortButtons[i].Content=title+(Tag(SortField)==detailColumns[i].Field?(sortDescending?" ↓":" ↑"):"");
         }
     }
     private async Task RestoreDetailWidths()
