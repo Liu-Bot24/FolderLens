@@ -21,23 +21,24 @@ public sealed partial class MainWindow
     private PreviewBookmark? TakePreviewBookmark(FileRow row)
     {
         var pending=pendingPreviewRestore;pendingPreviewRestore=null;
-        if(pending is null||pending.RootVersion!=rootChangeVersion||!string.Equals(pending.Path,row.RelativePath,StringComparison.Ordinal)||Stamp(row) is not {} stamp)return null;
+        if(pending is null||pending.RootVersion!=rootChangeVersion||!string.Equals(pending.Path,BrowserPath(row),StringComparison.Ordinal)||Stamp(row) is not {} stamp)return null;
         return pending.Bookmark.ForFile(stamp.Length,stamp.ModifiedUtcTicks,row.Kind);
     }
     private string? VisibleBrowserPath()
     {
         var list=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
         int index=list.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
-        return index>=0&&index<list.Items.Count?(list.Items[index] as FileRow)?.RelativePath:null;
+        return index>=0&&index<list.Items.Count?BrowserPath(list.Items[index] as FileRow):null;
     }
-    private SavedView CaptureView(FilterSpec? filter=null)=>new(root,filter??CurrentFilter(),selected?.RelativePath,immersive?browserOffset:FindScrollViewer(DetailsMode.IsChecked==true?FilesList:FilesGrid)?.VerticalOffset??0,DetailsMode.IsChecked==true,
-        immersive?(selected?.Ordinal==browserEntryOrdinal?browserAnchorPath:selected?.RelativePath):VisibleBrowserPath(),CapturePreviewBookmark());
+    private SavedView CaptureView(FilterSpec? filter=null)=>new(root,filter??CurrentFilter(),BrowserPath(selected),immersive?browserOffset:FindScrollViewer(DetailsMode.IsChecked==true?FilesList:FilesGrid)?.VerticalOffset??0,DetailsMode.IsChecked==true,
+        immersive?(selected?.Ordinal==browserEntryOrdinal?browserAnchorPath:BrowserPath(selected)):VisibleBrowserPath(),CapturePreviewBookmark());
     private SavedView? CaptureClosingView()=>lastAppliedFilter is {} filter&&filter.RootId==rootId?CaptureView(filter):null;
     private void ApplySavedFilter(FilterSpec filter)
     {
         filter.Validate();suppressFilters=true;searchTimer?.Stop();
         try
         {
+            activeCollectionId=filter.CollectionId;includedCollectionIds=filter.IncludeCollections.ToArray();excludedCollectionIds=filter.ExcludeCollections.ToArray();UpdateCollectionFilterLabel();
             advanced=filter;folderGrouping=filter.Grouping;UpdateGroupingButton();Search.Text=filter.NamePathQuery;SetFormatChoices(filter);
             string category=FileCategories.FromFilter(filter);
             SelectTag(Category,category);UpdateSortOptions();ApplyDetailColumns();SelectTag(RawMode,filter.Raw);SelectTag(AnimationMode,filter.Animation);SelectTag(SortField,FolderLens.Core.BrowserSortOptions.IsApplicable(category,filter.Sort.Field)?filter.Sort.Field:"name");
@@ -55,7 +56,7 @@ public sealed partial class MainWindow
         pendingViewRestore=new(saved,revision,requestedRoot);
         try
         {
-            ApplySavedFilter(saved.Filter);RootPath.Text=saved.Root;DetailsMode.IsChecked=saved.Details;
+            ApplySavedFilter(saved.Filter);RootPath.Text=saved.Root;DetailsMode.IsChecked=saved.Details;UpdatePathPresentationControl();
             if(sameRoot)
             {
                 if(recordHistory&&previous is not null)navigationHistory.VisitFrom(previous);UpdateNavigationButtons();

@@ -34,7 +34,7 @@ public sealed class DetailedPropertiesTests
         await using(var legacy=new CatalogStore(path))
         {
             await legacy.Initialize();await legacy.SeedBenchmark(1);
-            await legacy.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="DROP TABLE FileDetails; UPDATE SchemaInfo SET schema_version=1; PRAGMA user_version=1;";return cmd.ExecuteNonQuery();});
+            await legacy.Write(c=>{using var cmd=c.CreateCommand();LegacyCollectionSchema.Catalog(c);cmd.CommandText="DROP TABLE FileDetails; UPDATE SchemaInfo SET schema_version=1; PRAGMA user_version=1;";return cmd.ExecuteNonQuery();});
         }
         await using(var updated=new CatalogStore(path)){await updated.Initialize();Assert.NotNull(await updated.ReadFileProperties("benchmark","000000000001",1));}
         string backup=Assert.Single(Directory.GetFiles(path,"catalog.sqlite.pre-v2-*.bak"));

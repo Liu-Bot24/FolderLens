@@ -29,7 +29,7 @@ public sealed class MultipageFileTests
         await using(var catalog=new CatalogStore(directory))
         {
             await catalog.Initialize();await catalog.SeedBenchmark(2);
-            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET page_count=2,is_raw=0,is_animated=0 WHERE entry_id='000000000001'; UPDATE SchemaInfo SET schema_version=2; PRAGMA user_version=2;";return cmd.ExecuteNonQuery();});
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();LegacyCollectionSchema.Catalog(c);cmd.CommandText="UPDATE Files SET page_count=2,is_raw=0,is_animated=0 WHERE entry_id='000000000001'; UPDATE SchemaInfo SET schema_version=2; PRAGMA user_version=2;";return cmd.ExecuteNonQuery();});
         }
         await using(var catalog=new CatalogStore(directory))
         {

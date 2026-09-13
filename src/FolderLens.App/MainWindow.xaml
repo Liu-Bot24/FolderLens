@@ -34,9 +34,9 @@
               </Border>
             </Grid>
           </Border>
-          <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" />
           <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{x:Bind RelativePath, Mode=OneWay}" Visibility="{x:Bind PathVisibility, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind DisplayPath, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind NavigationPath, Mode=OneWay}" Visibility="{x:Bind PathVisibility, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
         </StackPanel>
       </DataTemplate>
       <DataTemplate x:Key="DetailRow" x:DataType="local:FileRow">
@@ -51,8 +51,8 @@
             <ColumnDefinition Width="130" />
             <ColumnDefinition Width="90" />
           </Grid.ColumnDefinitions>
-          <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
-          <TextBlock Grid.Column="1" Text="{x:Bind RelativePath, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="1" Text="{x:Bind DisplayPath, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind NavigationPath, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
           <TextBlock Grid.Column="2" Text="{x:Bind FormatText, Mode=OneWay}" TextTrimming="CharacterEllipsis"  FontSize="12" Margin="0,0,8,0" />
           <TextBlock Grid.Column="3" Text="{x:Bind Resolution, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
           <TextBlock Grid.Column="4" Text="{x:Bind SizeText, Mode=OneWay}"  TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,0,8,0" />
@@ -130,6 +130,9 @@
         <MenuFlyoutItem Text="清除筛选" Tag="ResetFilters" Click="ResetFilters" />
       </MenuBarItem>
       <MenuBarItem Title="收藏">
+        <MenuFlyoutItem Text="收藏所选文件…" Click="CollectSelected" />
+        <MenuFlyoutItem Text="浏览 / 管理收藏夹…" Click="ManageCollections" />
+        <MenuFlyoutSeparator />
         <MenuFlyoutItem Text="保存当前视图…" Tag="SaveView" Click="SaveView" />
         <MenuFlyoutItem Text="恢复保存的视图…" Tag="RestoreView" Click="RestoreView" />
       </MenuBarItem>
@@ -178,7 +181,7 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <TextBlock Text="文件夹" Padding="12,10,8,6" FontSize="13" FontWeight="SemiBold" />
+        <Grid Padding="12,6,8,4"><TextBlock Text="文件夹" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" /><Button Content="★ 收藏夹" HorizontalAlignment="Right" Click="ManageCollections" /></Grid>
         <TreeView x:Name="FolderTree" Grid.Row="1" Expanding="ExpandFolder" ItemInvoked="InvokeFolder" SelectionMode="Single" AutomationProperties.AutomationId="FolderTree" />
       </Grid>
       <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="2" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
@@ -269,7 +272,8 @@
                       <NumberBox x:Name="MinHeight" Grid.Row="4" Grid.Column="1" Header="最小高度 · px" Minimum="0" />
                       <CheckBox x:Name="ShowHidden" Grid.Row="5" Content="显示隐藏文件" />
                       <CheckBox x:Name="Recursive" Grid.Row="5" Grid.Column="1" Content="包含子文件夹" IsChecked="True" />
-                      <CheckBox x:Name="PendingView" Grid.Row="6" Grid.ColumnSpan="2" Content="查看待判断文件" />
+                      <CheckBox x:Name="PendingView" Grid.Row="6" Content="查看待判断文件" />
+                      <Button x:Name="CollectionFilterButton" Grid.Row="6" Grid.Column="1" Content="收藏标签：不限" Click="ConfigureCollectionFilter" HorizontalAlignment="Stretch" />
                     </Grid>
                   </ScrollViewer>
                   <StackPanel Grid.Row="1" Spacing="10">

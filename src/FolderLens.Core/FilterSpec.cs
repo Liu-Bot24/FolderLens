@@ -27,6 +27,9 @@ public sealed record FilterSpec
 {
     public int SchemaVersion { get; init; } = 1;
     public string RootId { get; init; } = "";
+    public string? CollectionId { get; init; }
+    public string[] IncludeCollections { get; init; } = [];
+    public string[] ExcludeCollections { get; init; } = [];
     public bool Recursive { get; init; } = true;
     public string DirectoryScope { get; init; } = "";
     public bool ScopeDirectFiles { get; init; }
@@ -58,6 +61,10 @@ public sealed record FilterSpec
 
     public void Validate()
     {
+        static bool ValidCollection(string id)=>Guid.TryParseExact(id,"N",out _);
+        if(CollectionId is not null&&!ValidCollection(CollectionId)||IncludeCollections.Length>64||ExcludeCollections.Length>64||IncludeCollections.Concat(ExcludeCollections).Any(id=>!ValidCollection(id)))throw new ArgumentException("收藏夹筛选无效。");
+        if(IncludeCollections.Distinct(StringComparer.Ordinal).Count()!=IncludeCollections.Length||ExcludeCollections.Distinct(StringComparer.Ordinal).Count()!=ExcludeCollections.Length)throw new ArgumentException("收藏夹筛选不应重复。");
+        if(CollectionId is not null&&Grouping.Enabled)throw new ArgumentException("收藏夹浏览不按物理目录分组。");
         Grouping.Validate();
         if(FileExtensions.Length>64||FileExtensions.Distinct(StringComparer.Ordinal).Count()!=FileExtensions.Length||FileExtensions.Any(e=>e.Length>255||e!=e.ToLowerInvariant()||e.Any(c=>char.IsControl(c)||"\\/:*?\"<>|".Contains(c))))throw new ArgumentException("扩展名选择无效。");
         _=new DirectoryRuleSet(DirectoryRules);

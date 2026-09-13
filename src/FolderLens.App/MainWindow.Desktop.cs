@@ -33,6 +33,15 @@ public sealed partial class MainWindow
     private sealed record FolderNode(string Path,string Label,string? CatalogRoot=null,string Relative="",string BasePath="",long? PageOffset=null)
     { public override string ToString()=>Label; }
     private sealed record DesktopState(double ThumbnailSize=144,bool ShowPaths=false,double SidebarWidth=300,bool Details=false);
+    private bool gridShowPaths;
+    private void UpdatePathPresentationControl()
+    {
+        bool details=DetailsMode.IsChecked==true;
+        ShowPaths.Content=activeCollectionId is null?"相对路径":"文件路径";
+        ShowPaths.IsEnabled=!details;
+        ShowPaths.IsChecked=details?detailColumns.Single(c=>c.Field=="path").Visible:gridShowPaths;
+        ToolTipService.SetToolTip(ShowPaths,details?"详情视图的路径显示由路径列决定；右键列标题可选择显示的列。":"在缩略图下显示相对路径");
+    }
 
     private void InitializeDesktop()
     {
@@ -96,7 +105,7 @@ public sealed partial class MainWindow
         await RestoreDetailWidths();
         if(await settings.Load<DesktopState>("desktop.json") is {} state)
         {
-            ThumbnailSize.Value=Math.Clamp(state.ThumbnailSize,100,240);ShowPaths.IsChecked=state.ShowPaths;
+            ThumbnailSize.Value=Math.Clamp(state.ThumbnailSize,100,240);gridShowPaths=state.ShowPaths;UpdatePathPresentationControl();
             PreviewColumn.Width=new GridLength(Math.Clamp(state.SidebarWidth,220,650));DetailsMode.IsChecked=state.Details;ToggleView(this,new());
         }
         await RestorePlayerPreferences();
@@ -160,20 +169,25 @@ public sealed partial class MainWindow
         if(!controlsReady||FilesGrid.ActualWidth<=10)return;
         double width=GridCardWidth;
         if(FilesGrid.ItemsPanelRoot is ItemsWrapGrid panel)panel.ItemWidth=width+4;
-        results?.SetPresentation(width,ShowPaths.IsChecked==true);
+        results?.SetPresentation(width,gridShowPaths);
         if(FilesGrid.ItemsSource is FileRow[] initial)
-            foreach(var row in initial)row.SetPresentation(width,ShowPaths.IsChecked==true);
+            foreach(var row in initial)row.SetPresentation(width,gridShowPaths);
     }
-    private void PresentationChanged(object sender,RoutedEventArgs e)=>UpdateGridPresentation();
+    private void PresentationChanged(object sender,RoutedEventArgs e)
+    {
+        if(DetailsMode.IsChecked!=true)gridShowPaths=ShowPaths.IsChecked==true;
+        UpdatePathPresentationControl();UpdateGridPresentation();
+    }
     private void ThumbnailSizeChanged(object sender,RangeBaseValueChangedEventArgs e)=>UpdateGridPresentation();
     private async void ResetFilters(object sender,RoutedEventArgs e)
         =>await ResetBrowserFilters();
     private async Task ResetBrowserFilters()
     {
+        includedCollectionIds=[];excludedCollectionIds=[];UpdateCollectionFilterLabel();
         suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;SearchPath.IsChecked=false;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
         MinSize.Value=MaxSize.Value=MinWidth.Value=MinHeight.Value=double.NaN;suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
     }
-    private async void ParentRoot(object sender,RoutedEventArgs e){var parent=Directory.GetParent(root);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
+    private async void ParentRoot(object sender,RoutedEventArgs e){if(activeCollectionId is not null){ManageCollections(sender,e);return;}var parent=Directory.GetParent(root);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
     private void StartPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=true;PaneDivider.CapturePointer(e.Pointer);}
     private void ResizePane(object sender,PointerRoutedEventArgs e){if(resizingPane&&!immersive)PreviewColumn.Width=new GridLength(Math.Clamp(e.GetCurrentPoint(BodyGrid).Position.X,220,Math.Max(220,Math.Min(650,BodyGrid.ActualWidth*.5))));}
     private void EndPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=false;PaneDivider.ReleasePointerCapture(e.Pointer);}
@@ -224,6 +238,7 @@ public sealed partial class MainWindow
     private async void InvokeFolder(TreeView sender,TreeViewItemInvokedEventArgs e)
     {
         try{var node=e.InvokedItem as TreeViewNode;var folder=node?.Content as FolderNode??e.InvokedItem as FolderNode;
+        if(node?.Content is CollectionNode collection){await OpenCollection(collection.Id);return;}
         if(node?.Content is NavigationGroup){node.IsExpanded=!node.IsExpanded;return;}
         if(folder?.PageOffset is {} offset&&node?.Parent is {} parent){await ChangeTreePage(parent,offset);return;}
         if(folder is not null)await NavigateFolder(folder);}
@@ -248,7 +263,7 @@ public sealed partial class MainWindow
     }
     private async void CopyFileReference(object sender,RoutedEventArgs e)
     {
-        if(selected is null)return;try{var file=await StorageFile.GetFileFromPathAsync(Path.Combine(root,selected.RelativePath));var data=new DataPackage();data.SetStorageItems([file],true);data.RequestedOperation=DataPackageOperation.Copy;Clipboard.SetContent(data);}catch(Exception ex){ShowError(ex);}
+        if(selected is null)return;try{var file=await StorageFile.GetFileFromPathAsync(SourcePath(selected));var data=new DataPackage();data.SetStorageItems([file],true);data.RequestedOperation=DataPackageOperation.Copy;Clipboard.SetContent(data);}catch(Exception ex){ShowError(ex);}
     }
     private void UpdatePlaylistCommand()=>PlaylistMenu.IsEnabled=playerSupportsPlaylists&&!string.IsNullOrWhiteSpace(playerExecutable);
     private void StartPlayer(string path)

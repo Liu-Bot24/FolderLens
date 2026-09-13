@@ -11,6 +11,7 @@ public static class FileCategories
         ["archives"]=["zip","rar","7z","tar","gz","bz2","xz"]
     };
     public static string[] Extensions(string category)=>extensions.TryGetValue(category,out var items)?items.ToArray():[];
+    public static bool SupportsExternalOpen(string name,string kind)=>kind!="other"||FileKinds.Candidate(name)!="other"||extensions.Values.Any(values=>values.Contains(Path.GetExtension(name).TrimStart('.'),StringComparer.OrdinalIgnoreCase));
     public static string[] Kinds(string category)=>category switch
     {
         "image" or "video" or "audio"=>[category],"media"=>["image","video"],"text"=>["text","markdown"],_=>[]

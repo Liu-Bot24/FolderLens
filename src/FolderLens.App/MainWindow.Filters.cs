@@ -11,6 +11,9 @@ public sealed partial class MainWindow
     private void ShowActiveFilters(FilterSpec filter)
     {
         var parts=new List<string>();
+        if(filter.CollectionId is {} collection)parts.Add("收藏夹："+CollectionLabel(collection));
+        if(filter.IncludeCollections.Length>0)parts.Add("包含收藏："+string.Join("、",filter.IncludeCollections.Select(CollectionLabel)));
+        if(filter.ExcludeCollections.Length>0)parts.Add("排除收藏："+string.Join("、",filter.ExcludeCollections.Select(CollectionLabel)));
         Search.PlaceholderText=filter.SearchScope=="nameAndPath"?"搜索文件名或相对路径…":"搜索文件名…";
         if(!string.IsNullOrWhiteSpace(filter.NamePathQuery))parts.Add((filter.SearchScope=="nameAndPath"?"文件名或路径：":"文件名：")+filter.NamePathQuery);
         foreach(var range in filter.Ranges)
@@ -64,7 +67,7 @@ public sealed partial class MainWindow
         try
         {
             if(verifyVideoMetadataBarrier is not null)await verifyVideoMetadataBarrier(token);
-            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token);
+            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token,activeCollectionId);
             if(Current())
             {
                 // Cover readiness does not imply that catalog metadata was ready when
@@ -86,7 +89,7 @@ public sealed partial class MainWindow
         if(rootId.Length==0||closing)return;
         try
         {
-            long revision=rootChangeVersion;string sourceRoot=root;
+            long revision=rootChangeVersion;string sourceRoot=root;string? sourceCollection=activeCollectionId;
             var editor=new AdvancedFilterEditor(CurrentFilter());
             using var dialogStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             var rules=CurrentFilter().Exclusions.Where(r=>r.Mode=="skipScan").ToList();
@@ -95,6 +98,7 @@ public sealed partial class MainWindow
             {
                 var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
                 var folder=await picker.PickSingleFolderAsync();if(folder is null)return null;
+                if(sourceCollection is not null)return await catalog!.RelativeCollectionDirectory(sourceCollection,folder.Path,dialogStop.Token);
                 string relative=Path.GetRelativePath(sourceRoot,folder.Path);
                 if(Path.IsPathRooted(relative)||relative=="."||relative.Split('\\','/').Contains(".."))throw new ArgumentException("请选择当前根目录内的子文件夹。");
                 return relative;
@@ -103,7 +107,7 @@ public sealed partial class MainWindow
             var folderSection=editor.View.Children.Last();editor.View.Children.Remove(folderSection);editor.View.Children.Insert(0,folderSection);
             var previewCatalog=catalog!;string previewRootId=rootId;
             var directoryEditor=new DirectoryRuleEditor(CurrentFilter().DirectoryRules,PickDirectory,
-                (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token),dialogStop.Token);
+                (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token,sourceCollection),dialogStop.Token);
             exclusions.Children.Add(directoryEditor.View);
             if(legacyRules.Count>0)
             {
@@ -116,6 +120,7 @@ public sealed partial class MainWindow
                 legacySection.Children.Add(removeLegacy);
             }
             var skipSection=editor.Section("不扫描的文件夹（高级）",rules.Count>0);
+            if(sourceCollection is not null)editor.View.Children.Last().Visibility=Visibility.Collapsed;
             skipSection.Children.Add(new TextBlock{Text="这些文件夹不进入索引，例外保留不能恢复其内容。修改后需要重新扫描。通常请使用上面的文件夹筛选。",TextWrapping=TextWrapping.Wrap});
             var list=new ListView{MaxHeight=144};
             void UpdateRules()=>list.ItemsSource=rules.Select(r=>r.RelativePath).ToArray();

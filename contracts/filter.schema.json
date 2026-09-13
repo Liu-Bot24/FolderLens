@@ -15,6 +15,9 @@
     "sort"
   ],
   "properties": {
+    "collectionId": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{32}$", "description": "Browse this collection across catalog roots; null keeps the physical root scope."},
+    "includeCollections": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-fA-F0-9]{32}$"}},
+    "excludeCollections": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-fA-F0-9]{32}$"}},
     "fileExtensions": {
       "type": "array", "maxItems": 64, "uniqueItems": true,
       "items": { "type": "string", "maxLength": 255 },

@@ -53,6 +53,12 @@ public sealed class FileRow : ObservableObject
     public void SetPresentation(double width,bool showPath){CardWidth=width;PathVisibility=showPath?Visibility.Visible:Visibility.Collapsed;}
     public string Name {get=>name;private set=>SetProperty(ref name,value);}
     public string RelativePath {get=>path;private set=>SetProperty(ref path,value);}
+    public string NavigationPath=>Item?.SourceRootPath is {} source?System.IO.Path.Combine(source,RelativePath):RelativePath;
+    private bool collectionView;
+    private string entryState="present";
+    public string DisplayPath=>collectionView?NavigationPath:RelativePath;
+    public string DisplayName=>Name+(entryState=="missing"?"（未找到）":entryState=="excluded"?"（未读取）":"");
+    public void SetCollectionView(bool value){collectionView=value;OnPropertyChanged(nameof(DisplayPath));}
     public string Detail {get=>detail;private set=>SetProperty(ref detail,value);}
     public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value))OnPropertyChanged(nameof(FileIconVisibility));}}
     public Visibility FileIconVisibility=>Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
@@ -61,13 +67,14 @@ public sealed class FileRow : ObservableObject
     public SnapshotItem? Item {get;private set;}
     public FileRow(long ordinal)=>Ordinal=ordinal;
     public void Relocate(long ordinal,SnapshotGroup? group){Ordinal=ordinal;if(Item is not null)Item=Item with{Ordinal=ordinal,Group=group};}
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced)DurationText="";Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced)DurationText="";Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";Detail=error.Message;}
     public void DescribeImage(int width,int height,string format)=>Detail=$"{width} × {height}  {format.ToUpperInvariant()}";
     public void UpdateProperties(FileProperties file)
     {
         if(Item is null||Item.EntryId!=file.EntryId||Item.Version!=file.Version)return;
         Name=file.Name;RelativePath=file.RelativePath;Kind=file.Kind;ModifiedUtcTicks=file.ModifiedUtcTicks;HydrationState=file.HydrationState;
+        entryState=file.EntryState;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));
         Resolution=file.Width is {} w&&file.Height is {} h?$"{w:N0} × {h:N0}":"未知";AllocatedText=file.AllocatedBytes is {} bytes?FormatBytes(bytes):"未知";
         ModifiedText=new DateTime(file.ModifiedUtcTicks,DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
         DurationText=file.DurationMs is {} ms?$"{ms/3600000}:{ms/60000%60:D2}:{ms/1000%60:D2}":"";FormatText=(file.Format??System.IO.Path.GetExtension(file.Name).TrimStart('.')).ToUpperInvariant();
@@ -94,9 +101,10 @@ public sealed partial class VirtualResults : IList,IDisposable
     public int Count {get;}
     private double cardWidth=144;
     private bool showPaths;
+    private readonly bool collectionView;
     public void SetPresentation(double width,bool paths){cardWidth=width;showPaths=paths;foreach(var row in CachedRows())row.SetPresentation(width,paths);}
     public VirtualResults(CatalogStore catalog,ResultHandle handle,DispatcherQueue dispatcher)
-        :this(checked((int)handle.Count),(page,token)=>catalog.ReadPage(handle.Id,page*256,256,token)){}
+        :this(checked((int)handle.Count),(page,token)=>catalog.ReadPage(handle.Id,page*256,256,token)){collectionView=handle.CollectionId is not null;}
     internal VirtualResults(int count,Func<int,CancellationToken,Task<IReadOnlyList<SnapshotItem>>> readPage)
     {
         Count=count;
@@ -127,7 +135,7 @@ public sealed partial class VirtualResults : IList,IDisposable
                     row??=resolveShared?.Invoke(i);
                     if(row is not null&&!positions.TryGetValue(row,out _))Register(row,i);
                     if(row is null){row=new FileRow(i);Register(row,i);}
-                    row.SetPresentation(cardWidth,showPaths);return row;
+                    row.SetCollectionView(collectionView);row.SetPresentation(cardWidth,showPaths);return row;
                 }).ToArray();
                 pages.Add(page,rows);recent.AddLast(page);
                 // WinUI's grouped collection can retain a row after its cache page

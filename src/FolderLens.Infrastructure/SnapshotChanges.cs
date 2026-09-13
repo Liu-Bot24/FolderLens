@@ -37,7 +37,7 @@ public sealed partial class CatalogStore
             AND n.snapshot_relative_path=o.snapshot_relative_path
             AND n.snapshot_logical_bytes=o.snapshot_logical_bytes
             AND n.snapshot_allocated_bytes IS o.snapshot_allocated_bytes
-            AND n.snapshot_kind=o.snapshot_kind AND n.group_id IS o.group_id
+            AND n.source_root_id IS o.source_root_id AND n.source_root_path IS o.source_root_path AND n.source_root_epoch IS o.source_root_epoch AND n.snapshot_kind=o.snapshot_kind AND n.group_id IS o.group_id
             WHERE o.session_id=$old AND o.ordinal >= $ofirst AND o.ordinal < $oend
             AND n.ordinal >= $nfirst AND n.ordinal < $nend ORDER BY o.ordinal
             """;
@@ -79,7 +79,7 @@ public sealed partial class CatalogStore
             long Boundary(long first,long last,long shift,bool reverse)
             {
                 if(last<first)return 0;
-                command.CommandText="SELECT o.ordinal FROM ResultItems o LEFT JOIN ResultItems n ON n.session_id=$next AND n.ordinal=o.ordinal+$shift WHERE o.session_id=$previous AND o.ordinal BETWEEN $first AND $last AND (n.entry_id IS NOT o.entry_id OR n.observed_version IS NOT o.observed_version OR n.snapshot_relative_path IS NOT o.snapshot_relative_path OR n.snapshot_logical_bytes IS NOT o.snapshot_logical_bytes OR n.snapshot_allocated_bytes IS NOT o.snapshot_allocated_bytes OR n.snapshot_kind IS NOT o.snapshot_kind) ORDER BY o.ordinal "+(reverse?"DESC":"ASC")+" LIMIT 1";
+                command.CommandText="SELECT o.ordinal FROM ResultItems o LEFT JOIN ResultItems n ON n.session_id=$next AND n.ordinal=o.ordinal+$shift WHERE o.session_id=$previous AND o.ordinal BETWEEN $first AND $last AND (n.entry_id IS NOT o.entry_id OR n.observed_version IS NOT o.observed_version OR n.snapshot_relative_path IS NOT o.snapshot_relative_path OR n.snapshot_logical_bytes IS NOT o.snapshot_logical_bytes OR n.snapshot_allocated_bytes IS NOT o.snapshot_allocated_bytes OR n.snapshot_kind IS NOT o.snapshot_kind OR n.source_root_id IS NOT o.source_root_id OR n.source_root_path IS NOT o.source_root_path OR n.source_root_epoch IS NOT o.source_root_epoch) ORDER BY o.ordinal "+(reverse?"DESC":"ASC")+" LIMIT 1";
                 command.Parameters.Clear();command.Parameters.AddWithValue("$previous",previous.Id);command.Parameters.AddWithValue("$next",next.Id);command.Parameters.AddWithValue("$shift",shift);command.Parameters.AddWithValue("$first",first);command.Parameters.AddWithValue("$last",last);
                 return command.ExecuteScalar() is long mismatch?(reverse?last-mismatch:mismatch-first):last-first+1;
             }
@@ -93,10 +93,10 @@ public sealed partial class CatalogStore
     public Task<IReadOnlyList<SnapshotItem>> ReadSnapshotEntries(string sessionId,IReadOnlyList<string> entries,CancellationToken cancellation)=>sessionReader.Execute<IReadOnlyList<SnapshotItem>>(c=>
     {
         if(entries.Count>8192)throw new ArgumentOutOfRangeException(nameof(entries));
-        using var command=c.CreateCommand();command.CommandText="SELECT i.ordinal,i.entry_id,i.observed_version,i.snapshot_relative_path,i.directory_id,i.snapshot_logical_bytes,i.snapshot_allocated_bytes,i.snapshot_kind,g.group_id,g.relative_path,g.logical_bytes,g.match_count,g.start_ordinal,g.item_count,g.scan_state,g.capacity_scope FROM ResultItems i LEFT JOIN ResultGroups g ON g.session_id=i.session_id AND g.group_id=i.group_id WHERE i.session_id=$session AND i.entry_id IN(SELECT value FROM json_each($ids))";
+        using var command=c.CreateCommand();command.CommandText="SELECT i.ordinal,i.entry_id,i.observed_version,i.snapshot_relative_path,i.directory_id,i.snapshot_logical_bytes,i.snapshot_allocated_bytes,i.snapshot_kind,g.group_id,g.relative_path,g.logical_bytes,g.match_count,g.start_ordinal,g.item_count,g.scan_state,g.capacity_scope,i.source_root_id,i.source_root_path,i.source_root_epoch FROM ResultItems i LEFT JOIN ResultGroups g ON g.session_id=i.session_id AND g.group_id=i.group_id WHERE i.session_id=$session AND i.entry_id IN(SELECT value FROM json_each($ids))";
         command.Parameters.AddWithValue("$session",sessionId);command.Parameters.AddWithValue("$ids",System.Text.Json.JsonSerializer.Serialize(entries));
         using var rows=command.ExecuteReader();var found=new List<SnapshotItem>();
-        while(rows.Read()){cancellation.ThrowIfCancellationRequested();found.Add(new(rows.GetInt64(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetString(4),rows.GetInt64(5),rows.IsDBNull(6)?null:rows.GetInt64(6),rows.GetString(7)){Group=rows.IsDBNull(8)?null:ReadGroup(rows,8)});}
+        while(rows.Read()){cancellation.ThrowIfCancellationRequested();found.Add(new(rows.GetInt64(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetString(4),rows.GetInt64(5),rows.IsDBNull(6)?null:rows.GetInt64(6),rows.GetString(7)){Group=rows.IsDBNull(8)?null:ReadGroup(rows,8),SourceRootId=rows.IsDBNull(16)?null:rows.GetString(16),SourceRootPath=rows.IsDBNull(17)?null:rows.GetString(17),SourceRootEpoch=rows.IsDBNull(18)?null:rows.GetInt64(18)});}
         return found;
     },cancellation);
 }

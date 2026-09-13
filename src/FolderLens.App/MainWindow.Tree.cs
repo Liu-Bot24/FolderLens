@@ -11,6 +11,7 @@ public sealed partial class MainWindow
     private sealed record NavigationGroup(string Label){public override string ToString()=>Label;}
     private async Task InitializeNavigationTree()
     {
+        await RefreshCollectionsTree();
         var locations=await Task.Run(NavigationLocations.Read,lifetime.Token);
         if(closing)return;
         foreach(var place in locations.Places)

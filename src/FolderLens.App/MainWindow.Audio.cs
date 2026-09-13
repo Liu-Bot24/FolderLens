@@ -61,7 +61,7 @@ public sealed partial class MainWindow
                     OnCurrent(()=>{StopAudio();AudioState.Text=message;});
                 };
                 AudioState.Text="正在打开音频…";
-                player.Source=MediaSource.CreateFromUri(new Uri(Path.Combine(root,row.RelativePath)));
+                player.Source=MediaSource.CreateFromUri(new Uri(SourcePath(row)));
                 ApplyAudioRate();player.Play();audioTimer?.Start();
             }
             else if(player.PlaybackSession.PlaybackState==MediaPlaybackState.Playing)player.Pause();
