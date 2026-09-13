@@ -104,7 +104,11 @@ public sealed partial class MainWindow
                 }
                 screens.Add(new{fraction,index,elapsedMs=timer.Elapsed.TotalMilliseconds,items,loaded,ready,errors,arrived});
                 Console.WriteLine($"Gallery viewport {fraction:P0}: {ready}/{items} thumbnails, {loaded} rows, {errors} errors, {timer.ElapsedMilliseconds}ms");
-                if(!arrived||items==0||loaded<items||ready+errors<items)throw new InvalidOperationException("实际可见区域在8秒内仍有未完成的文件行或缩略图。");
+                if(!arrived||items==0||loaded<items||ready+errors<items)
+                {
+                    report["unfinishedRows"]=Viewport().Where(item=>item.Row.Thumbnail is null&&item.Row.ThumbnailError.Length==0).Select(item=>new{ordinal=item.Row.Ordinal,kind=item.Row.Kind,extension=Path.GetExtension(item.Row.RelativePath),bytes=item.Row.Item?.Bytes,requested=thumbnailRequests.ContainsKey(item.Row),visible=visible.Contains(item.Row)}).ToArray();
+                    throw new InvalidOperationException("实际可见区域在8秒内仍有未完成的文件行或缩略图。");
+                }
                 await Task.Delay(250);
             }
             if(Environment.GetCommandLineArgs().Contains("--verify-gallery-capture"))

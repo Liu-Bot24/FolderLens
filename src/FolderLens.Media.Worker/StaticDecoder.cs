@@ -135,7 +135,7 @@ internal sealed class StaticDecoder : IDisposable
         if(data.Slice(4,4).SequenceEqual("ftyp"u8))return data.Slice(8,4).SequenceEqual("avif"u8)?"avif":"heic";
         throw new NotSupportedException("Unsupported image container.");
     }
-    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false)
+    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false)
     {
         if(targetWidth is <1 or >16384 || targetHeight is <1 or >16384 || tileX<0 || tileY<0)throw new ArgumentOutOfRangeException(nameof(targetWidth));
         CheckVersion();
@@ -154,6 +154,14 @@ internal sealed class StaticDecoder : IDisposable
         {
             int x=checked(tileX*1024),y=checked(tileY*1024);if(x>=Width || y>=Height)throw new ArgumentOutOfRangeException(nameof(tileX));
             using var tile=image!.Crop(x,y,Math.Min(1024,Width-x),Math.Min(1024,Height-y));using var output=tile.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
+        }
+        else if(thumbnail&&Format=="jpeg")
+        {
+            // Load and resize together so libvips can use JPEG shrink-on-load.
+            // Keep a separate stream: the full-resolution decoder may be used later.
+            using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+            using var small=VImage.ThumbnailStream(input,targetWidth,height:targetHeight,size:Enums.Size.Down,outputProfile:"srgb",failOn:Enums.FailOn.Error);
+            using var output=small.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
         }
         else WriteFit(image!,destination,targetWidth,targetHeight);
         CheckVersion();return(Width,Height,IsRaw?"rawDeveloped":full?"full":"fit");
