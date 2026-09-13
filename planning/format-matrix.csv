@@ -5,7 +5,7 @@
 "WebP","webp","P1_MUST","probe;thumbnail;fit;full;animation","静态及动画blend/disposal","NetVips / libvips","3.2.0 / 8.18.6","","NOT_RUN","artifacts/tests/consolidation-staged-animation.trx;implementation/P1_GAPS.md","NOT_RUN"
 "APNG","apng;png","P1_MUST","probe;thumbnail;fit;full;animation","按实际内容识别，不只扩展名","libvips probe / FFmpeg animation","8.18.6 / 8.0.1","","NOT_RUN","artifacts/tests/consolidation-staged-animation.trx;implementation/P1_GAPS.md","NOT_RUN"
 "BMP","bmp","P1_MUST","probe;thumbnail;fit;full","常用非压缩/调色板变体","Magick.NET","14.17.1","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"
-"TIFF","tif;tiff","P1_MUST","probe;thumbnail;fit;full;pages","8/16位、常用压缩、多页与动画分开","NetVips / libvips","3.2.0 / 8.18.6","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"
+"TIFF","tif;tiff","P1_MUST","probe;thumbnail;fit;full","单页8/16位及常用压缩；多页按普通文件","NetVips / libvips","3.2.0 / 8.18.6","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"
 "ICO","ico","P1_MUST","probe;thumbnail;fit;full","优选最大合适图标帧；不宣称全光标格式","Magick.NET","14.17.1","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"
 "HEIC/HEIF","heic;heif","P1_MUST","probe;thumbnail;fit;full","常见单张SDR；不依赖商店安装","Magick.NET","14.17.1","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"
 "AVIF","avif","P1_MUST","probe;thumbnail;fit;full","一期强制静态SDR，不承诺动画/HDR","NetVips / libvips","3.2.0 / 8.18.6","","NOT_RUN","artifacts/m0/formats/formats-static-result.json;implementation/P1_GAPS.md","NOT_RUN"

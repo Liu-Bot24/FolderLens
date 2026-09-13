@@ -32,10 +32,11 @@ public sealed class TextLineIndex : IAsyncDisposable
     private TextLineIndex(string path,string cacheDirectory,string? encoding,long fileVersion,CancellationToken cancellation)
     {
         reader=new(path,encoding,cancellation);FileVersion=fileVersion;VersionKey=reader.Snapshot.Key(path,reader.EncodingName,fileVersion);
-        try{owner=new(cacheDirectory);try{index=owner.OpenIndex(VersionKey);}catch{owner.Dispose();throw;}}catch{reader.Dispose();throw;}
+        try{owner=new(cacheDirectory);try{index=owner.OpenIndex(VersionKey,cancellation);}catch{owner.Dispose();throw;}}catch{reader.Dispose();throw;}
         cursor=lastWritten=new(reader.BomLength,1,1);progress=new(cursor.ByteOffset,reader.Length,1,cursor.ByteOffset==reader.Length,0);
         try
         {
+            if(index.Length>TextIndexDirectory.MaximumIndexBytes)throw new IOException("文本行索引超过 64 MiB 缓存上限；仍可按字节阅读和搜索。");
             try{if(index.Length==0)Reset();else Load(cancellation);}
             catch(Exception ex) when(ex is InvalidDataException or EndOfStreamException){RebuiltCorruptCache=true;Reset();}
             reader.CheckVersion();UpdateProgress();
@@ -84,6 +85,10 @@ public sealed class TextLineIndex : IAsyncDisposable
     private Task Step(CancellationToken cancellation)=>Run(()=>
     {
         if(cursor.ByteOffset==reader.Length)return true;
+        // A step may emit one record per 4096 newlines and one final record.
+        // Reserve before mutating cursor/records so a quota failure cannot corrupt the index.
+        if(index.Length>TextIndexDirectory.MaximumIndexBytes-(PageBytes/4096+1)*RecordSize)
+            throw new IOException("文本行索引达到 64 MiB 缓存上限；仍可按字节阅读和搜索。");
         var page=reader.ReadAtBoundary(cursor.ByteOffset,PageBytes,cancellation);
         cursor=Advance(page,cursor,page.Text.Length,p=>
         {

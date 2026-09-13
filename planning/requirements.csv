@@ -23,7 +23,7 @@
 "R022","P1_MUST","图片","常用图片格式和RAW家族","M3","T015","A022a;A022b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R023","P1_MUST","图片","现代格式随包可用","M3","T015","A023a;A023b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R024","P1_MUST","图片","GIF APNG WebP动画","M3","T017","A024a;A024b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
-"R025","P1_MUST","图片","多页图片导航","M3","T017","A025a;A025b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
+"R025","P1_MUST","文件浏览","多页扫描文件按普通文件浏览","M3","T017","A025a;A025b","IN_PROGRESS","docs/PHASE_ONE_SCOPE_UPDATE.md"
 "R026","P1_MUST","图片","颜色透明和位深","M3","T016","A026a;A026b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R027","P1_MUST","图片","超大图瓦片与资源保护","M3","T018","A027a;A027b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R028","P1_MUST","图片","切换预取与旧请求隔离","M3","T019","A028a;A028b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"

@@ -9,6 +9,8 @@ internal sealed class TextIndexDirectory : IDisposable
     private readonly List<SafeFileHandle> pins=[];
     private readonly string directory;
     private const string Marker=".folderlens-text-index-v1";
+    internal const long MaximumIndexBytes=64L*1024*1024;
+    private const int MaximumFiles=8;
     public TextIndexDirectory(string directory)
     {
         this.directory=Path.GetFullPath(directory).TrimEnd('\\');
@@ -31,14 +33,44 @@ internal sealed class TextIndexDirectory : IDisposable
         }
         catch{Dispose();throw;}
     }
-    public FileStream OpenIndex(string key)
+    public FileStream OpenIndex(string key,CancellationToken cancellation=default)
     {
         if(key.Length!=64 || !key.All(Uri.IsHexDigit))throw new ArgumentException("文本索引键无效。");
-        return new FileStream(Open(Path.Combine(directory,key+".flti"),0xC0000000,4,false),FileAccess.ReadWrite,64*1024);
+        using var gate=AcquireGate(cancellation);
+        string path=Path.Combine(directory,key+".flti");
+        var files=new DirectoryInfo(directory).EnumerateFiles("*.flti").Where(file=>file.Name.Length==69&&file.Name[..64].All(Uri.IsHexDigit)).OrderBy(file=>file.LastWriteTimeUtc).ToList();
+        int target=File.Exists(path)?MaximumFiles:MaximumFiles-1;
+        foreach(var file in files.ToArray())
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if(files.Count<=target)break;
+            if(string.Equals(file.FullName,path,StringComparison.OrdinalIgnoreCase))continue;
+            // Exclusive delete-on-close cannot remove an index held by another reader.
+            // The pinned, marked directory and hash-only names contain application cache only.
+            try
+            {
+                if((file.Attributes&FileAttributes.ReparsePoint)!=0)continue;
+                using(var retired=new FileStream(Open(file.FullName,0x80010000,3,false,0,deleteOnClose:true),FileAccess.Read)){}
+                files.Remove(file);
+            }
+            catch(IOException){} // An active index stays pinned; try another expired cache.
+        }
+        if(files.Count>target)throw new IOException("文本索引缓存正在使用，暂不能建立新索引；仍可按字节阅读和搜索。");
+        return new FileStream(Open(path,0xC0000000,4,false),FileAccess.ReadWrite,64*1024);
     }
-    private static SafeFileHandle Open(string path,uint access,uint disposition,bool directory)
+    private SafeFileHandle AcquireGate(CancellationToken cancellation)
     {
-        var handle=CreateFileW(path.StartsWith("\\\\?\\")?path:"\\\\?\\"+path,access,directory?3u:1u,IntPtr.Zero,disposition,0x00200000|(directory?0x02000000u:0),IntPtr.Zero);
+        long deadline=Environment.TickCount64+1000;
+        while(true)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try{return Open(Path.Combine(directory,".cache-lock"),0xC0000000,4,false,0);}
+            catch(IOException error) when(error.InnerException is Win32Exception {NativeErrorCode:32}&&Environment.TickCount64<deadline){Thread.Sleep(10);}
+        }
+    }
+    private static SafeFileHandle Open(string path,uint access,uint disposition,bool directory,uint? share=null,bool deleteOnClose=false)
+    {
+        var handle=CreateFileW(path.StartsWith("\\\\?\\")?path:"\\\\?\\"+path,access,share??(directory?3u:1u),IntPtr.Zero,disposition,0x00200000|(directory?0x02000000u:0)|(deleteOnClose?0x04000000u:0),IntPtr.Zero);
         if(handle.IsInvalid){int error=Marshal.GetLastWin32Error();handle.Dispose();throw new IOException("无法打开应用文本索引目录或文件。",new Win32Exception(error));}
         if(!GetTag(handle,9,out TagInfo tag,Marshal.SizeOf<TagInfo>())||(tag.Attributes&0x400)!=0){handle.Dispose();throw new IOException("文本索引目录不能经过重解析点。");}
         return handle;
