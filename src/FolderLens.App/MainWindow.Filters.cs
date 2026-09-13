@@ -7,6 +7,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private ContentDialog? advancedFilterDialog;
     private void ShowActiveFilters(FilterSpec filter)
     {
         var parts=new List<string>();
@@ -22,6 +23,7 @@ public sealed partial class MainWindow
         if(filter.Animation!="any")parts.Add(filter.Animation=="animated"?"仅动图":"仅静态图");
         if(!filter.Recursive)parts.Add("不穿透子目录");
         if(filter.Exclusions.Length>0)parts.Add($"排除 {filter.Exclusions.Length} 个目录规则");
+        if(filter.DirectoryRules.Any(r=>r.Enabled))parts.Add($"文件夹筛选：{filter.DirectoryRules.Count(r=>r.Enabled)} 条规则");
         if(filter.Dates.Length>0)parts.Add($"日期范围：{filter.Dates.Length} 项");
         if(filter.AspectRatio is not null)parts.Add("已限制宽高比");
         if(filter.Orientation!="any")parts.Add("已限制图片方向");
@@ -78,34 +80,34 @@ public sealed partial class MainWindow
         {
             long revision=rootChangeVersion;string sourceRoot=root;
             var editor=new AdvancedFilterEditor(CurrentFilter());
-            var rules=CurrentFilter().Exclusions.ToList();
-            var exclusions=editor.Section("目录排除",rules.Count>0);
-            var list=new ListView{MaxHeight=144,SelectionMode=ListViewSelectionMode.Single};
-            void UpdateRules()=>list.ItemsSource=rules.Select(r=>$"{(r.Mode=="hideView"?"只在视图隐藏":"完全不扫描")} · {r.RelativePath}").ToArray();
-            UpdateRules();exclusions.Children.Add(list);
+            using var dialogStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            var rules=CurrentFilter().Exclusions.Where(r=>r.Mode=="skipScan").ToList();
+            async Task<string?> PickDirectory()
+            {
+                var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
+                var folder=await picker.PickSingleFolderAsync();if(folder is null)return null;
+                string relative=Path.GetRelativePath(sourceRoot,folder.Path);
+                if(Path.IsPathRooted(relative)||relative=="."||relative.Split('\\','/').Contains(".."))throw new ArgumentException("请选择当前根目录内的子文件夹。");
+                return relative;
+            }
+            var exclusions=editor.Section("文件夹筛选",true);
+            var folderSection=editor.View.Children.Last();editor.View.Children.Remove(folderSection);editor.View.Children.Insert(0,folderSection);
+            var previewCatalog=catalog!;string previewRootId=rootId;
+            var directoryEditor=new DirectoryRuleEditor(CurrentFilter().DirectoryRules.Concat(CurrentFilter().Exclusions.Where(r=>r.Mode=="hideView").Select(r=>new DirectoryRule("exclude","path","equals",r.RelativePath))).ToArray(),PickDirectory,
+                (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token),dialogStop.Token);
+            exclusions.Children.Add(directoryEditor.View);
+            var skipSection=editor.Section("不扫描的文件夹（高级）",rules.Count>0);
+            skipSection.Children.Add(new TextBlock{Text="这些文件夹不进入索引，例外保留不能恢复其内容。修改后需要重新扫描。通常请使用上面的文件夹筛选。",TextWrapping=TextWrapping.Wrap});
+            var list=new ListView{MaxHeight=144};
+            void UpdateRules()=>list.ItemsSource=rules.Select(r=>r.RelativePath).ToArray();
+            UpdateRules();skipSection.Children.Add(list);
             var error=new TextBlock{TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};
             error.Foreground=(Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
-            async Task AddRule(string mode)
-            {
-                try
-                {
-                    var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
-                    var folder=await picker.PickSingleFolderAsync();if(folder is null)return;
-                    string relative=Path.GetRelativePath(sourceRoot,folder.Path);
-                    if(Path.IsPathRooted(relative)||relative=="."||relative.Split('\\','/').Contains(".."))throw new ArgumentException("请选择当前根目录内的子文件夹。");
-                    if(!rules.Any(rule=>rule.RelativePath==relative&&rule.Mode==mode))rules.Add(new(relative,mode));
-                    UpdateRules();error.Visibility=Visibility.Collapsed;
-                }
-                catch(Exception ex){error.Text=ex.Message;error.Visibility=Visibility.Visible;}
-            }
-            var actions=new StackPanel{Spacing=8};
-            var hide=new Button{Content="添加仅在视图中隐藏的目录",HorizontalAlignment=HorizontalAlignment.Stretch};
-            var skip=new Button{Content="添加不扫描的目录",HorizontalAlignment=HorizontalAlignment.Stretch};
-            var remove=new Button{Content="移除选中规则",HorizontalAlignment=HorizontalAlignment.Stretch,IsEnabled=false};
-            list.SelectionChanged+=(_,_)=>remove.IsEnabled=list.SelectedIndex>=0;
-            hide.Click+=async(_,_)=>await AddRule("hideView");skip.Click+=async(_,_)=>await AddRule("skipScan");
-            remove.Click+=(_,_)=>{int index=list.SelectedIndex;if(index>=0){rules.RemoveAt(index);UpdateRules();}};
-            actions.Children.Add(hide);actions.Children.Add(skip);actions.Children.Add(remove);exclusions.Children.Add(actions);
+            var skip=new Button{Content="添加不扫描的文件夹…"};
+            skip.Click+=async(_,_)=>{try{string? path=await PickDirectory();if(path is null)return;if(!rules.Any(r=>r.RelativePath==path))rules.Add(new(path,"skipScan"));UpdateRules();}catch(Exception ex){error.Text=ex.Message;error.Visibility=Visibility.Visible;}};
+            var remove=new Button{Content="删除选中规则",IsEnabled=false};list.SelectionChanged+=(_,_)=>remove.IsEnabled=list.SelectedIndex>=0;
+            remove.Click+=(_,_)=>{if(list.SelectedIndex is var i&&i>=0){rules.RemoveAt(i);UpdateRules();}};
+            skipSection.Children.Add(skip);skipSection.Children.Add(remove);
             var body=new StackPanel{Spacing=12,Width=Math.Max(240,Math.Min(520,Shell.XamlRoot.Size.Width-112))};
             body.Children.Add(new ScrollViewer{Content=editor.View,MaxHeight=Math.Max(160,Math.Min(580,Shell.XamlRoot.Size.Height-220)),HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});body.Children.Add(error);
             FilterSpec? candidate=null;
@@ -116,11 +118,14 @@ public sealed partial class MainWindow
                 try
                 {
                     if(closing||revision!=rootChangeVersion)throw new InvalidOperationException("当前目录已变化，请重新打开筛选。");
-                    candidate=editor.Read(rules.ToArray());error.Visibility=Visibility.Collapsed;
+                    candidate=editor.Read(rules.ToArray()) with{DirectoryRules=directoryEditor.Read()};candidate.Validate();error.Visibility=Visibility.Collapsed;
                 }
                 catch(Exception ex){candidate=null;args.Cancel=true;error.Text=ex.Message;error.Visibility=Visibility.Visible;}
             };
-            if(await dialog.ShowAsync()!=ContentDialogResult.Primary||candidate is null||closing||revision!=rootChangeVersion)return;
+            advancedFilterDialog=dialog;
+            ContentDialogResult result;
+            try{result=await dialog.ShowAsync();}finally{dialogStop.Cancel();advancedFilterDialog=null;}
+            if(result!=ContentDialogResult.Primary||candidate is null||closing||revision!=rootChangeVersion)return;
             advanced=candidate;MinWidth.Value=double.NaN;MinHeight.Value=double.NaN;
             await ApplyBrowserFilters();
         }

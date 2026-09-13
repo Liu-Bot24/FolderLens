@@ -109,7 +109,20 @@ public sealed partial class MainWindow
         catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){RecordWebView($"Playlist cleanup failed: {ex.GetType().Name}");}
         await RestoreViewerPreferences();
     }
-    private async void QuickFilterChanged(object sender,SelectionChangedEventArgs e){if(controlsReady&&!suppressFilters){if(ReferenceEquals(sender,Category))UpdateSortOptions();await RefreshQuery();}}
+    private readonly Dictionary<string,bool> categoryDetailViews=[];
+    private async void QuickFilterChanged(object sender,SelectionChangedEventArgs e)
+    {
+        if(!controlsReady||suppressFilters)return;
+        if(ReferenceEquals(sender,Category))
+        {
+            if(e.RemovedItems.OfType<ComboBoxItem>().FirstOrDefault()?.Tag is string previous)categoryDetailViews[previous]=DetailsMode.IsChecked==true;
+            string category=Tag(Category);
+            bool details=categoryDetailViews.TryGetValue(category,out bool preferred)?preferred:category is not ("image" or "video" or "media");
+            if((DetailsMode.IsChecked==true)!=details){DetailsMode.IsChecked=details;ToggleView(this,new());}
+            UpdateSortOptions();
+        }
+        await RefreshQuery();
+    }
     private void SearchChanged(object sender,TextChangedEventArgs e){if(controlsReady&&!suppressFilters){searchTimer?.Stop();searchTimer?.Start();}}
     private async void SearchKeyDown(object sender,KeyRoutedEventArgs e){if(e.Key==VirtualKey.Enter){e.Handled=true;searchTimer?.Stop();await RefreshQuery();}}
     private int browserToolbarLayout=-1;

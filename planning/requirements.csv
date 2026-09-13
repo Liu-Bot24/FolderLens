@@ -63,3 +63,5 @@
 "R062","P1_MUST","媒体","网格媒体懒加载","M4","T020","A062a;A062b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R063","P1_MUST","界面","DPI显示设备恢复","M7","T032","A063a;A063b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
 "R064","P1_MUST","目录","扫描状态持久化与再打开","M1","T008","A064a;A064b","IN_PROGRESS","implementation/PROGRESS.md;implementation/P1_GAPS.md"
+"R065","P1_MUST","筛选","文件夹名称路径正则与保留例外；规则不重扫并可保存","M2","","A065a;A065b","IMPLEMENTED","src/FolderLens.Core/DirectoryRules.cs;tests/FolderLens.UnitTests/DirectoryRuleTests.cs"
+"R066","P1_MUST","文件浏览","通用文档分类与详细信息视图；保留图片网格优势","M3","","A066a;A066b","IN_PROGRESS","docs/FILE_BROWSER_PHASE_ONE.md;src/FolderLens.Core/FileCategories.cs"

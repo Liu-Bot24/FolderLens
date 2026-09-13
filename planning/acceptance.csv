@@ -127,3 +127,7 @@
 "A063b","R063","反例","UI","锁定构建；受控夹具；按docs/10记录环境和证据","GPUdevice lost、睡眠唤醒、显示器拔插","纹理重建、颜色重验，界面不黑屏","YES","NOT_RUN",""
 "A064a","R064","正常路径","Integration","锁定构建；受控夹具；按docs/10记录环境和证据","大根扫描中关闭重开并恢复结果","先显示旧索引，后台核对，显示未完成范围","YES","NOT_RUN",""
 "A064b","R064","反例","Integration","锁定构建；受控夹具；按docs/10记录环境和证据","上次根所在移动磁盘更换同盘符设备","卷身份/rootEpoch更新，不把旧盘索引套新盘","YES","NOT_RUN",""
+"A065a","R065","正常路径","Native","隔离目录夹具","添加名称排除并预览应用；恢复视图","结果一致且扫描epoch不变","YES","PASS","artifacts/browser-final-directory-filter/native-refresh.json"
+"A065b","R065","反例","Unit/Integration","相似名称和嵌套目录夹具","精确匹配与保留例外；非法正则；10000文件1目录","不误排预览副本；拒绝非法规则；只按目录求值","YES","PASS","artifacts/logs/file-browser-verified-tests.stdout.log"
+"A066a","R066","正常路径","Native/Integration","无媒体元数据的文档夹具","切换PDF与表格分类并恢复视图选择","无需解码即可分类；文档默认详情且尊重手动选择","YES","PASS","artifacts/browser-final-directory-filter/native-refresh.json"
+"A066b","R066","反例","Native","全部文件大目录","验证通用类型图标与适用列组合","未知文件仍可辨认；无关尺寸和时长可隐藏","YES","NOT_RUN","docs/FILE_BROWSER_PHASE_ONE.md"

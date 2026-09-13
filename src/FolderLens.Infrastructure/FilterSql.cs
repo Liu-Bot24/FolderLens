@@ -45,6 +45,12 @@ public static class FilterSql
         if (!filter.Recursive||filter.ScopeDirectFiles) Known(directoryPrefix is null?"instr(f.relative_path,'\\')=0":$"instr(substr(f.relative_path,length({directoryPrefix})+1),'\\')=0");
         if (!filter.ShowHidden) Known("(f.file_attributes & 2)=0");
         Set("f.kind",filter.Kinds);
+        Set("lower(ltrim(f.extension,'.'))",filter.Extensions);
+        if(filter.DirectoryRules.Any(r=>r.Enabled))
+        {
+            string rules=Param(System.Text.Json.JsonSerializer.Serialize(filter.DirectoryRules));
+            Known($"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))");
+        }
         Set("f.format_id",filter.Formats,"identity");
         if (filter.Raw == "only") { Known("f.kind='image'"); Nullable("f.is_raw","f.is_raw=1","identity"); }
         if (filter.Raw == "exclude") Nullable("f.is_raw","(f.kind<>'image' OR f.is_raw=0)","identity");

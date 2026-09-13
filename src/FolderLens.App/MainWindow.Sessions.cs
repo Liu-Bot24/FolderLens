@@ -39,7 +39,7 @@ public sealed partial class MainWindow
         try
         {
             advanced=filter;folderGrouping=filter.Grouping;UpdateGroupingButton();Search.Text=filter.NamePathQuery;Formats.Text=string.Join(',',filter.Formats);
-            string category=filter.Kinds.Length==0?"all":filter.Kinds.Contains("image")&&filter.Kinds.Contains("video")?"media":filter.Kinds.Contains("text")||filter.Kinds.Contains("markdown")?"text":filter.Kinds[0];
+            string category=FileCategories.FromFilter(filter);
             SelectTag(Category,category);UpdateSortOptions();SelectTag(RawMode,filter.Raw);SelectTag(AnimationMode,filter.Animation);SelectTag(SortField,FolderLens.Core.BrowserSortOptions.IsApplicable(category,filter.Sort.Field)?filter.Sort.Field:"name");
             ShowHidden.IsChecked=filter.ShowHidden;PendingView.IsChecked=filter.IncludePending;Recursive.IsChecked=filter.Recursive;SearchPath.IsChecked=filter.SearchScope=="nameAndPath";sortDescending=filter.Sort.Direction=="desc";
             MinSize.Value=filter.Ranges.TryGetValue("logicalBytes",out var size)?size.Min/1048576.0??double.NaN:double.NaN;MaxSize.Value=size?.Max/1048576.0??double.NaN;
