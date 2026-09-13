@@ -27,11 +27,13 @@ public sealed partial class MainWindow
         var preview=SelectPreview(row);long adopted=browserSelectionRequest;await preview;
         return adopted==browserSelectionRequest&&!closing&&!cancellation.IsCancellationRequested&&ReferenceEquals(selected,row);
     }
+    private HashSet<FileRow> firstPageRows=[];
     private void AttachBrowserView(object? source)
     {
         // A collapsed ListView still receives every notification and may build a
         // nonvirtual item cache. Only the displayed view owns a source subscription.
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
+        firstPageRows=source is FileRow[] initial?new(initial):[];
         try
         {
             if(DetailsMode.IsChecked==true){FilesList.ItemsSource=source;FilesGrid.ItemsSource=null;}

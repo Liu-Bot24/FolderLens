@@ -14,7 +14,7 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private Action? verifyPublishFault;
-    private Func<CancellationToken,Task>? verifyCandidateBarrier,verifyScanBarrier,verifyPageBarrier,verifyPreviewBarrier;
+    private Func<CancellationToken,Task>? verifyCandidateBarrier,verifyScanBarrier,verifyPageBarrier,verifyPreviewBarrier,verifyFirstPageBarrier;
     private Func<Task>? verifyClosingState;
     private Func<long,Task>? verifyTreePageReadBarrier;
     private Action<FileRow,string>? verifyRowRecycling;
@@ -62,6 +62,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-tree-current-folder")){await VerifyTreeCurrentFolder(source,png,report);return;}
             if(arguments.Contains("--verify-press-gesture")){await VerifyPressGesture(source,report);return;}
             if(arguments.Contains("--verify-fit-lock")){await VerifyFitLock(source,report);return;}
+            if(arguments.Contains("--verify-first-page")){await VerifyFirstPage(source,report);return;}
             if(arguments.Contains("--verify-filmstrip")){await VerifyFilmstrip(report);return;}
             if(arguments.Contains("--verify-group-collapse")){await VerifyGroupCollapse(source,png,report);return;}
             if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}

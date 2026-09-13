@@ -20,6 +20,9 @@ public sealed partial class MainWindow
         void Check(bool condition,string message){if(!condition)failures.Add(message);}
         PreparePreview();Check(viewerLockToggle!.IsEnabled==false,"图片加载时锁定按钮未禁用");
         FinishPreview();Check(viewerLockToggle.IsEnabled,"图片加载完成后锁定按钮未恢复可用");
+        viewerSizing=ViewerSizing.Automatic;
+        selection++;ApplyViewerSizing();
+        Check(Math.Abs(EffectiveScale()-1/Shell.XamlRoot.RasterizationScale)<.00001,"默认打开小图被放大");
         foreach(var shape in new[]{(64d,48d,0),(48d,128d,0),(8000d,4000d,0),(64d,48d,1)})
         {
             (sourceWidth,sourceHeight,rotation)=shape;await RunViewerAction(ViewerAction.Fit);
@@ -39,17 +42,19 @@ public sealed partial class MainWindow
             provider.Toggle();await WaitUntil(()=>viewerSizing==ViewerSizing.Locked,TimeSpan.FromSeconds(3));
             Check(toggle.IsChecked&&Math.Abs(EffectiveScale()-fitted)<.00001,"勾选时改变了当前画面");
             sourceWidth=128;sourceHeight=96;selection++;ApplyViewerSizing();
-            Check(Math.Abs(EffectiveScale()-fitted)<.00001,"切图没有保留锁定比例");
+            double nextFit=Math.Min(ImageCanvas.ActualWidth/sourceWidth,ImageCanvas.ActualHeight/sourceHeight);
+            Check(Math.Abs(EffectiveScale()-nextFit)<.00001,"锁定适应屏幕后切图未重新适应当前图片");
             await SaveViewerPreferences();viewerSizing=ViewerSizing.Automatic;await RestoreViewerPreferences();
             Check(viewerSizing==ViewerSizing.Locked,"锁定设置没有保存恢复");
             Check(Math.Abs(viewerLockedPhysicalScale-fitted*Shell.XamlRoot.RasterizationScale)<.00001,"小图适应屏幕后锁定的倍率在恢复时被截断");
             BuildViewerContextMenu();toggle=viewerContextMenu!.Items.OfType<ToggleMenuFlyoutItem>().Single();
             Check(toggle.IsChecked,"重新打开菜单未显示勾选状态");
+            double beforeUnlock=EffectiveScale();
             provider=(IToggleProvider)new ToggleMenuFlyoutItemAutomationPeer(toggle).GetPattern(PatternInterface.Toggle);
             provider.Toggle();await WaitUntil(()=>viewerSizing==ViewerSizing.Automatic,TimeSpan.FromSeconds(3));
-            Check(!toggle.IsChecked&&Math.Abs(EffectiveScale()-fitted)<.00001,"取消锁定不应突然改变当前画面");
+            Check(!toggle.IsChecked&&Math.Abs(EffectiveScale()-beforeUnlock)<.00001,"取消锁定不应突然改变当前画面");
             selection++;ApplyViewerSizing();
-            Check(Math.Abs(EffectiveScale()-Math.Min(ImageCanvas.ActualWidth/sourceWidth,ImageCanvas.ActualHeight/sourceHeight))<.00001,"取消锁定后下一张未适应屏幕");
+            Check(Math.Abs(EffectiveScale()-1/Shell.XamlRoot.RasterizationScale)<.00001,"取消锁定后下一张小图仍被自动放大");
             await RunViewerAction(ViewerAction.LockSizing);BuildViewerContextMenu();
             Check(viewerContextMenu!.Items.OfType<ToggleMenuFlyoutItem>().Single().IsChecked,"快捷键与菜单状态不同步");
             await RunViewerAction(ViewerAction.LockSizing);
@@ -59,6 +64,19 @@ public sealed partial class MainWindow
             sideProvider.Toggle();await WaitUntil(()=>viewerSizing==ViewerSizing.Automatic,TimeSpan.FromSeconds(3));
             Check(viewerLockToggle.IsChecked==false,"左侧再次按下没有解除锁定");
         }
+        viewerSizing=ViewerSizing.Automatic;sourceWidth=8000;sourceHeight=4000;selection++;ApplyViewerSizing();
+        Check(Math.Abs(EffectiveScale()-Math.Min(ImageCanvas.ActualWidth/sourceWidth,ImageCanvas.ActualHeight/sourceHeight))<.00001,"默认大图没有完整缩入窗口");
+        sourceWidth=64;sourceHeight=48;selection++;ApplyViewerSizing();
+        await RunViewerAction(ViewerAction.Fit);
+        Check(viewerSizing==ViewerSizing.Automatic,"手动适应屏幕自动开启锁定");
+        selection++;ApplyViewerSizing();
+        Check(Math.Abs(EffectiveScale()-1/Shell.XamlRoot.RasterizationScale)<.00001,"未锁定时手动适应屏幕被带到下一张");
+        await ZoomViewerAt(2/Shell.XamlRoot.RasterizationScale,new(0,0));
+        await RunViewerAction(ViewerAction.LockSizing);sourceWidth=128;sourceHeight=96;selection++;ApplyViewerSizing();
+        Check(Math.Abs(EffectiveScale()*Shell.XamlRoot.RasterizationScale-2)<.00001,"锁定自定义倍率没有保持200%");
+        await SaveViewerPreferences();viewerLockedIntent=ViewerScaleIntent.Fit;await RestoreViewerPreferences();
+        Check(viewerLockedIntent==ViewerScaleIntent.Custom,"自定义锁定方式没有保存恢复");
+        await RunViewerAction(ViewerAction.LockSizing);
         double beforeQuickChange=EffectiveScale();string mode=viewerPressZoom.LargeViewMode;
         viewerPressZoomSelector!.SelectedItem=viewerPressZoomSelector.Items.OfType<ComboBoxItem>().Single(x=>x.Tag is double value&&value==400);
         await WaitUntil(()=>viewerPressZoom.Percent==400,TimeSpan.FromSeconds(3));
