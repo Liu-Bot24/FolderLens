@@ -43,7 +43,7 @@ public sealed class FileRow : ObservableObject
     public long? ModifiedUtcTicks {get;private set;}
     public string? HydrationState {get;private set;}
     private string kind="other";
-    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));}}}
+    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){if(value=="other")Thumbnail=null;OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}}}
     public string SizeText=>FormatBytes(Item?.Bytes??0);
     private double cardWidth=144;
     private Visibility pathVisibility=Visibility.Collapsed;

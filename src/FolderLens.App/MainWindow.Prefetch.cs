@@ -16,6 +16,20 @@ public sealed partial class MainWindow
     private long prefetchBytes;
     private readonly LinkedList<PrefetchedDetail> prefetchedDetails=[];
     private long prefetchedDetailBytes;
+    private int prefetchPressurePending;
+    private void OnPrefetchMemoryPressure()
+    {
+        if(Interlocked.Exchange(ref prefetchPressurePending,1)!=0)return;
+        if(!DispatcherQueue.TryEnqueue(()=>
+        {
+            try
+            {
+                if(closing)return;
+                prefetchStop.Cancel();prefetched.Clear();prefetchBytes=0;prefetchedDetails.Clear();prefetchedDetailBytes=0;
+            }
+            finally{Volatile.Write(ref prefetchPressurePending,0);}
+        }))Volatile.Write(ref prefetchPressurePending,0);
+    }
     private sealed record PrefetchedDetail(string Root,long Epoch,string Path,long Version,long Modified,long Length,int X,int Y,byte[] Png);
     private readonly SourceFileProbe prefetchSourceProbe=new();
     private sealed record PrefetchedImage(string Root,long Epoch,string Path,long Version,long Modified,long Length,int TargetWidth,int TargetHeight,byte[] Png,WorkerEnvelope Message);
@@ -43,7 +57,7 @@ public sealed partial class MainWindow
     }
     private async Task PrefetchNeighbours(long current,CancellationToken token)
     {
-        if(selected is null||results is null||prefetchWorker is null)return;
+        if(selected is null||results is null||prefetchWorker is null||WorkerResources.Shared.Snapshot.UnderPressure)return;
         var sourceResults=results;long ordinal=selected.Ordinal;string sourceRoot=root,sourceRootId=rootId;long sourceEpoch=epoch,sourceGeneration=generation;
         // A sidebar-sized preload is insufficient when the next action opens full screen.
         int width=Math.Max(256,(int)(Shell.ActualWidth*Shell.XamlRoot.RasterizationScale)),height=Math.Max(256,(int)(Shell.ActualHeight*Shell.XamlRoot.RasterizationScale));
@@ -67,6 +81,8 @@ public sealed partial class MainWindow
                     bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));reply=await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",new(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1),new(width,height),token,expectedStamp);
                     if(reply.Message.Metadata!.Value.GetProperty("isAnimated").GetBoolean())continue;
                     long encodedLength=new FileInfo(reply.AssetPath!).Length;if(encodedLength>32L*1024*1024)continue;
+                    var metadata=reply.Message.Metadata!.Value;
+                    if(metadata.GetProperty("pages").GetInt32()>1&&!metadata.GetProperty("isAnimated").GetBoolean()&&!metadata.GetProperty("isRaw").GetBoolean())continue;
                     byte[] png=await File.ReadAllBytesAsync(reply.AssetPath!,token);
                     if(current!=selection||sourceRootId!=rootId||sourceEpoch!=epoch||sourceGeneration!=generation||sourceResults!=results||token.IsCancellationRequested)return;
                     var cached=new PrefetchedImage(sourceRootId,sourceEpoch,path,row.Item.Version,expectedStamp.ModifiedUtcTicks,expectedStamp.Length,width,height,png,reply.Message);

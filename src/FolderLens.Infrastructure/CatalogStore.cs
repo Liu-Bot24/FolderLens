@@ -62,7 +62,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private static bool InitializeSchema(SqliteConnection c,string name)
     {
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";long version=(long)cmd.ExecuteScalar()!;
-        long supported=name=="sessions"?3:2;
+        long supported=3;
         if(version>supported)throw new InvalidDataException("数据库由较新版本创建，请使用匹配版本。");
         bool existing=version!=0;
         if(version==0)
@@ -85,6 +85,19 @@ public sealed partial class CatalogStore : IAsyncDisposable
                 PRAGMA user_version=2;
                 """;cmd.ExecuteNonQuery();migration.Commit();
             version=2;
+        }
+        if(name=="catalog"&&version==2)
+        {
+            if(existing)
+            {
+                string backup=c.DataSource+".pre-v3-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff",System.Globalization.CultureInfo.InvariantCulture)+".bak";
+                using var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=backup,Pooling=false}.ToString());destination.Open();c.BackupDatabase(destination);
+            }
+            using var migration=c.BeginTransaction();cmd.Transaction=migration;cmd.CommandText="""
+                UPDATE Files SET kind='other' WHERE kind='image' AND page_count>1 AND is_raw IS NOT 1 AND is_animated IS NOT 1;
+                UPDATE SchemaInfo SET schema_version=3,catalog_revision=catalog_revision+1;
+                PRAGMA user_version=3;
+                """;cmd.ExecuteNonQuery();migration.Commit();version=3;
         }
         if(name=="sessions"&&version==1)
         {
@@ -389,15 +402,16 @@ public sealed partial class CatalogStore : IAsyncDisposable
         return result;
     },cancellation);
     public Task<T> Write<T>(Func<SqliteConnection,T> action,CancellationToken cancellation=default)=>writer.Execute(action,cancellation);
-    public Task<bool> ApplyImageMetadata(string entryId,long expectedVersion,string rootId,long expectedEpoch,int width,int height,string format,bool isRaw,bool animated,string provider,CancellationToken cancellation=default)=>writer.Execute(c=>
+    public Task<bool> ApplyImageMetadata(string entryId,long expectedVersion,string rootId,long expectedEpoch,int width,int height,string format,bool isRaw,bool animated,string provider,CancellationToken cancellation=default,int pageCount=1)=>writer.Execute(c=>
     {
         if(width<=0 || height<=0)throw new ArgumentOutOfRangeException(nameof(width));
+        if(pageCount<1)throw new ArgumentOutOfRangeException(nameof(pageCount));
         using var t=c.BeginTransaction();
         int changed=DirectoryIndexer.Execute(c,t,"""
-        UPDATE Files SET kind='image',kind_confidence='verified',format_id=$format,is_raw=$raw,is_animated=$animated,
+        UPDATE Files SET kind=CASE WHEN $pages>1 AND $raw=0 AND $animated=0 THEN 'other' ELSE 'image' END,kind_confidence='verified',format_id=$format,is_raw=$raw,is_animated=$animated,page_count=$pages,
         display_width=$w,display_height=$h,long_edge=max($w,$h),short_edge=min($w,$h),pixel_count=$pixels,source_metadata_version=$version
         WHERE entry_id=$entry AND file_version=$version AND root_id=$root AND entry_state='present' AND EXISTS(SELECT 1 FROM Roots WHERE root_id=$root AND root_epoch=$epoch);
-        """,("$format",format),("$raw",isRaw?1:0),("$animated",animated?1:0),("$w",width),("$h",height),("$pixels",checked((long)width*height)),("$version",expectedVersion),("$entry",entryId),("$root",rootId),("$epoch",expectedEpoch));
+        """,("$pages",animated?1:pageCount),("$format",format),("$raw",isRaw?1:0),("$animated",animated?1:0),("$w",width),("$h",height),("$pixels",checked((long)width*height)),("$version",expectedVersion),("$entry",entryId),("$root",rootId),("$epoch",expectedEpoch));
         if(changed==1)
         {
             foreach(string group in new[]{"identity","imageGeometry","animation"})DirectoryIndexer.Execute(c,t,"INSERT INTO FieldStates(entry_id,field_group,source_version,state,provider_version,attempt_count) VALUES($entry,$group,$version,'ready',$provider,1) ON CONFLICT(entry_id,field_group) DO UPDATE SET source_version=excluded.source_version,state='ready',provider_version=excluded.provider_version,attempt_count=FieldStates.attempt_count+1,error_code=NULL",("$entry",entryId),("$group",group),("$version",expectedVersion),("$provider",provider));

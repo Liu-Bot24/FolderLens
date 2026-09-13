@@ -25,6 +25,17 @@ public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=nu
         }
         finally{gate.Release();}
     }
+    public async Task<string> ResolveImage(string root,string document,string relativeUrl,CancellationToken cancellation)
+    {
+        await gate.WaitAsync(cancellation).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed,this);
+            worker??=new(executable??ScanWorkerClient.FindExecutable()??throw new InvalidOperationException("缺少文件访问组件 FolderLens.Scan.Worker.exe。"),timeout);
+            return await worker.ResolveImage(root,document,relativeUrl,cancellation).ConfigureAwait(false);
+        }
+        finally{gate.Release();}
+    }
     public async ValueTask DisposeAsync()
     {
         await gate.WaitAsync().ConfigureAwait(false);

@@ -96,6 +96,7 @@ public sealed partial class MainWindow : Window
         animationTimer=DispatcherQueue.CreateTimer();animationTimer.IsRepeating=false;animationTimer.Tick+=async(_,_)=>await AdvanceAnimation(false);
         AppWindow.Changed+=(_,_)=>{if(!AppWindow.IsVisible||AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter {State:Microsoft.UI.Windowing.OverlappedPresenterState.Minimized})PauseAnimationForDetail();};
         InitializeAudio();
+        WorkerResources.Shared.MemoryPressure+=OnPrefetchMemoryPressure;
     }
     private async Task Initialize()
     {
@@ -496,7 +497,18 @@ public sealed partial class MainWindow : Window
         }
         if(raw||cached is null)
         {
-            try{var reply=await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));await RecordMetadata(row,reply,cancellation);await PresentFit(reply,current,cancellation);message=reply.Message;}
+            try
+            {
+                var reply=await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
+                await RecordMetadata(row,reply,cancellation);
+                if(row.Kind!="image")
+                {
+                    await previewWorker.ReleaseAsset(reply);
+                    if(current==selection){ClearImage();ImageCanvas.Visibility=Visibility.Collapsed;QualityLabel.Text=$"{row.Detail} · 请使用外部打开查看此文件。";}
+                    return;
+                }
+                await PresentFit(reply,current,cancellation);message=reply.Message;
+            }
             catch(Exception ex) when(raw&&rawPreviewOnly&&current==selection&&CanRetainRawPreview(ex))
             {QualityLabel.Text="相机内嵌预览 · 原始开发未完成："+ex.Message;SchedulePrefetch(current);return;}
         }
@@ -828,7 +840,14 @@ public sealed partial class MainWindow : Window
     {
         if(reply.Message.Quality=="rawEmbedded" || catalog is null || row.Item is null)return;
         var data=reply.Message.Metadata!.Value;var context=reply.Message.Context!;
-        await catalog.ApplyImageMetadata(row.Item.EntryId,row.Item.Version,context.RootId,context.RootEpoch,data.GetProperty("width").GetInt32(),data.GetProperty("height").GetInt32(),data.GetProperty("format").GetString()!,data.GetProperty("isRaw").GetBoolean(),data.GetProperty("isAnimated").GetBoolean(),data.GetProperty("provider").GetString()!,cancellation);
+        int pages=data.GetProperty("pages").GetInt32();
+        bool applied=await catalog.ApplyImageMetadata(row.Item.EntryId,row.Item.Version,context.RootId,context.RootEpoch,data.GetProperty("width").GetInt32(),data.GetProperty("height").GetInt32(),data.GetProperty("format").GetString()!,data.GetProperty("isRaw").GetBoolean(),data.GetProperty("isAnimated").GetBoolean(),data.GetProperty("provider").GetString()!,cancellation,pages);
+        if(applied&&pages>1&&!data.GetProperty("isRaw").GetBoolean()&&!data.GetProperty("isAnimated").GetBoolean()&&rootId==context.RootId&&epoch==context.RootEpoch)
+        {
+            var properties=await ResolveRow(row,context.RootId,cancellation);
+            row.Thumbnail=null;
+            if(ReferenceEquals(row,selected))selectedProperties=properties;
+        }
     }
     private async Task LoadText(long offset,long current,CancellationToken cancellation)
     {
@@ -867,7 +886,7 @@ public sealed partial class MainWindow : Window
             {
                 token.ThrowIfCancellationRequested();try
                 {
-                    string path=await Task.Run(()=>LocalResourceRules.ResolveImage(root,document,resource.GetProperty("relativeUrl").GetString()!),token);
+                    string path=await prefetchSourceProbe.ResolveImage(root,document,resource.GetProperty("relativeUrl").GetString()!,token);
                     var image=await thumbnailWorker!.Request(path,"thumbnail",new(rootId,epoch,generation,current,1,1),new(1024,1024),token);
                     try
                     {
@@ -877,7 +896,7 @@ public sealed partial class MainWindow : Window
                     }
                     finally{await thumbnailWorker.ReleaseAsset(image);}
                 }
-                catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or NotSupportedException){if(current==selection&&!closing)Status.Text="部分 Markdown 图片无法显示；已保留文档内容。";}
+                catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or NotSupportedException or TimeoutException){if(current==selection&&!closing)Status.Text="部分 Markdown 图片无法显示；已保留文档内容。";}
             }
             if(markdown is null)
             {
@@ -960,7 +979,7 @@ public sealed partial class MainWindow : Window
     private Task RequestShutdown()=>shutdownTask??=Shutdown();
     private async Task Shutdown()
     {
-        closing=true;controlsReady=false;var retired=browserWork.Stop();
+        closing=true;controlsReady=false;WorkerResources.Shared.MemoryPressure-=OnPrefetchMemoryPressure;var retired=browserWork.Stop();
         async Task Cleanup(Func<Task> action){try{await action();}catch(OperationCanceledException){}catch(Exception ex){RecordWebView("ShutdownError "+ex.GetType().Name+" "+ex.HResult);}}
         try
         {

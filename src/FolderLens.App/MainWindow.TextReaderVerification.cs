@@ -11,7 +11,7 @@ public sealed partial class MainWindow
     {
         const string text="文本阅读测试：中文与 English\r\n第二行完整显示。";
         await File.WriteAllTextAsync(Path.Combine(source,"reader.txt"),text);
-        await File.WriteAllTextAsync(Path.Combine(source,"reader.md"),"# 阅读标题\n\n正文中文 **加粗**。\n");
+        await File.WriteAllTextAsync(Path.Combine(source,"reader.md"),"# 阅读标题\n\n正文中文 **加粗**。\n\n![本地图片](A/image-00.png)\n\n![禁止越界](../outside.png)\n");
         suppressFilters=true;SelectTag(Category,"text");suppressFilters=false;
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         var failures=new List<string>();
@@ -34,6 +34,10 @@ public sealed partial class MainWindow
                 string zoomValue=await markdown!.CoreWebView2.ExecuteScriptAsync("document.body.style.zoom");
                 if(zoomValue!="\"1.125\"")failures.Add("Markdown 字号没有跟随阅读按钮");
                 if(markdown.CoreWebView2.Settings.IsScriptEnabled)failures.Add("阅读字号意外允许文档脚本执行");
+                if(markdownImages.Count!=1)failures.Add("隔离资源核验没有只加载允许的本地图片");
+                string imageReady=await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).some(image=>image.naturalWidth>0)");
+                if(imageReady!="true")failures.Add("允许的本地图片没有在 Markdown 阅读区显示");
+                report["isolatedMarkdownImageDisplayed"]=imageReady=="true";
                 ((IInvokeProvider)new ButtonAutomationPeer(ReaderRenderMode).GetPattern(PatternInterface.Invoke)).Invoke();
                 if(TextScroll.Visibility!=Visibility.Visible||ReaderRenderMode.Content as string!="阅读排版")failures.Add("查看原文没有正确切换状态");
             }

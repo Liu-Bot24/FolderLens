@@ -11,7 +11,7 @@ namespace FolderLens.Infrastructure;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ScanWorkerMessage(string Type,string Instance,string Nonce,string RequestId="",string? Directory=null,
-    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v3");
+    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v4",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null);
 
 public static class ScanWorkerProtocol
 {
@@ -29,7 +29,7 @@ public static class ScanWorkerProtocol
         int length=BinaryPrimitives.ReadInt32LittleEndian(header);if(length is <2 or >1024*1024)throw new InvalidDataException("Invalid scan frame length.");
         byte[] bytes=new byte[length];await stream.ReadExactlyAsync(bytes,cancellation).ConfigureAwait(false);
         var message=JsonSerializer.Deserialize<ScanWorkerMessage>(bytes,Json)??throw new InvalidDataException("Empty scan message.");
-        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v3" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "stat" or "packet"))throw new InvalidDataException("Scan protocol mismatch.");
+        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v4" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "stat" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
         return message;
     }
     public static async Task Serve(string pipeName,string instance,string nonce,CancellationToken cancellation=default)
@@ -41,7 +41,17 @@ public static class ScanWorkerProtocol
         {
             ScanWorkerMessage message;
             try{message=await Read(pipe,cancellation).ConfigureAwait(false);}catch(EndOfStreamException){return;}
-            if(message.Type is not ("directory" or "stat") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type is not ("directory" or "stat" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type=="resolveImage")
+            {
+                if(message.Document is null||message.RelativeUrl is null)throw new InvalidDataException("Invalid Markdown resource request.");
+                string? resolved=null,error=null;
+                try{resolved=LocalResourceRules.ResolveImage(message.Directory,message.Document,message.RelativeUrl);}
+                catch(UnauthorizedAccessException){error="denied";}
+                catch(NotSupportedException){error="unsupported";}
+                catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception or ArgumentException){error="unavailable";}
+                await Write(pipe,new("imagePath",instance,nonce,message.RequestId,ResolvedImage:resolved,ResourceError:error),cancellation).ConfigureAwait(false);continue;
+            }
             if(message.Type=="stat")
             {await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:ScanPathProbe.Read(message.Directory,message.AllowCloud)),cancellation).ConfigureAwait(false);continue;}
             ScanDirectoryPacket? failure=null;
@@ -118,6 +128,30 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
             completed=true;return reply.Packet;
         }
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("路径身份核验超时。");}
+        finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
+    }
+    public async Task<string> ResolveImage(string root,string document,string relativeUrl,CancellationToken cancellation)
+    {
+        if(Interlocked.Exchange(ref busy,1)!=0)throw new InvalidOperationException("A scan worker has one active request.");
+        using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(operationTimeout??TimeSpan.FromSeconds(20));
+        bool completed=false;
+        try
+        {
+            if(process is null)await Start(timeout.Token).ConfigureAwait(false);
+            string request=Guid.NewGuid().ToString("N");
+            await ScanWorkerProtocol.Write(pipe!,new("resolveImage",instance,nonce,request,PathRules.ValidateSource(root),Document:PathRules.ValidateSource(document),RelativeUrl:relativeUrl),timeout.Token).ConfigureAwait(false);
+            var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
+            if(reply.Type!="imagePath"||reply.Instance!=instance||reply.Nonce!=nonce||reply.RequestId!=request||((reply.ResolvedImage is null)==(reply.ResourceError is null))||reply.ResourceError is not (null or "denied" or "unsupported" or "unavailable"))throw new InvalidDataException("Invalid Markdown resource response.");
+            completed=true;
+            return reply.ResourceError switch
+            {
+                "denied"=>throw new UnauthorizedAccessException("Markdown 图片不在允许范围内。"),
+                "unsupported"=>throw new NotSupportedException("该格式不用于 Markdown 内嵌预览。"),
+                "unavailable"=>throw new IOException("Markdown 图片暂不可用。"),
+                _=>PathRules.ValidateSource(reply.ResolvedImage!)
+            };
+        }
+        catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("Markdown 图片路径核验超时。");}
         finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
     }
     private async Task Start(CancellationToken cancellation)

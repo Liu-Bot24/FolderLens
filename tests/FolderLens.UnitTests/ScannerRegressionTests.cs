@@ -107,6 +107,21 @@ public sealed class ScannerRegressionTests
         Assert.Equal(second,await probe.Read(path,CancellationToken.None));
         Assert.Equal("originalchanged",File.ReadAllText(path));
     }
+    [Fact] public async Task MarkdownResourceResolutionUsesIsolatedWorkerAndPreservesPathRules()
+    {
+        string root=Fixture(),document=Path.Combine(root,"note.md"),image=Path.Combine(root,"图片.png");
+        File.WriteAllText(document,"![图片](图片.png)");File.WriteAllBytes(image,[1,2,3]);
+        await using var probe=new SourceFileProbe(Worker());
+        string resolved=await probe.ResolveImage(root,document,Uri.EscapeDataString("图片.png"),CancellationToken.None);
+        Assert.EndsWith("图片.png",resolved);Assert.Equal(new byte[]{1,2,3},await File.ReadAllBytesAsync(resolved));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(()=>probe.ResolveImage(root,document,"../outside.png",CancellationToken.None));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(()=>probe.ResolveImage(root,document,"https://example.com/image.png",CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(()=>probe.ResolveImage(root,document,"missing.png",CancellationToken.None));
+        using var stop=new CancellationTokenSource();stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>probe.ResolveImage(root,document,"图片.png",stop.Token));
+        Assert.Equal(resolved,await probe.ResolveImage(root,document,"图片.png",CancellationToken.None));
+        Assert.Equal(3,(await probe.Read(image,CancellationToken.None)).Length);
+    }
     [Fact] public async Task RootReplacementRetainsOldIndexAndRejectsNewVolumeContext()
     {
         string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"old.jpg"),"old");

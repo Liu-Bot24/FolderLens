@@ -57,6 +57,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-player-settings")){await VerifyPlayerSettings(report);return;}
             if(arguments.Contains("--verify-audio-recovery")){await VerifyAudioRecovery(source,report);return;}
             if(arguments.Contains("--verify-collection-contract")){VerifyCollectionContract(report);return;}
+            if(arguments.Contains("--verify-display-compatibility")){await VerifyDisplayCompatibility(source,report);return;}
             if(arguments.Any(arg=>arg.StartsWith("--verify-first-audit-"))){await VerifyFirstPageAudit(source,report);return;}
             if(arguments.Contains("--verify-capacity-ui")){await VerifyCapacityUi(source,report);return;}
             if(arguments.Contains("--verify-empty-audit")){await VerifyEmptyStateAudit(source,report);return;}
@@ -188,34 +189,19 @@ public sealed partial class MainWindow
             byte[] green=new byte[pixels.Length];for(int index=0;index<green.Length;index+=4){green[index+1]=240;green[index+3]=255;}
             multi.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,green);await multi.FlushAsync();tiff.Seek(0);
             byte[] tiffBytes=new byte[checked((int)tiff.Size)];await tiff.ReadAsync(tiffBytes.AsBuffer(),(uint)tiffBytes.Length,InputStreamOptions.None);await File.WriteAllBytesAsync(Path.Combine(pagesDirectory,"pages.tiff"),tiffBytes);
-            await OpenRoot(pagesDirectory);var pageRow=(FileRow)results![0]!;await results.EnsureLoaded(pageRow,lifetime.Token);await SelectPreview(pageRow);
-            if(imagePageCount!=2)throw new InvalidOperationException("多页样本未被识别。");
+            suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;
+            await OpenRoot(pagesDirectory);if(metadataTask is not null)await metadataTask;await RefreshQuery();
+            await SelectPreview((FileRow)results![0]!);
+            if(selected?.Kind!="other"||selectedProperties?.PageCount!=2||fitBitmap is not null)throw new InvalidOperationException("多页扫描文件没有进入普通文件路径。");
+            report["multipageIsOrdinaryFile"]=true;
+            suppressFilters=true;SelectTag(Category,"image");suppressFilters=false;
+            await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();await SelectPreview((FileRow)results![0]!);
             viewerGestureSelection=selection;viewerLastPoint=new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2);StartViewerMagnifier();
-            await WaitUntil(()=>lensTiles.Count>0,TimeSpan.FromSeconds(10));ResetViewerGesture(keepDetails:true);var previousPageToken=selectionStop.Token;
-            await ImagePage(1);
-            if(lensTiles.Count!=0||!previousPageToken.IsCancellationRequested)throw new InvalidOperationException("翻页未隔离上一页的细节缓存和异步请求。");
-            viewerGestureSelection=selection;StartViewerMagnifier();await WaitUntil(()=>lensTiles.Count>0,TimeSpan.FromSeconds(10));
-            var pagePixel=lensTiles.Values.First().GetPixelColors()[0];
-            if(pagePixel.G<220||pagePixel.R>20||pagePixel.B>20)throw new InvalidOperationException("第二页显示了上一页的原图细节。");
-            report["imagePageDetailsIsolated"]=true;ResetViewerGesture();
+            await WaitUntil(()=>lensTiles.Count>0,TimeSpan.FromSeconds(10));ResetViewerGesture();
             rotation=1;viewerScaleIntent=ViewerScaleIntent.Custom;viewerCustomPhysicalScale=2.5;ApplyViewerScaleIntent();
-            await RestoreImageDevice(1,1);
-            if(imagePage!=1||rotation!=1||viewerScaleIntent!=ViewerScaleIntent.Custom||viewerCustomPhysicalScale!=2.5)throw new InvalidOperationException("第二页设备恢复丢失页码/旋转/自定义倍率。");
-            report["pageDeviceStateRestored"]=true;
-            await File.WriteAllBytesAsync(Path.Combine(pagesDirectory,"replacement.png"),png);
-            await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery();
-            var restoreRow=(FileRow)results![checked((int)(await catalog!.FindOrdinal(resultHandle!.Id,"pages.tiff"))!.Value)]!;
-            await SelectPreview(restoreRow);await ImagePage(1);
-            var pageEntered=new TaskCompletionSource();verifyPageBarrier=token=>{pageEntered.TrySetResult();return Task.Delay(Timeout.Infinite,token);};
-            try
-            {
-                var interruptedRestore=RestoreImageDevice(1,1);await pageEntered.Task;
-                var replacement=(FileRow)results[checked((int)(await catalog.FindOrdinal(resultHandle.Id,"replacement.png"))!.Value)]!;
-                await SelectPreview(replacement);await interruptedRestore;
-                if(!ReferenceEquals(selected,replacement)||imagePage!=0||rotation!=0)throw new InvalidOperationException("过期的页面设备恢复覆盖了用户的新选择。");
-            }
-            finally{verifyPageBarrier=null;}
-            report["pageDeviceRestoreRespectsNewSelection"]=true;
+            await RestoreImageDevice(Shell.XamlRoot.RasterizationScale,Shell.XamlRoot.RasterizationScale);
+            if(imagePage!=0||rotation!=1||viewerScaleIntent!=ViewerScaleIntent.Custom||viewerCustomPhysicalScale!=2.5)throw new InvalidOperationException("图片设备恢复丢失旋转或自定义倍率。");
+            report["imageDeviceStateRestored"]=true;ClearResultSelection();
             string displayedId=resultHandle!.Id;long displayedCount=resultHandle.Count;
             for(int iteration=0;iteration<4;iteration++)
             {
@@ -427,11 +413,21 @@ public sealed partial class MainWindow
         var green=new byte[pixels.Length];for(int index=0;index<green.Length;index+=4){green[index+1]=240;green[index+3]=255;}
         encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,green);await encoder.FlushAsync();stream.Seek(0);
         var bytes=new byte[checked((int)stream.Size)];await stream.ReadAsync(bytes.AsBuffer(),(uint)bytes.Length,InputStreamOptions.None);await File.WriteAllBytesAsync(Path.Combine(directory,"pages.tiff"),bytes);
-        await OpenRoot(directory);await SelectPreview((FileRow)results![0]!);await ImagePage(1);
-        await SetImmersive(true);
-        var pixel=fitBitmap!.GetPixelColors()[0];report["page"]=imagePage;report["label"]=ImagePageLabel.Text;report["greenSecondPage"]=pixel.G>220&&pixel.R<20&&pixel.B<20;
-        if(imagePage!=1||ImagePageLabel.Text!="2 / 2"||!(bool)report["greenSecondPage"])throw new InvalidOperationException("放大预览后多页图片的底图或页码回到了第一页。");
-        if(Environment.GetCommandLineArgs().Contains("--verify-page-pending-close")){await VerifyPendingPreviewClose(directory,true,report);return;}
+        suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;
+        await OpenRoot(directory);if(metadataTask is not null)await metadataTask;await RefreshQuery();
+        if(results?.Count!=1)throw new InvalidOperationException("全部文件未保留多页扫描文件。");
+        await SelectPreview((FileRow)results[0]!);
+        if(selected?.Kind!="other"||selectedProperties?.PageCount!=2||fitBitmap is not null||FrameTools.Visibility!=Visibility.Collapsed)
+            throw new InvalidOperationException("多页扫描文件仍进入了图片翻页预览。");
+        var pictures=await catalog!.ReadFirstPage(CurrentFilter() with{Kinds=["image"]});
+        if(pictures.Items.Count!=0)throw new InvalidOperationException("图片筛选仍包含多页扫描文件。");
+        report["multipageRoutedAsFile"]=true;report["pageCount"]=selectedProperties.PageCount;report["imageFilterExcludesPages"]=true;
+        ClearResultSelection();
+        await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET kind='image',page_count=NULL WHERE name='pages.tiff'";return command.ExecuteNonQuery();});
+        await RefreshQuery();await SelectPreview((FileRow)results![0]!);
+        if(selected?.Kind!="other"||fitBitmap is not null||ImageCanvas.Visibility!=Visibility.Collapsed)
+            throw new InvalidOperationException("尚未完成元数据检测的多页文件仍被作为图片显示。");
+        report["coldPreviewAlsoRoutesAsFile"]=true;
         report["status"]="PASS";
     }
     private async Task VerifyTreePageOrder(string source,Dictionary<string,object> report)
