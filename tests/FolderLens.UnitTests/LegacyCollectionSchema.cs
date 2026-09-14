@@ -7,22 +7,26 @@ internal static class LegacyCollectionSchema
     // Build actual pre-v4 fixtures, rather than relabelling a v4 schema as legacy.
     internal static void Catalog(SqliteConnection connection)
     {
+        LegacyDirectoryLocations.Remove(connection);
         using var command=connection.CreateCommand();command.CommandText="""
+            DROP TRIGGER IF EXISTS CollectionAliases_Invalidate;
             DROP TRIGGER IF EXISTS CollectionMembers_FollowKnownRename;
             DROP TRIGGER IF EXISTS CollectionMembers_RefreshIdentity;
             DROP TRIGGER IF EXISTS Files_CollectionsMissing;
             DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Insert;
             DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Update;
-            DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_Location_Update;DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;
+            DROP TRIGGER IF EXISTS Files_Location_Insert;DROP TRIGGER IF EXISTS Files_Location_Update;DROP TRIGGER IF EXISTS Roots_Location_Update;DROP TRIGGER IF EXISTS Directories_Location_Update;
             DROP TABLE CollectionMembers;DROP TABLE Collections;DROP INDEX IX_Files_Location;ALTER TABLE Files DROP COLUMN location_key;
             """;command.ExecuteNonQuery();
     }
     internal static void V4(SqliteConnection connection)
     {
+        LegacyDirectoryLocations.Remove(connection);
         using var command=connection.CreateCommand();command.CommandText="""
-            DROP TRIGGER CollectionMembers_RefreshIdentity;DROP TRIGGER Files_CollectionsMissing;
-            DROP TRIGGER DirectoryIdentity_Location_Insert;DROP TRIGGER DirectoryIdentity_Location_Update;
-            DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_Location_Update;DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;
+            DROP TRIGGER IF EXISTS CollectionAliases_Invalidate;
+            DROP TRIGGER IF EXISTS CollectionMembers_RefreshIdentity;DROP TRIGGER IF EXISTS Files_CollectionsMissing;
+            DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Insert;DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Update;
+            DROP TRIGGER IF EXISTS Files_Location_Insert;DROP TRIGGER IF EXISTS Files_Location_Update;DROP TRIGGER IF EXISTS Roots_Location_Update;DROP TRIGGER IF EXISTS Directories_Location_Update;
             UPDATE Files SET location_key=(SELECT lens_location(r.display_path,Files.relative_path,d.case_mode) FROM Roots r JOIN Directories d ON d.directory_id=Files.directory_id WHERE r.root_id=Files.root_id);
             UPDATE CollectionMembers SET location_key=(SELECT location_key FROM Files WHERE entry_id=CollectionMembers.entry_id);
             CREATE TRIGGER Files_Location_Insert AFTER INSERT ON Files BEGIN
@@ -46,6 +50,6 @@ internal static class LegacyCollectionSchema
     }
     internal static void Sessions(SqliteConnection connection)
     {
-        using var command=connection.CreateCommand();command.CommandText="ALTER TABLE ResultItems DROP COLUMN source_root_id;ALTER TABLE ResultItems DROP COLUMN source_root_path;ALTER TABLE ResultItems DROP COLUMN source_root_epoch;";command.ExecuteNonQuery();
+        using var command=connection.CreateCommand();command.CommandText="ALTER TABLE ResultItems DROP COLUMN observed_directory_location_id;ALTER TABLE ResultItems DROP COLUMN observed_binding_revision;ALTER TABLE ResultItems DROP COLUMN source_root_id;ALTER TABLE ResultItems DROP COLUMN source_root_path;ALTER TABLE ResultItems DROP COLUMN source_root_epoch;";command.ExecuteNonQuery();
     }
 }

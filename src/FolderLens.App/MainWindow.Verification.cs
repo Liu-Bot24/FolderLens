@@ -107,6 +107,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-browser-status")){await VerifyBrowserStatusBar(source,report);return;}
             if(arguments.Contains("--verify-collections")){await VerifyCollections(source,report);return;}
             if(arguments.Contains("--verify-quick-collections")){await VerifyQuickCollections(source,report);return;}
+            if(arguments.Contains("--verify-collection-observation")){await VerifyCollectionObservationRefresh(source,report);return;}
             if(arguments.Contains("--verify-pro-feedback")){await VerifyProFeedback(source,report);return;}
             if(arguments.Contains("--verify-collection-markdown")){await VerifyCollectionMarkdown(source,report);return;}
             if(arguments.Contains("--verify-collection-pending-close")){await VerifyCollectionPendingClose(source,report);return;}

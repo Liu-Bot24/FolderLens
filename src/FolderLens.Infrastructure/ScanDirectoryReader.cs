@@ -9,7 +9,7 @@ namespace FolderLens.Infrastructure;
 public sealed record ScanEntry(string Name,bool Directory,long Bytes,long Modified,long Created,long Attributes,
     string Hydration,string? SkipReason,long? Allocated,string? PhysicalIdentity,long? ChangeTime,string CaseMode="unknown");
 public sealed record ScanDirectoryPacket(string State,ScanEntry[] Entries,string? ErrorCode=null,
-    string? PhysicalIdentity=null,string? VolumeIdentity=null,string CaseMode="unknown",SourceFileStamp? FileStamp=null);
+    string? PhysicalIdentity=null,string? VolumeIdentity=null,string CaseMode="unknown",SourceFileStamp? FileStamp=null,string? ResolvedLocation=null);
 
 /// <summary>One directory only; its caller owns the persistent disk-backed traversal queue.</summary>
 public static class ScanDirectoryReader
@@ -21,10 +21,10 @@ public static class ScanDirectoryReader
         if((attributes&FileAttributes.Directory)==0)throw new IOException("Not a directory.");
         if(!allowCloud && FileAllocation.IsDeferred((long)attributes))
         {yield return new("excluded",[],"DeferredOffline");yield break;}
-        var identity=FileAllocation.InspectMetadata(directory);
+        var identity=FileAllocation.InspectMetadata(directory,resolveLocation:true);
         if((attributes&FileAttributes.ReparsePoint)!=0 && (identity.ReparseTag is null || !FileAllocation.IsCloudTag(identity.ReparseTag.Value)))
         {yield return new("excluded",[],"LinkDirectorySkipped");yield break;}
-        yield return new("started",[],PhysicalIdentity:identity.PhysicalIdentity,VolumeIdentity:identity.VolumeIdentity,CaseMode:identity.CaseMode);
+        yield return new("started",[],PhysicalIdentity:identity.PhysicalIdentity,VolumeIdentity:identity.VolumeIdentity,CaseMode:identity.CaseMode,ResolvedLocation:identity.ResolvedLocation);
         string pattern=Path.Combine(LongPath(directory),"*");
         using var search=FindFirstFileExW(pattern,1,out var item,0,IntPtr.Zero,2);
         if(search.IsInvalid)

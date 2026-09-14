@@ -49,7 +49,7 @@ public sealed partial class CatalogStore
     public Task<FileProperties?> ReadFileProperties(string rootId,string entryId,long version,CancellationToken cancellation=default)=>interactiveReader.Execute<FileProperties?>(c=>
     {
         using var transaction=c.BeginTransaction(deferred:true);using var cmd=c.CreateCommand();cmd.Transaction=transaction;
-        cmd.CommandText="SELECT f.*,d.detail_json,EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key) AS is_collected FROM Files f LEFT JOIN FileDetails d ON d.entry_id=f.entry_id AND d.source_version=f.file_version WHERE f.root_id=$root AND f.entry_id=$entry AND f.file_version=$version";
+        cmd.CommandText="SELECT f.*,d.detail_json,EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id)) AS is_collected FROM Files f LEFT JOIN FileDetails d ON d.entry_id=f.entry_id AND d.source_version=f.file_version WHERE f.root_id=$root AND f.entry_id=$entry AND f.file_version=$version";
         cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$entry",entryId);cmd.Parameters.AddWithValue("$version",version);
         FileProperties file;
         using(var row=cmd.ExecuteReader())

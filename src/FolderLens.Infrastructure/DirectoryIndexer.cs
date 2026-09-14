@@ -12,6 +12,7 @@ public sealed class RootIdentityChangedException():IOException("根目录的卷�
 /// <summary>Disk-backed depth-first traversal reaches nested content early; only a completed directory can reconcile unseen entries.</summary>
 public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExecutable=null)
 {
+    internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PathProbeOverride {get;set;}
     public TimeSpan RenameLookupTime { get; private set; }
     public TimeSpan BatchWriteTime { get; private set; }
     public static string StablePathId(string rootId,string relative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rootId+"\0"+relative)));
@@ -27,7 +28,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         if(executable is null && RequiresIsolation(root))throw new NotSupportedException("目录扫描工作进程缺失，无法安全扫描远程或可移动磁盘。");
         await using var worker=executable is null?null:new ScanWorkerClient(executable);
         await using var probe=executable is null?null:new ScanWorkerClient(executable);
-        var renames=new ScanRenames(catalog,probe);
+        var renames=new ScanRenames(catalog,probe,PathProbeOverride);
         var dirtyStore=new ScanDirtyDirectories(catalog);
         IReadOnlyList<DirtyScanScope> captured=scopeRelative is null?await dirtyStore.Read(rootId,epoch,cancellation,includeDeferred:true).ConfigureAwait(false):[];
         string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false;string availability="online",outcome="failed";
@@ -82,6 +83,8 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                         cancellation.ThrowIfCancellationRequested();
                         if(packet.State=="started")
                         {
+                            if(relative.Length==0&&packet.PhysicalIdentity is {} rootIdentity)
+                                await renames.RetireConfirmedMovedRoot(rootId,root,epoch,rootIdentity,cancellation).ConfigureAwait(false);
                             await catalog.Write(c=>
                             {
                                 using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
@@ -92,7 +95,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                                     if(recorded is not null && recorded!=packet.PhysicalIdentity)throw new RootIdentityChangedException();
                                     Execute(c,t,"UPDATE Roots SET volume_identity=$identity WHERE root_id=$r",("$identity",packet.PhysicalIdentity),("$r",rootId));
                                 }
-                                Execute(c,t,"UPDATE Directories SET case_mode=$case WHERE directory_id=$id",("$case",packet.CaseMode),("$id",id));t.Commit();return true;
+                                Execute(c,t,"UPDATE Directories SET case_mode=$case WHERE directory_id=$id",("$case",packet.CaseMode),("$id",id));
+                                CatalogStore.BindDirectoryLocation(c,t,id,packet.PhysicalIdentity,packet.ResolvedLocation);
+                                t.Commit();return true;
                             },cancellation).ConfigureAwait(false);
                         }
                         if(packet.Entries.Length>0)
@@ -219,8 +224,8 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     },cancellation);
     // Keep the recursive working set first so every descendant lookup binds both
     // columns of IX_Directories_Parent, even in a large multi-root catalog.
-    internal const string RemovedDirectoriesSql="WITH RECURSIVE removed(id) AS (SELECT directory_id FROM Directories WHERE root_id=$root AND parent_id=$dir AND entry_state='present' AND (last_seen_scan_id IS NULL OR last_seen_scan_id<>$scan) UNION ALL SELECT d.directory_id FROM removed r CROSS JOIN Directories d ON d.parent_id=r.id WHERE d.root_id=$root) ";
-    internal const string ReconcileRemovedFilesSql=RemovedDirectoriesSql+"UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE root_id=$root AND entry_state='present' AND directory_id IN (SELECT id FROM removed)";
+    internal const string RemovedDirectoriesSql="WITH RECURSIVE removed(id) AS (SELECT directory_id FROM Directories WHERE root_id=$root AND parent_id=$dir AND entry_state<>'missing' AND (last_seen_scan_id IS NULL OR last_seen_scan_id<>$scan) UNION ALL SELECT d.directory_id FROM removed r CROSS JOIN Directories d ON d.parent_id=r.id WHERE d.root_id=$root) ";
+    internal const string ReconcileRemovedFilesSql=RemovedDirectoriesSql+"UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE root_id=$root AND entry_state<>'missing' AND directory_id IN (SELECT id FROM removed)";
     private Task<bool> Reconcile(string root,long epoch,string scan,string directory,long count,CancellationToken cancellation)=>catalog.Write(c=>
     {
         using var t=c.BeginTransaction();EnsureEpoch(c,t,root,epoch);

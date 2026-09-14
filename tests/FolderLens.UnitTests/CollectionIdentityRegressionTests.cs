@@ -79,7 +79,7 @@ public sealed class CollectionIdentityRegressionTests
                 UPDATE Files SET physical_identity='volume:file-a',directory_id='lower',relative_path='a\photo.jpg' WHERE entry_id='000000000002';
                 """;cmd.ExecuteNonQuery();tx.Commit();return true;
         });
-        string tag=(await catalog.CreateCollection("both")).Id;
+        await catalog.Write(c=>{using var t=c.BeginTransaction();CatalogStore.BindDirectoryLocation(c,t,"benchmark-dir","volume:parent-A","fixture:A");CatalogStore.BindDirectoryLocation(c,t,"lower","volume:parent-a","fixture:a");t.Commit();return true;});string tag=(await catalog.CreateCollection("both")).Id;
         await catalog.ChangeCollectionMembers([tag],["000000000001"],true);
         Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="benchmark",ExcludeCollections=[tag]},1,1)).Count);
         await catalog.ChangeCollectionMembers([tag],["000000000002"],true);

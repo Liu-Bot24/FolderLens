@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 namespace FolderLens.Infrastructure;
 
 internal sealed record ScanRename(string EntryId,string OldPath,string PhysicalIdentity,bool Directory);
-internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe)
+internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,Func<string,CancellationToken,Task<ScanDirectoryPacket>>? probeOverride=null)
 {
     public static void Ensure(SqliteConnection c,SqliteTransaction t)
     {
@@ -52,7 +52,73 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe)
         }
         return result;
     }
-    private Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation)=>probe is not null?probe.Probe(path,cancellation):Task.Run(()=>ScanPathProbe.Read(path),cancellation);
+    private Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation)=>probeOverride is not null?probeOverride(path,cancellation):probe is not null?probe.Probe(path,cancellation):Task.Run(()=>ScanPathProbe.Read(path),cancellation);
+    private async Task<bool> MissingWithinKnownNamespace(string path,string identity,CancellationToken cancellation)
+    {
+        string? parent=Path.GetDirectoryName(path.TrimEnd('\\'));
+        for(int depth=0;parent is not null&&depth<64;depth++,parent=Path.GetDirectoryName(parent.TrimEnd('\\')))
+        {
+            var state=await Probe(parent,cancellation).ConfigureAwait(false);
+            if(state.State=="present")return state.VolumeIdentity is {} volume&&identity.StartsWith(volume+":",StringComparison.Ordinal);
+            if(state.State!="missing")return false;
+        }
+        return false;
+    }
+    public async Task RetireConfirmedMovedRoot(string rootId,string path,long epoch,string identity,CancellationToken cancellation)
+    {
+        var candidates=await catalog.Write(c=>
+        {
+            using var command=c.CreateCommand();command.CommandText="""
+                SELECT d.directory_id,d.root_id,r.display_path,d.relative_path,r.root_epoch,d.path_revision,b.location_id,b.binding_revision,l.anchor_locator
+                FROM ScanDirectoryIdentities i JOIN Directories d ON d.directory_id=i.directory_id JOIN Roots r ON r.root_id=d.root_id
+                JOIN DirectoryLocationBindings b ON b.directory_id=d.directory_id JOIN DirectoryLocations l ON l.location_id=b.location_id
+                WHERE i.physical_identity=$identity AND d.root_id<>$root AND d.entry_state<>'missing'
+                UNION
+                SELECT d.directory_id,d.root_id,r.display_path,d.relative_path,r.root_epoch,d.path_revision,b.location_id,b.binding_revision,l.anchor_locator
+                FROM Roots r JOIN Directories d ON d.root_id=r.root_id AND d.relative_path=''
+                JOIN DirectoryLocationBindings b ON b.directory_id=d.directory_id JOIN DirectoryLocations l ON l.location_id=b.location_id
+                WHERE r.volume_identity=$identity AND r.root_id<>$root AND d.entry_state<>'missing'
+                LIMIT 129
+                """;
+            command.Parameters.AddWithValue("$identity",identity);command.Parameters.AddWithValue("$root",rootId);
+            using var rows=command.ExecuteReader();var found=new List<(string Id,string Root,string RootPath,string Relative,long Epoch,long PathRevision,string Location,long Binding,string? Locator)>();
+            while(rows.Read())found.Add((rows.GetString(0),rows.GetString(1),rows.GetString(2),rows.GetString(3),rows.GetInt64(4),rows.GetInt64(5),rows.GetString(6),rows.GetInt64(7),rows.IsDBNull(8)?null:rows.GetString(8)));
+            return found;
+        },cancellation).ConfigureAwait(false);
+        if(candidates.Count>128)return;
+        foreach(var old in candidates)
+        {
+            string oldPath=Path.Combine(old.RootPath,old.Relative);
+            if(string.Equals(oldPath,path,StringComparison.Ordinal))continue;
+            var previous=await Probe(oldPath,cancellation).ConfigureAwait(false);
+            bool renamedSpelling=previous.State=="present"&&previous.PhysicalIdentity==identity&&old.Locator is not null&&previous.ResolvedLocation is not null&&previous.ResolvedLocation!=old.Locator;
+            if(!renamedSpelling&&previous.State!="missing"&&!(previous.State=="present"&&previous.PhysicalIdentity is {} actual&&actual!=identity))continue;
+            // A vanished drive/share route is not proof that its directory entry
+            // was deleted. Require the old immediate parent namespace to exist.
+            if(previous.State=="missing")
+            {
+                if(!await MissingWithinKnownNamespace(oldPath,identity,cancellation).ConfigureAwait(false))continue;
+            }
+            if((await Probe(path,cancellation).ConfigureAwait(false)).PhysicalIdentity!=identity)throw new IOException("根目录在身份核对期间发生变化。");
+            await catalog.Write(c=>
+            {
+                using var transaction=c.BeginTransaction();using var check=c.CreateCommand();check.Transaction=transaction;
+                check.CommandText="""
+                    SELECT EXISTS(SELECT 1 FROM Roots WHERE root_id=$root AND root_epoch=$epoch AND display_path=$path)
+                       AND EXISTS(SELECT 1 FROM Directories d JOIN Roots r ON r.root_id=d.root_id
+                           LEFT JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id
+                           JOIN DirectoryLocationBindings b ON b.directory_id=d.directory_id
+                           WHERE d.directory_id=$id AND d.root_id=$oldRoot AND r.root_epoch=$oldEpoch
+                           AND r.display_path=$oldPath AND d.relative_path=$relative AND d.entry_state<>'missing'
+                           AND d.path_revision=$pathRevision AND b.location_id=$location AND b.binding_revision=$binding
+                           AND coalesce(i.physical_identity,CASE WHEN d.relative_path='' THEN r.volume_identity END)=$identity)
+                    """;
+                foreach(var (name,value) in new (string,object)[]{("$root",rootId),("$epoch",epoch),("$path",path),("$id",old.Id),("$oldRoot",old.Root),("$oldEpoch",old.Epoch),("$oldPath",old.RootPath),("$relative",old.Relative),("$identity",identity),("$pathRevision",old.PathRevision),("$location",old.Location),("$binding",old.Binding)})check.Parameters.AddWithValue(name,value);
+                if((long)check.ExecuteScalar()! !=1)return false;
+                RetireTree(c,transaction,old.Root,old.Id);transaction.Commit();return true;
+            },cancellation).ConfigureAwait(false);
+        }
+    }
     public static long RetireReplacement(SqliteConnection c,SqliteTransaction t,string root,string path,ScanEntry item)
     {
         if(item.PhysicalIdentity is null)return 1;

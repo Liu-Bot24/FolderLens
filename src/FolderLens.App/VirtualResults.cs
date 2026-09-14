@@ -74,6 +74,12 @@ public sealed class FileRow : ObservableObject
     public SnapshotItem? Item {get;private set;}
     public FileRow(long ordinal)=>Ordinal=ordinal;
     public void Relocate(long ordinal,SnapshotGroup? group){Ordinal=ordinal;if(Item is not null)Item=Item with{Ordinal=ordinal,Group=group};}
+    internal void AdoptObservation(SnapshotItem item)
+    {
+        if(Item is not {} old||old.EntryId!=item.EntryId||old.Version!=item.Version||old.RelativePath!=item.RelativePath||old.Bytes!=item.Bytes||old.Allocated!=item.Allocated||old.Kind!=item.Kind)
+            throw new InvalidOperationException("只能为视觉等价的文件行更新快照观察值。");
+        Item=item;Ordinal=item.Ordinal;OnPropertyChanged(nameof(QuickCollectEnabled));
+    }
     public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";Detail=error.Message;}
     public void DescribeImage(int width,int height,string format)=>Detail=$"{width} × {height}  {format.ToUpperInvariant()}";
@@ -105,6 +111,7 @@ public sealed partial class VirtualResults : IList,IDisposable
     public IEnumerable<FileRow> CachedRows()=>identities.Values.Select(reference=>reference.TryGetTarget(out var row)?row:null).OfType<FileRow>();
     private void Register(FileRow row,int index){positions.Remove(row);positions.Add(row,new(index));identities[index]=new(row);shareCreated?.Invoke(row,index);}
     public void Retain(FileRow row,long ordinal,SnapshotGroup? group){int index=checked((int)ordinal);row.Relocate(ordinal,group);Register(row,index);retained[index]=row;}
+    internal void Retain(FileRow row,SnapshotItem item){row.AdoptObservation(item);Retain(row,item.Ordinal,item.Group);}
     private bool disposed;
     public int Count {get;}
     private double cardWidth=144;

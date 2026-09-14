@@ -69,7 +69,7 @@ public sealed class SnapshotKindTests
         check.CommandText="SELECT count(*) FROM ResultItems";Assert.Equal(2L,check.ExecuteScalar());
         check.CommandText="SELECT state FROM ResultSessions";Assert.Equal("ready",check.ExecuteScalar());
         using var current=Open(Path.Combine(directory,"sessions.sqlite"));using var version=current.CreateCommand();
-        version.CommandText="PRAGMA user_version";Assert.Equal(4L,version.ExecuteScalar());
+        version.CommandText="PRAGMA user_version";Assert.Equal(5L,version.ExecuteScalar());
     }
 
     private static SqliteConnection Open(string path)

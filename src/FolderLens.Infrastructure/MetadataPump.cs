@@ -45,7 +45,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                         """;
                     cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$epoch",epoch);cmd.Parameters.AddWithValue("$after",after);cmd.Parameters.AddWithValue("$media",includeMedia?1:0);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
                     cmd.Parameters.AddWithValue("$collection",collectionId??(object)DBNull.Value);
-                    if(collectionId is not null)cmd.CommandText=cmd.CommandText.Replace("WHERE root_id=$root","WHERE location_key IN(SELECT location_key FROM CollectionMembers WHERE collection_id=$collection)").Replace("AND r.root_epoch=$epoch","");
+                    if(collectionId is not null)cmd.CommandText=cmd.CommandText.Replace("WHERE root_id=$root","WHERE ((SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id),location_key) IN(SELECT directory_location_id,location_key FROM CollectionMembers WHERE collection_id=$collection)").Replace("AND r.root_epoch=$epoch","");
                     using var rows=cmd.ExecuteReader();var entries=new List<(string Id,string Path,long Version,string Kind,long Length,long Modified,string RootId,string Root,long Epoch)>();
                     while(rows.Read())entries.Add((rows.GetString(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetInt64(4),rows.GetInt64(5),rows.GetString(6),rows.GetString(7),rows.GetInt64(8)));return entries;
                 },cancellation).ConfigureAwait(false);

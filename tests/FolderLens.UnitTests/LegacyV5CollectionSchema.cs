@@ -47,11 +47,12 @@ internal static class LegacyV5CollectionSchema
         """;
     internal static void Apply(SqliteConnection connection)
     {
-        using var transaction=connection.BeginTransaction();using var command=connection.CreateCommand();command.Transaction=transaction;
+        LegacyDirectoryLocations.Remove(connection);using var transaction=connection.BeginTransaction();using var command=connection.CreateCommand();command.Transaction=transaction;
         command.CommandText="""
-            DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_CollectionsMissing;DROP TRIGGER Files_Location_Update;
-            DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;DROP TRIGGER DirectoryIdentity_Location_Insert;
-            DROP TRIGGER DirectoryIdentity_Location_Update;DROP TRIGGER CollectionMembers_RefreshIdentity;
+            DROP TRIGGER IF EXISTS CollectionAliases_Invalidate;
+            DROP TRIGGER IF EXISTS Files_Location_Insert;DROP TRIGGER IF EXISTS Files_CollectionsMissing;DROP TRIGGER IF EXISTS Files_Location_Update;
+            DROP TRIGGER IF EXISTS Roots_Location_Update;DROP TRIGGER IF EXISTS Directories_Location_Update;DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Insert;
+            DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Update;DROP TRIGGER IF EXISTS CollectionMembers_RefreshIdentity;
             DROP TABLE CollectionIdentityHistory;
             """+LocationTriggers()+"UPDATE SchemaInfo SET schema_version=5;PRAGMA user_version=5;";
         command.ExecuteNonQuery();transaction.Commit();
