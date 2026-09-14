@@ -116,7 +116,7 @@ public sealed partial class MainWindow : Window
             catalog=browsingStorage.Catalog;
             if(closing)return;
             StartupStage("catalog");
-            settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
+            settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));InitializeScanDiagnostics();
             await RefreshCollectionsTree();
             await RestoreDesktop();
             StartupStage("desktopAndCollections");
@@ -252,11 +252,11 @@ public sealed partial class MainWindow : Window
                 _=StartMetadataRefresh();
                 return;
             }
-            string activeRoot=root,activeId=rootId;long activeEpoch=epoch;
-            RootChangeMonitor CreateScanMonitor()=>new(activeRoot,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,activeId,activeEpoch);
+            string activeRoot=root,activeId=rootId;long activeEpoch=epoch;scanScheduler.Prefer(activeId);
+            RootChangeMonitor CreateScanMonitor()=>new(activeRoot,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,activeId,activeEpoch,[dataDirectory]);
             var report=new Progress<ScanProgress>(p=>
             {
-                if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
+                scanProgress[activeId]=(p,DateTimeOffset.UtcNow);if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
                 Status.Text=$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
                 if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
@@ -271,8 +271,8 @@ public sealed partial class MainWindow : Window
             var rootToken=scanStop.Token;
             if(reusable is null)
             {
-                var indexer=new DirectoryIndexer(catalog,scanWorker);
-                activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,backgroundScanSlots,lifetime.Token,
+                var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
+                activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,scanScheduler,lifetime.Token,
                     token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token,forceRefresh),CreateScanMonitor);
                 backgroundScans.Add(activeBackgroundScan);
                 _=ObserveBackgroundCompletion(activeBackgroundScan);
@@ -306,17 +306,17 @@ public sealed partial class MainWindow : Window
     {
         using var operation=browserWork.Enter();if(operation is null)return;
         if(closing||replacingRoot||scanStop.IsCancellationRequested||catalog is null||scanTask is {IsCompleted:false}||!reconcilePending)return;reconcilePending=false;
-        string activeRoot=root,activeId=rootId;long activeEpoch=epoch;bool recursive=true;var exclusions=ScanExclusions();
+        string activeRoot=root,activeId=rootId;long activeEpoch=epoch;scanScheduler.Prefer(activeId);bool recursive=true;var exclusions=ScanExclusions();
         var rootToken=scanStop.Token;long rootVersion=rootChangeVersion;
         try
         {
             if(force)Status.Text="正在刷新文件列表…";
             string? executable=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
-            var task=Task.Run(()=>BackgroundScan.WithSlot(backgroundScanSlots,rootToken,async token=>
+            var task=Task.Run(async ()=>
             {
-                if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(token);
-                return await (force?new DirectoryIndexer(catalog,executable).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token,true):new DirectoryIndexer(catalog,executable).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token));
-            }));
+                var token=rootToken;if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(token);
+                return await (force?new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token,true):new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token));
+            });
             scanTask=task;var report=await task;
             if(rootVersion!=rootChangeVersion||activeId!=rootId||activeEpoch!=epoch||closing||rootToken.IsCancellationRequested)return;
             // A successful query or a dirty-subdirectory scan does not prove that a
@@ -1112,7 +1112,7 @@ public sealed partial class MainWindow : Window
     private Task RequestShutdown()=>shutdownTask??=Shutdown();
     private async Task Shutdown()
     {
-        closing=true;controlsReady=false;WorkerResources.Shared.MemoryPressure-=OnPrefetchMemoryPressure;var retired=browserWork.Stop();
+        closing=true;controlsReady=false;scanLogTimer?.Stop();DatabaseExecutor.OperationMeasured=null;WorkerResources.Shared.MemoryPressure-=OnPrefetchMemoryPressure;var retired=browserWork.Stop();
         async Task Cleanup(Func<Task> action){try{await action();}catch(OperationCanceledException){}catch(Exception ex){RecordWebView("ShutdownError "+ex.GetType().Name+" "+ex.HResult);}}
         try
         {
@@ -1122,7 +1122,7 @@ public sealed partial class MainWindow : Window
             await Cleanup(CloseCapacityWindow);
             if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true)));
             await Cleanup(()=>retired);
-            await Cleanup(RetireBackgroundScans);
+            await Cleanup(RetireBackgroundScans);if(scanLog is not null)await Cleanup(()=>scanLog.DisposeAsync().AsTask());
             await Cleanup(DisposeMarkdownView);await Cleanup(DisposeTextSession);
             foreach(var task in new[]{scanTask,metadataTask,prefetchTask,capabilityTask,treeRefreshTask,physicalTreeTask})if(task is not null)await Cleanup(()=>task);
             if(thumbnailWorkCount>0)await Cleanup(()=>thumbnailsIdle.Task);

@@ -22,6 +22,7 @@ public static class UserMessages
             _=>null
         };
         if(known is not null)return known;
+        if(error is Microsoft.Data.Sqlite.SqliteException {SqliteErrorCode:13})return "临时浏览数据已达到空间上限或磁盘已满。已显示的文件仍可浏览；关闭应用可清理临时数据，重新打开后请选择更小的文件夹。";
         if(error is UnauthorizedAccessException)return "没有访问权限，请检查文件或文件夹的权限。";
         if(error is FileNotFoundException or DirectoryNotFoundException)return "找不到文件或文件夹，请检查其是否已移动或删除，然后刷新。";
         if(error is TimeoutException)return "操作超时，请稍后重试。";

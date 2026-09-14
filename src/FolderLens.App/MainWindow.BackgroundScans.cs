@@ -5,12 +5,14 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private readonly List<BackgroundScan> backgroundScans=[];
-    private readonly SemaphoreSlim backgroundScanSlots=new(2,2);
+    private readonly ScanScheduler scanScheduler=new();
     private BackgroundScan? activeBackgroundScan;
     private async Task ObserveBackgroundCompletion(BackgroundScan scan)
     {
         using var operation=browserWork.Enter();if(operation is null)return;
-        try{await scan.Completion;}catch(OperationCanceledException){}catch(Exception error){RecordWebView("BackgroundScanError "+error.GetType().Name);}
+        try{var result=await scan.Completion;scanLog?.Write("scan-completed",new{root=scan.RootId,result.Files,result.Directories,result.Errors,result.State});}
+        catch(OperationCanceledException){scanLog?.Write("scan-cancelled",new{root=scan.RootId});}
+        catch(Exception error){scanLog?.Write("scan-failed",new{root=scan.RootId,type=error.GetType().Name,error.HResult});RecordWebView("BackgroundScanError "+error.GetType().Name);}
         if(closing)return;
         bool acquired=false;
         try
@@ -40,6 +42,6 @@ public sealed partial class MainWindow
             try{await scan.Completion;}catch(OperationCanceledException){}catch(Exception error){RecordWebView("BackgroundScanError "+error.GetType().Name);}
             finally{scan.Dispose();}
         }
-        backgroundScans.Clear();backgroundScanSlots.Dispose();
+        backgroundScans.Clear();
     }
 }

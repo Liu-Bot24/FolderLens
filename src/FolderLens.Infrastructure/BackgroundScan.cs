@@ -11,9 +11,22 @@ public sealed class BackgroundScan : IDisposable
     public FilterSpec Policy {get;}
     public ScanPriority Priority {get;}
     public Task<ScanProgress> Completion {get;}
+    public DateTimeOffset RequestedAt {get;}=DateTimeOffset.UtcNow;
     public RootChangeMonitor? Monitor {get;private set;}
     private readonly CancellationTokenSource stop;
     public bool Cancelled=>stop.IsCancellationRequested;
+    public BackgroundScan(string rootId,string path,long epoch,FilterSpec policy,ScanPriority priority,
+        ScanScheduler scheduler,CancellationToken application,Func<CancellationToken,Task<ScanProgress>> run,Func<RootChangeMonitor?>? createMonitor=null)
+    {
+        RootId=rootId;Path=path;Epoch=epoch;Policy=policy;Priority=priority;
+        stop=CancellationTokenSource.CreateLinkedTokenSource(application);
+        Completion=Task.Run(async()=>
+        {
+            // Admission is short: DirectoryIndexer takes subsequent packet turns.
+            using(await scheduler.Enter(rootId,stop.Token).ConfigureAwait(false))Monitor=createMonitor?.Invoke();
+            return await run(stop.Token).ConfigureAwait(false);
+        },CancellationToken.None);
+    }
     public BackgroundScan(string rootId,string path,long epoch,FilterSpec policy,ScanPriority priority,
         SemaphoreSlim slots,CancellationToken application,Func<CancellationToken,Task<ScanProgress>> run,Func<RootChangeMonitor?>? createMonitor=null)
     {

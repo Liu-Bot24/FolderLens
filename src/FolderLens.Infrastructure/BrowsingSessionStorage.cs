@@ -25,6 +25,7 @@ public sealed class BrowsingSessionStorage : IAsyncDisposable
         try
         {
             await session.Catalog.Initialize(cancellation).ConfigureAwait(false);
+            await session.Catalog.Write(c=>{CompactBrowsingCatalog.Configure(c);return true;},cancellation).ConfigureAwait(false);
             await session.Catalog.ImportLegacyPlaylists(Path.Combine(dataDirectory,"catalog","catalog.sqlite"),cancellation).ConfigureAwait(false);
             return session;
         }
