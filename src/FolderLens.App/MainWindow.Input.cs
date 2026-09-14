@@ -369,7 +369,7 @@ public sealed partial class MainWindow
     private HashSet<(int X,int Y)> MagnifierTileKeys()
     {
         var range=ImageViewport.VisibleTiles(sourceWidth,sourceHeight,PreviewSurface.MagnifierWidth,PreviewSurface.MagnifierHeight,PressZoomScale,(sourceWidth/2-lensNativeCenter.X)*PressZoomScale,(sourceHeight/2-lensNativeCenter.Y)*PressZoomScale,rotation,padding:0);
-        if(range.Count>128)throw new InvalidDataException("当前放大区域超过原图读取预算，请提高放大比例。");
+        if(range.Count>128)throw new InvalidDataException("当前区域过大，无法一次读取全部原图细节，请继续放大后查看。");
         var keys=new HashSet<(int,int)>();for(int y=range.FirstY;y<=range.LastY;y++)for(int x=range.FirstX;x<=range.LastX;x++)keys.Add((x,y));return keys;
     }
     private async Task LoadMagnifierPixels()

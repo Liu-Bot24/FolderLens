@@ -40,7 +40,7 @@ public sealed partial class MainWindow
                 var query=RefreshQuery();
                 try{await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));ShowScanError(new ScanWorkerUnavailableException(failure));}
                 finally{release.TrySetResult();verifyCandidateBarrier=null;}
-                await query;ReportMetadataProgress(32);ReportMetadataProgress(64);
+                await query;await StartMetadataRefresh();
                 Shell.UpdateLayout();
                 bool visible=Status.Text.Contains(failure)||ResultSummary.Text.Contains(failure)||BrowserEmptyState.Visibility==Microsoft.UI.Xaml.Visibility.Visible&&BrowserEmptyDescription.Text.Contains(failure);
                 if(Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar)visible|=bar.IsOpen&&bar.Message.Contains(failure);

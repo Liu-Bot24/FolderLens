@@ -77,7 +77,7 @@ public sealed partial class CapacityWindow : Window
         ToolTipService.SetToolTip(scope,"筛选结果固定在打开看板时的浏览顺序；主窗口后续筛选不会悄悄改变此统计");
         ToolTipService.SetToolTip(allocation,"只统计已知占用空间，无法读取的项单列；不代表删除后可释放的空间");
         ToolTipService.SetToolTip(descendants,"显示所有后代目录，父子容量有重叠，不能相加");
-        ToolTipService.SetToolTip(parent,"返回上一级目录，并恢复之前选中的目录");ToolTipService.SetToolTip(refresh,"重新读取本地索引；不扫描或修改原文件");
+        ToolTipService.SetToolTip(parent,"返回上一级目录，并恢复之前选中的目录");ToolTipService.SetToolTip(refresh,"更新当前统计；如需重新查找文件，请在主窗口刷新目录");
         ToolTipService.SetToolTip(browseButton,"查看选中目录的文件；未选中时查看当前目录。保持主窗口原有扫描根和其他筛选。");
         SetCommandContent(parent,"\uE74A","上层");SetCommandContent(refresh,"\uE72C","刷新统计");SetCommandContent(browseButton,"\uE8B7","在主窗口浏览");
         var toolbar=new Grid{ColumnSpacing=16,RowSpacing=12};for(int i=0;i<3;i++){toolbar.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});toolbar.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});}
@@ -187,7 +187,7 @@ public sealed partial class CapacityWindow : Window
     {
         await previous;if(closed||current!=generation)return;
         operation.Dispose();operation=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var token=operation.Token;
-        busy.IsActive=true;hasDisplayedPage=false;ranking.IsEnabled=false;browseButton.IsEnabled=false;state.Text="正在计算本地索引…";
+        busy.IsActive=true;hasDisplayedPage=false;ranking.IsEnabled=false;browseButton.IsEnabled=false;state.Text="正在统计文件大小…";
         if(!preserve){logical.Text=allocated.Text=files.Text="—";unknown.Text="统计中";ranking.ItemsSource=null;shares.ItemsSource=null;}
         try
         {
@@ -222,8 +222,8 @@ public sealed partial class CapacityWindow : Window
             shares.ItemsSource=page.bars;chartCaption.Text=all?"排名口径":"本层容量分布";
             chartNote.Text=all?"父子目录容量有重叠，不能相加；切回本层排名可查看占比。":useAllocated?"占比基于已知占用空间。前20项单列，其余合并；完整排名在左侧。":"各直属子目录与直属文件互不重叠。前20项单列，其余合并；完整排名在左侧。";
             if(!captured.IsComplete)chartNote.Text="统计尚未完成，暂不计算占比。已统计的容量保留；没有统计到文件不表示目录为空。";
-            string status=captured.State switch{"ready"=>"扫描完成","snapshot"=>"基于打开看板时的筛选结果","scanning"=>"扫描中，统计不完整","cancelled"=>"扫描已取消，统计不完整","failed"=>"扫描失败，统计不完整","offline" or "offlineSnapshot"=>"离线快照","notStarted"=>"尚未完成扫描",_=>"部分统计"};
-            state.Text=$"{status} · 计算于 {captured.CalculatedAt:HH:mm:ss} · 待判断 {captured.Pending:N0} 项 / 无法判断 {captured.Unresolvable:N0} 项\n按路径累计；占用空间不代表删除可释放空间。刷新不会重新扫描原文件。";
+            string status=captured.State switch{"ready"=>"扫描完成","snapshot"=>"打开窗口时的筛选结果","scanning"=>"扫描中，统计不完整","cancelled"=>"扫描已取消，统计不完整","failed"=>"扫描失败，统计不完整","offline" or "offlineSnapshot"=>"文件夹暂时无法访问，显示上次统计","notStarted"=>"尚未完成扫描",_=>"部分统计"};
+            state.Text=$"{status} · 计算于 {captured.CalculatedAt:HH:mm:ss} · 待判断 {captured.Pending:N0} 项 / 无法判断 {captured.Unresolvable:N0} 项\n按路径累计；占用空间不代表删除可释放空间。如需重新查找文件，请在主窗口刷新目录。";
         }
         catch(OperationCanceledException) when(token.IsCancellationRequested){}
         catch(Exception error){if(!closed&&current==generation)state.Text="统计未完成："+error.Message;}

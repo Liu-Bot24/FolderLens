@@ -91,7 +91,7 @@ public sealed partial class MainWindow
             remove.Click+=async(_,_)=>
             {
                 using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;
-                if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="仅删除收藏夹及其收藏归属，原文件保留。再次点击确认。";return;}
+                if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="删除此收藏夹及其中的收藏记录，不删除原文件。再次点击确认。";return;}
                 try{await DeleteCollectionAndRefresh(c.Id);await Reload();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
             };
             if(await ShowCollectionDialog(dialog)==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
@@ -127,7 +127,7 @@ public sealed partial class MainWindow
                     int changed=handle is null?await store.ChangeCollectionItems(ids,first,add,stop.Token):await store.ChangeCollectionSelection(ids.ToArray(),handle.Id,ranges,add,stop.Token);
                     if(add){lastCollectionTargets=ids.ToArray();if(quickRow is not null)quickCollectionUsed=true;}
                     RefreshCollectionBadges();
-                    await RefreshCollectionsTree();Status.Text=add?$"已添加 {changed:N0} 条收藏归属。":$"已移除 {changed:N0} 条收藏归属，原文件保留。";
+                    await RefreshCollectionsTree();Status.Text=add?$"已添加 {changed:N0} 项收藏。":$"已移除 {changed:N0} 项收藏。";
                     if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
                     return true;
                 }

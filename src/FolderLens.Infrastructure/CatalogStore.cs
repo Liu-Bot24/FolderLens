@@ -375,8 +375,8 @@ public sealed partial class CatalogStore : IAsyncDisposable
             if(started)Execute(session,"UPDATE ResultSessions SET state=$state,error_code=$error,completed_utc_ticks=$now WHERE session_id=$id",("$state",cancellation.IsCancellationRequested?"cancelled":"failed"),("$error",code),("$now",DateTime.UtcNow.Ticks),("$id",id));
             Exception Classified(Exception error){error.Data["FolderLens.SnapshotFailure"]=code;error.Data["FolderLens.CandidateId"]=id;return error;}
             if(cancellation.IsCancellationRequested)throw Classified(new OperationCanceledException(cancellation));
-            if(resourceFault==1)throw Classified(new TimeoutException("结果快照超过硬期限；已保留之前的结果。",ex));
-            if(resourceFault is 2 or 3)throw Classified(new IOException("结果快照触及 WAL 或会话磁盘预算；可重试。",ex));
+            if(resourceFault==1)throw Classified(new TimeoutException("读取文件列表超时，请缩小查看范围后重试。",ex));
+            if(resourceFault is 2 or 3)throw Classified(new IOException("生成文件列表所需的临时空间不足，请缩小查看范围后重试。",ex));
             Classified(ex);
             throw;
         }
@@ -411,7 +411,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         while(rows.Read())
         {
             cancellation.ThrowIfCancellationRequested();var group=ReadGroup(rows,0);bytes+=256+group.RelativePath.Length*2L+group.Id.Length*2L;
-            if(bytes>32L<<20)throw new IOException("文件夹分组数量超过当前显示预算，请选择更小的根目录。");result.Add(group);
+            if(bytes>32L<<20)throw new IOException("文件夹分组过多，请选择下一级文件夹后重试。");result.Add(group);
         }
         return result;
     },cancellation);

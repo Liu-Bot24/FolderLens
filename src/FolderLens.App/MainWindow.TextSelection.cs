@@ -16,7 +16,7 @@ public sealed partial class MainWindow
     {
         if(displayedText is null)return;
         TextContent.SelectAll();wholeTextSelected=true;
-        TextSelectionStatus.Text="已选择整个文档。复制上限为 16 MiB 字符数据；超限时请缩小选择范围。";
+        TextSelectionStatus.Text="已选择整个文档。最多可复制约 800 万个字符；内容过多时请分段复制。";
     }
     private void TextSelectionChanged(object sender,RoutedEventArgs e)
     {
@@ -46,7 +46,7 @@ public sealed partial class MainWindow
             string value;
             if(wholeTextSelected)
             {
-                TextSelectionStatus.Text="正在分块读取全文以复制…";
+                TextSelectionStatus.Text="正在复制全文…";
                 var progress=new Progress<long>(bytes=>{if(IsCurrent())TextSelectionStatus.Text=$"正在复制 · 已读取 {FileRow.FormatBytes(bytes)}";});
                 value=await CurrentTextClient().ReadDocumentForCopy(progress:progress,cancellation:token);
             }

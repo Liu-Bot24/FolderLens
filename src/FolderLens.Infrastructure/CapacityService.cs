@@ -16,12 +16,12 @@ public sealed class CapacityService(CatalogStore catalog)
     public Task<(string State,long Revision,long RootEpoch)> ChangeStamp(string root,CancellationToken cancellation)=>catalog.Read(c=>
     {
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT scan_state,catalog_revision,root_epoch FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",root);
-        using var row=cmd.ExecuteReader();if(!row.Read())throw new InvalidOperationException("目录索引已不存在。");return(row.GetString(0),row.GetInt64(1),row.GetInt64(2));
+        using var row=cmd.ExecuteReader();if(!row.Read())throw new InvalidOperationException("该文件夹的统计已失效，请重新打开目录容量。");return(row.GetString(0),row.GetInt64(1),row.GetInt64(2));
     },cancellation);
     public Task<CapacityReport> EntireRoot(string root,CancellationToken cancellation,bool currentObservationsOnly=false)=>catalog.Read(c=>
     {
         using var transaction=c.BeginTransaction(deferred:true);using var state=c.CreateCommand();state.Transaction=transaction;state.CommandText="SELECT scan_state,catalog_revision,root_epoch FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";state.Parameters.AddWithValue("$root",root);
-        string status;long revision,rootEpoch;using(var row=state.ExecuteReader()){if(!row.Read())throw new InvalidOperationException("该根目录没有可用的索引统计。");status=row.GetString(0);revision=row.GetInt64(1);rootEpoch=row.GetInt64(2);}
+        string status;long revision,rootEpoch;using(var row=state.ExecuteReader()){if(!row.Read())throw new InvalidOperationException("此文件夹尚无统计结果，请先在主窗口打开它。");status=row.GetString(0);revision=row.GetInt64(1);rootEpoch=row.GetInt64(2);}
         IEnumerable<DirectoryCapacity> Directories()
         {
             using var cmd=c.CreateCommand();cmd.Transaction=transaction;

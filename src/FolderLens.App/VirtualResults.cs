@@ -11,7 +11,7 @@ namespace FolderLens.App;
 public sealed class FileRow : ObservableObject
 {
     public long Ordinal {get;private set;}
-    private string name="加载中…",path="",detail="";
+    private string name="加载中…",path="",detail="",cardInfo="";
     private ImageSource? thumbnail;
     private bool isCollected,quickCollectBusy;
     public bool IsCollected=>isCollected;
@@ -52,7 +52,7 @@ public sealed class FileRow : ObservableObject
     public string? HydrationState {get;private set;}
     private string kind="other";
     public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){if(value=="other")Thumbnail=null;OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}}}
-    public string SizeText=>FormatBytes(Item?.Bytes??0);
+    public string SizeText=>Item is {} item?FormatBytes(item.Bytes):"";
     private double cardWidth=144;
     private Visibility pathVisibility=Visibility.Collapsed;
     public double CardWidth {get=>cardWidth;private set{if(SetProperty(ref cardWidth,value))OnPropertyChanged(nameof(ThumbnailHeight));}}
@@ -68,6 +68,7 @@ public sealed class FileRow : ObservableObject
     public string DisplayName=>Name+(entryState=="missing"?"（未找到）":entryState=="excluded"?"（未读取）":"");
     public void SetCollectionView(bool value){collectionView=value;OnPropertyChanged(nameof(DisplayPath));}
     public string Detail {get=>detail;private set=>SetProperty(ref detail,value);}
+    public string CardInfo {get=>cardInfo;private set=>SetProperty(ref cardInfo,value);}
     public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value))OnPropertyChanged(nameof(FileIconVisibility));}}
     public Visibility FileIconVisibility=>Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     public string FileTypeLabel=>FileTypeDisplay.Label(Name,Kind);
@@ -78,12 +79,12 @@ public sealed class FileRow : ObservableObject
     internal void AdoptObservation(SnapshotItem item)
     {
         if(Item is not {} old||old.EntryId!=item.EntryId||old.Version!=item.Version||old.RelativePath!=item.RelativePath||old.Bytes!=item.Bytes||old.Allocated!=item.Allocated||old.Kind!=item.Kind)
-            throw new InvalidOperationException("只能为视觉等价的文件行更新快照观察值。");
+            throw new InvalidOperationException("文件列表已变化，请刷新后重试。");
         Item=item;Ordinal=item.Ordinal;OnPropertyChanged(nameof(QuickCollectEnabled));
     }
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
-    public void Fail(Exception error){Name="加载失败";Detail=error.Message;}
-    public void DescribeImage(int width,int height,string format)=>Detail=$"{width} × {height}  {format.ToUpperInvariant()}";
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
+    public void Fail(Exception error){Name="加载失败";CardInfo="请刷新后重试";Detail=error.Message;}
+    public void DescribeImage(int width,int height,string format){CardInfo=$"{width:N0} × {height:N0}  {format.ToUpperInvariant()}";Detail=$"{CardInfo} · {SizeText}";}
     public void UpdateProperties(FileProperties file,bool updateCollection=true)
     {
         if(Item is null||Item.EntryId!=file.EntryId||Item.Version!=file.Version)return;
@@ -94,7 +95,8 @@ public sealed class FileRow : ObservableObject
         Resolution=file.Width is {} w&&file.Height is {} h?$"{w:N0} × {h:N0}":"未知";AllocatedText=file.AllocatedBytes is {} bytes?FormatBytes(bytes):"未知";
         ModifiedText=new DateTime(file.ModifiedUtcTicks,DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
         DurationText=file.DurationMs is {} ms?$"{ms/3600000}:{ms/60000%60:D2}:{ms/1000%60:D2}":"";FormatText=(file.Format??System.IO.Path.GetExtension(file.Name).TrimStart('.')).ToUpperInvariant();
-        Detail=$"{(file.Width is not null?Resolution:SizeText)}  {FormatText}{(file.Animated==true?" · 动图":"")}{(file.PageCount>1?$" · {file.PageCount} 页":"")}{(file.HydrationState=="placeholder"?" · 在线":"")}";OnPropertyChanged(nameof(SizeText));
+        CardInfo=$"{(file.Width is not null?Resolution+"  ":"")}{FormatText}{(file.Animated==true?" · 动图":"")}{(file.PageCount>1?$" · {file.PageCount} 页":"")}{(file.HydrationState=="placeholder"?" · 在线":"")}";
+        Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));
     }
     public static string FormatBytes(long bytes)=>bytes>=1L<<30?$"{bytes/(double)(1L<<30):N2} GiB":bytes>=1<<20?$"{bytes/(double)(1<<20):N2} MiB":bytes>=1024?$"{bytes/1024.0:N1} KiB":$"{bytes} B";
 }
