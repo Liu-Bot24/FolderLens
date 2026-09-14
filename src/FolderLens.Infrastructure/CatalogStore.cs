@@ -137,6 +137,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
                 """;cmd.ExecuteNonQuery();migration.Commit();version=3;
         }
         if(version==3)MigrateCollections(c,name,existing);
+        if(name=="catalog")RepairCollectionDirectoryTrigger(c);
         return true;
     }
     public Task<long> OpenRoot(string rootId,string path,CancellationToken cancellation=default)=>writer.Execute(c=>

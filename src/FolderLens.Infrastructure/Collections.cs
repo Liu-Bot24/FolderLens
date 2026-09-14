@@ -34,7 +34,7 @@ public sealed partial class CatalogStore
                 UPDATE Files SET location_key=lens_location(NEW.display_path,relative_path,(SELECT case_mode FROM Directories WHERE directory_id=Files.directory_id)) WHERE root_id=NEW.root_id;
             END;
             CREATE TRIGGER Directories_Location_Update AFTER UPDATE OF case_mode ON Directories WHEN OLD.case_mode<>NEW.case_mode BEGIN
-                UPDATE Files SET location_key=lens_location((SELECT display_path FROM Roots WHERE root_id=Files.root_id),relative_path,NEW.case_mode) WHERE directory_id=NEW.directory_id;
+                UPDATE Files SET location_key=lens_location((SELECT display_path FROM Roots WHERE root_id=Files.root_id),relative_path,NEW.case_mode) WHERE root_id=NEW.root_id AND directory_id=NEW.directory_id;
             END;
             CREATE TABLE Collections(collection_id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE,created_utc_ticks INTEGER NOT NULL) STRICT;
             CREATE TABLE CollectionMembers(collection_id TEXT NOT NULL REFERENCES Collections(collection_id) ON DELETE CASCADE,location_key TEXT NOT NULL,entry_id TEXT NOT NULL,added_utc_ticks INTEGER NOT NULL,PRIMARY KEY(collection_id,location_key)) STRICT;
@@ -50,6 +50,22 @@ public sealed partial class CatalogStore
             ALTER TABLE ResultItems ADD COLUMN source_root_path TEXT;
             ALTER TABLE ResultItems ADD COLUMN source_root_epoch INTEGER;
             PRAGMA user_version=4;
+            """;
+        command.ExecuteNonQuery();transaction.Commit();
+    }
+    private static void RepairCollectionDirectoryTrigger(SqliteConnection connection)
+    {
+        using var command=connection.CreateCommand();
+        command.CommandText="SELECT sql FROM sqlite_master WHERE type='trigger' AND name='Directories_Location_Update'";
+        if(command.ExecuteScalar() is string sql&&sql.Contains("root_id=NEW.root_id AND directory_id=NEW.directory_id",StringComparison.Ordinal))return;
+        // A trigger-only v4 repair: no data rewrite or format change. The DDL is
+        // atomic, remains readable by v4 builds, and reuses the existing index.
+        using var transaction=connection.BeginTransaction();command.Transaction=transaction;
+        command.CommandText="""
+            DROP TRIGGER IF EXISTS Directories_Location_Update;
+            CREATE TRIGGER Directories_Location_Update AFTER UPDATE OF case_mode ON Directories WHEN OLD.case_mode<>NEW.case_mode BEGIN
+                UPDATE Files SET location_key=lens_location((SELECT display_path FROM Roots WHERE root_id=Files.root_id),relative_path,NEW.case_mode) WHERE root_id=NEW.root_id AND directory_id=NEW.directory_id;
+            END;
             """;
         command.ExecuteNonQuery();transaction.Commit();
     }
