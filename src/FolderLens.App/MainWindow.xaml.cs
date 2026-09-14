@@ -177,7 +177,7 @@ public sealed partial class MainWindow : Window
         if(!double.IsNaN(MinWidth.Value))ranges["width"]=new(checked((long)MinWidth.Value),ranges.GetValueOrDefault("width")?.Max);
         if(!double.IsNaN(MinHeight.Value))ranges["height"]=new(checked((long)MinHeight.Value),ranges.GetValueOrDefault("height")?.Max);
         string category=Tag(Category);
-        var filter=(advanced??new FilterSpec()) with{RootId=rootId,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
+        var filter=(advanced??new FilterSpec()) with{RootId=rootId,ObservedRootEpoch=activeCollectionId is null?epoch:null,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
     }
     private async void PickRoot(object sender,RoutedEventArgs e)
     {
@@ -194,20 +194,7 @@ public sealed partial class MainWindow : Window
         if(activeCollectionId is not null){await RefreshQuery(preserveViewport:true);return;}
         try
         {
-            if(!replacingRoot&&!scanStop.IsCancellationRequested&&string.Equals(RootPath.Text,root,StringComparison.Ordinal))
-            {
-                long requestedRoot=rootChangeVersion;var token=scanStop.Token;
-                // F5 must not silently degrade to a query while automatic reconciliation
-                // is busy. Wait for its bounded worker, then scan this same root fully.
-                while(scanTask is {IsCompleted:false} active)
-                {
-                    await active.WaitAsync(token);
-                    if(closing||replacingRoot||requestedRoot!=rootChangeVersion||token.IsCancellationRequested)return;
-                }
-                reconcilePending=true;await Reconcile(force:true);
-                await RefreshQuery(preserveViewport:true);return;
-            }
-            await OpenRoot(RootPath.Text,true);
+            await OpenRoot(RootPath.Text,true,recordHistory:false,preserveDirectoryScope:true);
         }
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
@@ -229,7 +216,7 @@ public sealed partial class MainWindow : Window
             if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
             RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):path;if(!collectionScope)ShowTreeRoot(path);else activeTreeRoot=null;UpdateNavigationButtons();
             browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
-            FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在打开文件夹…";
+            firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
             monitor?.Dispose();monitor=null;
@@ -286,14 +273,16 @@ public sealed partial class MainWindow : Window
                 _=ObserveBackgroundCompletion(activeBackgroundScan);
             }
             scanTask=activeBackgroundScan!.Completion;
-            var openedScanTask=scanTask;
+            var openedScanTask=activeBackgroundScan.Completion;
             PreferScanDirectory(activeId,CurrentFilter().DirectoryScope);
             UpdateBrowserEmptyState();
             rootChangeGate.Release();acquired=false;
             await RefreshQuery(preserveViewport:true,scanPreview:true);
-            await openedScanTask;
+            var completedScan=await openedScanTask;
             if(verifyScanBarrier is not null)await verifyScanBarrier(rootToken);
             if(requested!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
+            if(completedScan.State=="missing"){await RefreshQuery();ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
+            if(completedScan.State=="partial"&&completedScan.Files==0){ShowScanError(new IOException("无法读取此文件夹，请检查磁盘连接和访问权限后刷新。"));return;}
             if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
             if(settings is not null)await settings.Save("last-root.json",activeRoot);
             if(activeId==rootId&&!scanStop.IsCancellationRequested)_=StartMetadataRefresh();
@@ -323,8 +312,14 @@ public sealed partial class MainWindow : Window
             // A successful query or a dirty-subdirectory scan does not prove that a
             // previous root scan failure recovered. F5 performs the complete scope.
             if(force&&report.State=="ready")ClearScanError();
+            if(report.State is "ready" or "missing")
+            {
+                await RefreshQuery(preserveViewport:true);
+                if(rootVersion!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
+                if(report.State=="missing"){ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
+            }
             _=StartMetadataRefresh();
-            Status.Text=report.State=="ready"?"目录变化已核对。当前浏览顺序保持不变。":"部分目录尚未就绪，将自动重试；已保留当前结果。";
+            Status.Text=report.State=="ready"?"目录变化已核对，文件列表已更新。":"部分目录尚未就绪，将自动重试；已保留本次发现的结果。";
         }
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
         catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}

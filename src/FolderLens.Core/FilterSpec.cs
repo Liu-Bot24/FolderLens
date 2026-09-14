@@ -27,6 +27,9 @@ public sealed record FilterSpec
 {
     public int SchemaVersion { get; init; } = 1;
     public string RootId { get; init; } = "";
+    // Runtime browsing scope, never saved as a user filter or reused after reopening a root.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long? ObservedRootEpoch { get; init; }
     public string? CollectionId { get; init; }
     public string[] IncludeCollections { get; init; } = [];
     public string[] ExcludeCollections { get; init; } = [];

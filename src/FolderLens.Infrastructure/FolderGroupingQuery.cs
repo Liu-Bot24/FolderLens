@@ -47,7 +47,7 @@ internal sealed class FolderGroupingQuery : IDisposable
         var matches=FilterSql.Build(filter);
         var scope=options.CapacityScope=="matches"?matches:FilterSql.Build(new FilterSpec
         {
-            RootId=filter.RootId,DirectoryScope=filter.DirectoryScope,Kinds=[],ShowHidden=true,Exclusions=filter.Exclusions.Where(rule=>rule.Mode=="skipScan").ToArray()
+            RootId=filter.RootId,ObservedRootEpoch=filter.ObservedRootEpoch,DirectoryScope=filter.DirectoryScope,Kinds=[],ShowHidden=true,Exclusions=filter.Exclusions.Where(rule=>rule.Mode=="skipScan").ToArray()
         });
         Aggregate("direct_bytes","sum(f.logical_bytes)",scope);
         Aggregate("direct_matches","count(*)",matches);

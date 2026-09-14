@@ -17,7 +17,20 @@ public static class ScanDirectoryReader
     public static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud=false)
     {
         directory=PathRules.ValidateSource(directory);
-        FileAttributes attributes=File.GetAttributes(directory);
+        FileAttributes attributes=default;bool missing=false;
+        try{attributes=File.GetAttributes(directory);}
+        catch(FileNotFoundException){missing=true;}
+        catch(DirectoryNotFoundException){missing=true;}
+        if(missing)
+        {
+            // Absence is conclusive only with an accessible, ordinary parent on a known volume.
+            string? parent=Path.GetDirectoryName(directory.TrimEnd('\\'));
+            var observed=parent is null?null:ScanPathProbe.Read(parent);
+            if(observed?.State=="present"&&observed.FileStamp is null&&observed.VolumeIdentity is not null)
+                yield return new("completed",[],"DirectoryMissing",VolumeIdentity:observed.VolumeIdentity);
+            else yield return new("offline",[],"ParentUnavailable");
+            yield break;
+        }
         if((attributes&FileAttributes.Directory)==0)throw new IOException("Not a directory.");
         if(!allowCloud && FileAllocation.IsDeferred((long)attributes))
         {yield return new("excluded",[],"DeferredOffline");yield break;}

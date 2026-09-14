@@ -17,14 +17,14 @@ public sealed partial class MainWindow
     private async Task OpenCapacityWindow()
     {
         long requestedForeground=WindowFocus.Foreground;
-        var store=catalog!;string capturedRoot=rootId,capturedPath=root;
+        var store=catalog!;string capturedRoot=rootId,capturedPath=root;long capturedEpoch=epoch;
         ResultHandle? handle=resultHandle is {IsPendingView:false}?resultHandle:null;bool retained=false;
         try
         {
             if(handle is not null){retained=await store.RetainSnapshot(handle.Id,lifetime.Token);if(!retained)handle=null;}
             if(closing)return;
             PreferScanDirectory(capturedRoot,"");
-            var window=new CapacityWindow(store,capturedRoot,capturedPath,handle,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),path=>PreferScanDirectory(capturedRoot,path));capacityWindow=window;retained=false;
+            var window=new CapacityWindow(store,capturedRoot,capturedPath,handle,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),path=>PreferScanDirectory(capturedRoot,path),capturedEpoch);capacityWindow=window;retained=false;
             window.Closed+=async(_,_)=>
             {
                 try{await window.ShutdownAsync();}catch(Exception error){ShowError(error);}

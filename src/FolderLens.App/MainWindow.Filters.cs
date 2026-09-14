@@ -67,7 +67,7 @@ public sealed partial class MainWindow
         try
         {
             if(verifyVideoMetadataBarrier is not null)await verifyVideoMetadataBarrier(token);
-            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token,activeCollectionId);
+            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token,activeCollectionId,observedOnly:true);
             if(Current())
             {
                 // Cover readiness does not imply that catalog metadata was ready when

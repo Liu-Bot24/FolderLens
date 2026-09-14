@@ -43,9 +43,9 @@ public sealed class ScanTests
     }
     [Fact] public async Task OfflineRootDoesNotEraseExistingEntries()
     {
-        string baseDir=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));string source=Path.Combine(baseDir,"source");Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"a.jpg"),"candidate");
+        string baseDir=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));string parent=Path.Combine(baseDir,"unavailable-parent"),source=Path.Combine(parent,"source");Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"a.jpg"),"candidate");
         await using var catalog=new CatalogStore(Path.Combine(baseDir,"data"));await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);var indexer=new DirectoryIndexer(catalog);
-        await Task.Run(()=>indexer.Scan("root",source,epoch,true,[],null,CancellationToken.None));Directory.Move(source,source+"-offline");
+        await Task.Run(()=>indexer.Scan("root",source,epoch,true,[],null,CancellationToken.None));Directory.Move(parent,parent+"-offline");
         var partial=await Task.Run(()=>indexer.Scan("root",source,epoch,true,[],null,CancellationToken.None));Assert.Equal("partial",partial.State);
         var handle=await catalog.CreateSnapshot(new FilterSpec{RootId="root"},epoch,1);Assert.Equal(1,handle.Count);
     }
