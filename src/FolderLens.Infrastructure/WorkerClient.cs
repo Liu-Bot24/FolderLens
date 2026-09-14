@@ -12,9 +12,35 @@ namespace FolderLens.Infrastructure;
 public sealed record ImageReply(WorkerEnvelope Message,string? AssetPath);
 
 /// <summary>One persistent foreground worker, one active request. Cancelling invalidates and terminates that instance.</summary>
-public sealed class WorkerClient(string executable,string tempRoot,WorkerPriority priority=WorkerPriority.Foreground) : IAsyncDisposable
+public sealed class WorkerClient : IAsyncDisposable
 {
+    private readonly string executable,tempRoot;
+    private readonly WorkerPriority priority;
+    private readonly WorkerResources resources;
+    public WorkerClient(string executable,string tempRoot,WorkerPriority priority=WorkerPriority.Foreground):this(executable,tempRoot,priority,WorkerResources.Shared){}
+    internal WorkerClient(string executable,string tempRoot,WorkerPriority priority,WorkerResources resources)
+    {this.executable=executable;this.tempRoot=tempRoot;this.priority=priority;this.resources=resources;resources.MemoryPressure+=OnMemoryPressure;}
     private readonly SemaphoreSlim gate=new(1,1);
+    private readonly SemaphoreSlim requestGate=new(1,1);
+    private readonly CancellationTokenSource lifetime=new();
+    private Task idleReclaimTask=Task.CompletedTask;
+    private int disposing;
+    private readonly object disposalSync=new();
+    private Task? disposalTask;
+    private void OnMemoryPressure()
+    {
+        // A foreground animation/text session can carry required decoder state.
+        // Background workers are reconstructible, but assets still belong to their
+        // consumers until ReleaseAsset; never remove those files prematurely.
+        if(priority==WorkerPriority.Foreground||Volatile.Read(ref disposing)!=0||!gate.Wait(0))return;
+        if(process is null||producedAssets.Count!=0){gate.Release();return;}
+        idleReclaimTask=ReclaimIdle();
+    }
+    private async Task ReclaimIdle()
+    {
+        try{await Stop().ConfigureAwait(false);}
+        finally{gate.Release();}
+    }
     private Process? process;
     private NamedPipeServerStream? pipe;
     private WorkerJob? job;
@@ -82,17 +108,20 @@ public sealed class WorkerClient(string executable,string tempRoot,WorkerPriorit
     private async Task<ImageReply> RequestCore(string? path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp,bool dataOnly,bool fileless=false)
     {
         if(!fileless)path=PathRules.ValidateSource(path!);sourceStamp?.Validate();
-        await gate.WaitAsync(cancellation).ConfigureAwait(false);
+        using var linked=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lifetime.Token);cancellation=linked.Token;
+        await requestGate.WaitAsync(cancellation).ConfigureAwait(false);
         WorkerResources.Lease? lease=null;CancellationTokenSource? deadline=null;Timer? diskGuard=null;
-        int diskFailure=0;
+        int diskFailure=0;bool ownsGate=false;
         try
         {
-            lease=await WorkerResources.Shared.Acquire(priority,cancellation).ConfigureAwait(false);
+            lease=await resources.Acquire(priority,cancellation).ConfigureAwait(false);
+            await gate.WaitAsync(cancellation).ConfigureAwait(false);ownsGate=true;
+            await idleReclaimTask.ConfigureAwait(false);
             deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lease.PressureCancellation);
             double seconds=operation=="markdownRender"?3:operation=="capabilities"||dataOnly?30:priority!=WorkerPriority.Foreground?10:60;
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));var token=deadline.Token;
             long memoryLimit=operation=="markdownRender"||dataOnly?1L<<30:2L<<30;
-            memoryLimit=Math.Min(memoryLimit,Math.Max(256L<<20,WorkerResources.Shared.Snapshot.HardLimitBytes/2));
+            memoryLimit=Math.Min(memoryLimit,Math.Max(256L<<20,resources.Snapshot.HardLimitBytes/2));
             if(process is null||process.HasExited)await Start(token,lease.CpuThreads,memoryLimit).ConfigureAwait(false);
             if(producedAssets.Count>=512)throw new WorkerResourceLimitException("待释放的媒体预览过多，请关闭旧预览后重试。");
             diskGuard=new Timer(_=>
@@ -135,17 +164,18 @@ public sealed class WorkerClient(string executable,string tempRoot,WorkerPriorit
         }
         catch(OperationCanceledException)
         {
+            if(!ownsGate){await gate.WaitAsync().ConfigureAwait(false);ownsGate=true;}
             await Stop().ConfigureAwait(false);
             if(cancellation.IsCancellationRequested)throw;
             if(diskFailure!=0)throw new WorkerResourceLimitException("工作进程临时磁盘预算已触发，任务已停止。");
             if(lease?.PressureCancellation.IsCancellationRequested==true)throw new WorkerResourceLimitException("内存保护已暂停后台媒体任务。");
             throw new TimeoutException("媒体工作进程任务超时。");
         }
-        catch{await Stop().ConfigureAwait(false);throw;}
+        catch{if(!ownsGate){await gate.WaitAsync().ConfigureAwait(false);ownsGate=true;}await Stop().ConfigureAwait(false);throw;}
         finally
         {
             if(diskGuard is not null)await diskGuard.DisposeAsync().ConfigureAwait(false);
-            deadline?.Dispose();lease?.Dispose();gate.Release();
+            deadline?.Dispose();lease?.Dispose();if(ownsGate)gate.Release();requestGate.Release();
         }
     }
     private async Task Start(CancellationToken cancellation,int threads,long memoryLimit)
@@ -182,5 +212,15 @@ public sealed class WorkerClient(string executable,string tempRoot,WorkerPriorit
         if(retired is not null)LastTemporaryCleanup=await Task.Run(()=>WorkerTemporaryFiles.ReleaseExited(retired)).ConfigureAwait(false);
         producedAssets.Clear();requestedOutputs.Clear();currentPath=null;currentInput=null;currentInputFile=null;taskDirectory=null;
     }
-    public async ValueTask DisposeAsync(){await gate.WaitAsync().ConfigureAwait(false);try{await Stop().ConfigureAwait(false);}finally{gate.Release();gate.Dispose();}}
+    public ValueTask DisposeAsync()
+    {lock(disposalSync)return new(disposalTask??=DisposeCore());}
+    private async Task DisposeCore()
+    {
+        if(Interlocked.Exchange(ref disposing,1)!=0)return;
+        resources.MemoryPressure-=OnMemoryPressure;lifetime.Cancel();
+        await requestGate.WaitAsync().ConfigureAwait(false);
+        await gate.WaitAsync().ConfigureAwait(false);
+        try{try{await idleReclaimTask.ConfigureAwait(false);}finally{await Stop().ConfigureAwait(false);}}
+        finally{gate.Release();requestGate.Release();}
+    }
 }

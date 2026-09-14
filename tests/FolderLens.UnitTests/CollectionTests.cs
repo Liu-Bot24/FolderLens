@@ -151,6 +151,11 @@ public sealed class CollectionTests
         var collection=await catalog.CreateCollection("Approved");var ids=new[]{collection.Id};
         await catalog.ChangeCollectionMembers(ids,["000000000001"],true);
         Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids},1,1)).Count);
+        await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET physical_identity=NULL WHERE entry_id='000000000001'";return command.ExecuteNonQuery();});
+        Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids},1,10)).Count);
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+        await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET physical_identity='volume:shared-file' WHERE entry_id='000000000001'";return command.ExecuteNonQuery();});
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
         Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="collection:"+collection.Id,CollectionId=collection.Id},1,2)).Count);
         Assert.Equal(0,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids,ExcludeCollections=ids},1,3)).Count);
         await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(()=>catalog.ChangeCollectionMembers([collection.Id,Guid.NewGuid().ToString("N")],["000000000003"],true));
