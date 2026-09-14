@@ -8,6 +8,11 @@ using VImage=NetVips.Image;
 NetVips.NetVips.Concurrency=4;
 NetVips.Cache.Max=0;
 NetVips.Cache.MaxMem=64*1024*1024;
+if(args is ["raw-preview-check"])
+{
+    try{Console.WriteLine(JsonSerializer.Serialize(RawPreviewImage.Verify()));return 0;}
+    catch(Exception error){Console.Error.WriteLine(error);return 1;}
+}
 var magickConfiguration=ImageMagick.Configuration.ConfigurationFiles.Default;
 magickConfiguration.Policy.Data=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"magick","policy.xml"));
 string configurationDirectory=Path.Combine(args.Length==5 && args[0]=="serve"?args[2]:Path.Combine(Path.GetTempPath(),"FolderLens-worker",Guid.NewGuid().ToString("N")),"magick");

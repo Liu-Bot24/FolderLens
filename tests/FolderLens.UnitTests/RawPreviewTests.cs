@@ -6,6 +6,23 @@ namespace FolderLens.UnitTests;
 public sealed class RawPreviewTests
 {
     [Fact]
+    public async Task RealWorkerAcceptsEmbeddedBitmapAndJpegAndRejectsTruncation()
+    {
+        var project=new DirectoryInfo(AppContext.BaseDirectory);
+        while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;
+        Assert.NotNull(project);
+        string exe=Path.Combine(project.FullName,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
+        using var process=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe,"raw-preview-check"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true})!;
+        var output=process.StandardOutput.ReadToEndAsync();var error=process.StandardError.ReadToEndAsync();
+        using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try{await process.WaitForExitAsync(timeout.Token);}finally{if(!process.HasExited)process.Kill(true);}
+        Assert.True(process.ExitCode==0,await error);
+        using var report=System.Text.Json.JsonDocument.Parse(await output);
+        Assert.Equal("PASS",report.RootElement.GetProperty("status").GetString());
+        Assert.True(report.RootElement.GetProperty("bitmap").GetBoolean());Assert.True(report.RootElement.GetProperty("jpeg").GetBoolean());
+        Assert.True(report.RootElement.GetProperty("orientation").GetBoolean());Assert.True(report.RootElement.GetProperty("truncatedRejected").GetBoolean());
+    }
+    [Fact]
     public async Task PublicArwUsesRealEmbeddedDecoderAndReleasesOutput()
     {
         var project=new DirectoryInfo(AppContext.BaseDirectory);

@@ -15,6 +15,7 @@ internal sealed class StaticDecoder : IDisposable
     private readonly string path;
     private readonly long length,mtime;
     private int rawWidth,rawHeight;
+    private int rawFlip;
     private int rawEncodedWidth,rawEncodedHeight;
     private int? encodedWidth,encodedHeight,sourceDepth;
     private bool? sourceHasAlpha;
@@ -56,7 +57,7 @@ internal sealed class StaticDecoder : IDisposable
             if(IsRaw)
             {
                 int result=RawDecoder.Open(file,2048,out raw,out var info);if(result!=0)throw new InvalidDataException($"LibRaw open error {result}");
-                rawWidth=rawEncodedWidth=(int)info.Width;rawHeight=rawEncodedHeight=(int)info.Height;if(info.Flip is 5 or 6)(rawWidth,rawHeight)=(rawHeight,rawWidth);
+                rawFlip=info.Flip;rawWidth=rawEncodedWidth=(int)info.Width;rawHeight=rawEncodedHeight=(int)info.Height;if(info.Flip is 5 or 6)(rawWidth,rawHeight)=(rawHeight,rawWidth);
                 Format=ext[1..];Provider="LibRaw 0.22.2";return;
             }
             byte[] head=new byte[32];int read=source.Read(head);source.Position=0;Format=Identify(head.AsSpan(0,read));
@@ -141,7 +142,7 @@ internal sealed class StaticDecoder : IDisposable
         CheckVersion();
         if(IsRaw && embedded)
         {
-            var preview=RawDecoder.Decode(raw!,false);using var decoded=VImage.NewFromBuffer(preview.Data);using var oriented=decoded.Autorot();
+            var preview=RawDecoder.Decode(raw!,false);using var decoded=RawPreviewImage.Decode(preview.Data,preview.Info,rawFlip);using var oriented=decoded.Autorot();
             WriteFit(oriented,destination,targetWidth,targetHeight);return(oriented.Width,oriented.Height,"rawEmbedded");
         }
         if(IsRaw && image is null)

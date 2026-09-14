@@ -316,6 +316,32 @@ public sealed class ScannerRegressionTests
         Assert.Equal(0,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files WHERE display_width IS NOT NULL";return (long)cmd.ExecuteScalar()!;}));
         Assert.Equal(hash,SHA256.HashData(File.ReadAllBytes(path)));Assert.Equal(write,File.GetLastWriteTimeUtc(path));
     }
+    [Fact] public async Task BrowsingChildRechecksChangesWithoutDuplicatingRootOrInvalidatingUnchangedMetadata()
+    {
+        string source=Fixture(),child=Path.Combine(source,"child");Directory.CreateDirectory(child);
+        File.WriteAllText(Path.Combine(child,"keep.jpg"),"keep");File.WriteAllText(Path.Combine(child,"remove.jpg"),"remove");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();
+        long epoch=await catalog.OpenRoot("root",source);var scanner=new DirectoryIndexer(catalog,Worker());
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        string id=DirectoryIndexer.StablePathId("root",@"child\keep.jpg");
+        Assert.True(await catalog.ApplyImageMetadata(id,1,"root",epoch,100,200,"JPEG",false,false,"test"));
+        File.Delete(Path.Combine(child,"remove.jpg"));File.WriteAllText(Path.Combine(child,"new.jpg"),"new");
+        var dirty=new ScanDirtyDirectories(catalog);await dirty.Mark("root",epoch,[new("child","BrowseNavigation",true)]);
+        var rechecked=await scanner.ReconcileDirty("root",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal("ready",rechecked.State);Assert.Equal(1,rechecked.Directories);
+        var page=await catalog.ReadFirstPage(new(){RootId="root",DirectoryScope="child",Kinds=[]});
+        Assert.Equal(new[]{@"child\keep.jpg",@"child\new.jpg"},page.Items.Select(row=>row.RelativePath).Order().ToArray());
+        Assert.Equal((1L,3L,1L,100L),await catalog.Read(c=>
+        {
+            using var cmd=c.CreateCommand();cmd.CommandText="SELECT (SELECT count(*) FROM Roots),(SELECT count(*) FROM Files),file_version,display_width FROM Files WHERE entry_id=$id";cmd.Parameters.AddWithValue("$id",id);
+            using var row=cmd.ExecuteReader();Assert.True(row.Read());return(row.GetInt64(0),row.GetInt64(1),row.GetInt64(2),row.GetInt64(3));
+        }));
+        // A real source change must still invalidate the previous image geometry.
+        File.WriteAllText(Path.Combine(child,"keep.jpg"),"changed source bytes");
+        await dirty.Mark("root",epoch,[new("child","BrowseNavigation",true)]);
+        await scanner.ReconcileDirty("root",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(1L,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files WHERE entry_id=$id AND file_version=2 AND display_width IS NULL";cmd.Parameters.AddWithValue("$id",id);return (long)cmd.ExecuteScalar()!;}));
+    }
     [Fact] public void AllocationIdentitySharesHardLinksButRetainsCreationIdentity()
     {
         string source=Fixture(),a=Path.Combine(source,"a.txt"),b=Path.Combine(source,"b.txt");File.WriteAllText(a,"hardlink data");

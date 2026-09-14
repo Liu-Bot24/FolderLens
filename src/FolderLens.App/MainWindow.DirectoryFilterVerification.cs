@@ -114,6 +114,17 @@ public sealed partial class MainWindow
         SelectTag(Category,"pdf");await queryCompletion;
         if(DetailsMode.IsChecked==true||categoryDetailViews["pdf"])throw new InvalidOperationException("离开收藏视图后覆盖了 PDF 的用户网格偏好。");
         report["savedViewDoesNotOverwriteCategoryPreference"]=true;
-        report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;report["status"]="PASS";
+        report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;
+        long navigationEpoch=epoch;string navigationRoot=rootId;
+        await NavigateFolder(new FolderNode(Path.Combine(source,"A"),"A",rootId,"A",source));
+        if(rootId!=navigationRoot||epoch!=navigationEpoch||CurrentFilter().DirectoryScope!="A"||RootPath.Text!=Path.Combine(source,"A"))throw new InvalidOperationException("进入子目录建立了重复扫描根或没有更新浏览位置。");
+        if(scanTask is not null)await scanTask;
+        await NavigateFolder(new FolderNode(source,"root",rootId,"",source));
+        if(rootId!=navigationRoot||epoch!=navigationEpoch||CurrentFilter().DirectoryScope!="")throw new InvalidOperationException("返回扫描根时未清除子目录范围。");
+        if(scanTask is not null)await scanTask;
+        async Task<long> Versions()=>await catalog!.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT sum(file_version) FROM Files WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",rootId);return (long)cmd.ExecuteScalar()!;});
+        long beforeRefresh=await Versions();await RefreshCurrentRoot();
+        if(await Versions()!=beforeRefresh)throw new InvalidOperationException("普通刷新使未变化文件的版本全部失效。");
+        report["treeNavigationReusesRootAndEpoch"]=true;report["ordinaryRefreshPreservesUnchangedVersions"]=true;report["status"]="PASS";
     }
 }

@@ -17,7 +17,7 @@ public sealed partial class MainWindow
         if(forward?!navigationHistory.CanGoForward:!navigationHistory.CanGoBack)return;
         await ReturnToBrowser();
         var target=forward?navigationHistory.GoForward(CaptureView()):navigationHistory.GoBack(CaptureView());
-        UpdateNavigationButtons();await RestoreSavedView(target,false);
+        UpdateNavigationButtons();await RestoreSavedView(target,false,recheckDirectory:true);
     }
     private async void BackFolder(object sender,RoutedEventArgs e){try{await NavigateHistory(false);}catch(Exception ex){ShowError(ex);}}
     private async void ForwardFolder(object sender,RoutedEventArgs e){try{await NavigateHistory(true);}catch(Exception ex){ShowError(ex);}}
