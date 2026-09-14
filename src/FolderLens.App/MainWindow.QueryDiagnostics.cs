@@ -27,7 +27,7 @@ public sealed partial class MainWindow
             errorCode=error is Microsoft.Data.Sqlite.SqliteException sqlite?sqlite.SqliteExtendedErrorCode:(int?)null,
             cancelledByNewRequest=attempt.Request!=queryRequest,closing
         };
-        string directory=dataDirectory;
+        string directory=RuntimeDataDirectory;
         try
         {
             await queryDiagnosticGate.WaitAsync();

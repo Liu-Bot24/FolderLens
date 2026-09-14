@@ -7,6 +7,22 @@ namespace FolderLens.UnitTests;
 public sealed class CapacityServiceTests
 {
     [Fact]
+    public async Task LiveCapacityFollowsReopenedRootWhileSnapshotRemainsFrozen()
+    {
+        string fixture=Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")),root=Path.Combine(fixture,"source");
+        Directory.CreateDirectory(root);File.WriteAllText(Path.Combine(root,"one.jpg"),"one");
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();
+        long first=await catalog.OpenRoot("root",root);var scan=new DirectoryIndexer(catalog);await scan.Scan("root",root,first,true,[],null,CancellationToken.None);
+        var service=new CapacityService(catalog);var frozen=await catalog.CreateSnapshot(new(){RootId="root",ObservedRootEpoch=first},first,1);await catalog.RetainSnapshot(frozen.Id);
+        var before=await service.EntireRoot("root",CancellationToken.None,currentObservationsOnly:true);
+        long second=await catalog.OpenRoot("root",root);File.WriteAllText(Path.Combine(root,"two.jpg"),"two");await scan.Scan("root",root,second,true,[],null,CancellationToken.None);
+        var after=await service.EntireRoot("root",CancellationToken.None,currentObservationsOnly:true);
+        Assert.Equal(1,before.Rows.Single(row=>row.RelativePath=="").SubtreeFiles);
+        Assert.Equal(2,after.Rows.Single(row=>row.RelativePath=="").SubtreeFiles);
+        Assert.Equal(1,(await service.Result(frozen,CancellationToken.None)).Rows.Single(row=>row.RelativePath=="").SubtreeFiles);
+        await catalog.ReleaseSnapshot(frozen.Id);
+    }
+    [Fact]
     public async Task DirectoryAggregateMatchesFileStreamIncludingUnknownAllocationAndMissingRows()
     {
         await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")));

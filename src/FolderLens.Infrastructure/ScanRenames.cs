@@ -61,8 +61,13 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,F
             using var row=cmd.ExecuteReader();return row.Read()?(Path:row.IsDBNull(0)?null:row.GetString(0),Identity:row.IsDBNull(1)?null:row.GetString(1)):(Path:(string?)null,Identity:(string?)null);
         },cancellation).ConfigureAwait(false);
         if(location.Path is null||location.Identity is null)return false;
-        var anchor=await Probe(location.Path,cancellation).ConfigureAwait(false);
-        return anchor.State=="missing"&&await MissingWithinKnownNamespace(location.Path,location.Identity,cancellation).ConfigureAwait(false);
+        return await ConfirmMissingLocation(location.Path,location.Identity,cancellation).ConfigureAwait(false);
+    }
+    internal async Task<bool> ConfirmMissingLocation(string path,string identity,CancellationToken cancellation)
+    {
+        if(string.IsNullOrEmpty(path)||string.IsNullOrEmpty(identity))return false;
+        var anchor=await Probe(path,cancellation).ConfigureAwait(false);
+        return anchor.State=="missing"&&await MissingWithinKnownNamespace(path,identity,cancellation).ConfigureAwait(false);
     }
     private async Task<bool> MissingWithinKnownNamespace(string path,string identity,CancellationToken cancellation)
     {

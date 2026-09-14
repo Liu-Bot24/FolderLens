@@ -114,7 +114,7 @@ public sealed partial class MainWindow
         await RestorePlayerPreferences();
         try
         {
-            var cleanup=await Task.Run(()=>FolderLens.Infrastructure.PlaylistFiles.Cleanup(Path.Combine(dataDirectory,"playlists"),DateTimeOffset.UtcNow,lifetime.Token),lifetime.Token);
+            var cleanup=await Task.Run(()=>FolderLens.Infrastructure.PlaylistFiles.Cleanup(Path.Combine(RuntimeDataDirectory,"playlists"),DateTimeOffset.UtcNow,lifetime.Token),lifetime.Token);
             if(cleanup.Removed>0||cleanup.Failed>0||cleanup.Incomplete)RecordWebView($"Playlist cleanup removed={cleanup.Removed} failed={cleanup.Failed} incomplete={cleanup.Incomplete}");
         }
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
@@ -275,7 +275,7 @@ public sealed partial class MainWindow
     private async void PlayResultVideos(object sender,RoutedEventArgs e)
     {
         if(catalog is not {} store||resultHandle is not {} handle||!playerSupportsPlaylists||string.IsNullOrWhiteSpace(playerExecutable))return;
-        string sourceRoot=root,directory=Path.Combine(dataDirectory,"playlists");long currentOrdinal=selected?.Ordinal??0;bool retained=false,busy=false;
+        string sourceRoot=root,directory=Path.Combine(RuntimeDataDirectory,"playlists");long currentOrdinal=selected?.Ordinal??0;bool retained=false,busy=false;
         using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var chosen=SelectedOrdinals(DetailsMode.IsChecked==true?FilesList:FilesGrid);long chosenCount=chosen.Sum(range=>range.Count);
         string[] scopes=chosenCount>0?["当前结果的全部视频","从当前项开始的后续视频",$"仅选中项目中的视频（已选 {chosenCount:N0} 项）"]:["当前结果的全部视频","从当前项开始的后续视频"];

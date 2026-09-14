@@ -10,6 +10,15 @@ string directory=Path.GetFullPath(args[1]);Directory.CreateDirectory(directory);
 var options=new JsonSerializerOptions { WriteIndented=true };
 try
 {
+ if(args[0]=="migrate-playlists"&&args.Length==2)
+ {
+    long collections,members;
+    await using(var session=await BrowsingSessionStorage.Open(directory))
+    {
+        var saved=await session.Catalog.ReadCollections();collections=saved.Count;members=saved.Sum(c=>c.Count);
+    }
+    Console.WriteLine(JsonSerializer.Serialize(new{status="PASS",collections,members,legacyCatalog="read-only",runtime="removed"}));return 0;
+ }
  if(args[0]=="check-migration"&&args.Length==3)return FolderLens.Diagnostics.MigrationCheck.Run(directory,Path.GetFullPath(args[2]));
  if(args[0]=="grouping-scale"&&args.Length is >=2 and <=4)return await FolderLens.Diagnostics.GroupingScaleScenario.Run(directory,args.Length>2?int.Parse(args[2]):50_000,args.Length>3?int.Parse(args[3]):4);
  if(args[0]=="grouping"&&args.Length==4)return await FolderLens.Diagnostics.GroupingScenario.Run(directory,Path.GetFullPath(args[2]),args[3]);

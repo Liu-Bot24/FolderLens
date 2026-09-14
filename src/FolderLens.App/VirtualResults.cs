@@ -48,6 +48,7 @@ public sealed class FileRow : ObservableObject
     public Visibility VideoBadgeVisibility=>Kind=="video"&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     public string FormatText {get=>format;private set=>SetProperty(ref format,value);}
     public long? ModifiedUtcTicks {get;private set;}
+    public string SourceSignature {get;private set;}="";
     public string? HydrationState {get;private set;}
     private string kind="other";
     public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){if(value=="other")Thumbnail=null;OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}}}
@@ -86,6 +87,7 @@ public sealed class FileRow : ObservableObject
     public void UpdateProperties(FileProperties file,bool updateCollection=true)
     {
         if(Item is null||Item.EntryId!=file.EntryId||Item.Version!=file.Version)return;
+        SourceSignature=file.SourceSignature;
         if(updateCollection)SetCollected(file.IsCollected);OnPropertyChanged(nameof(QuickCollectEnabled));
         Name=file.Name;RelativePath=file.RelativePath;Kind=file.Kind;ModifiedUtcTicks=file.ModifiedUtcTicks;HydrationState=file.HydrationState;
         entryState=file.EntryState;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));

@@ -108,9 +108,10 @@ public sealed partial class CatalogStore
         }
         throw new ArgumentException("请选择某个收藏来源目录内的子文件夹。");
     },cancellation);
-    public Task<IReadOnlyList<FileCollection>> ReadCollections(CancellationToken cancellation=default)=>interactiveReader.Execute<IReadOnlyList<FileCollection>>(c=>
+    public Task<IReadOnlyList<FileCollection>> ReadCollections(CancellationToken cancellation=default)=>(playlistPath is null?interactiveReader:writer).Execute<IReadOnlyList<FileCollection>>(c=>
     {
         using var command=c.CreateCommand();command.CommandText="SELECT c.collection_id,c.name,(SELECT count(*) FROM CollectionMembers m WHERE m.collection_id=c.collection_id) FROM Collections c ORDER BY c.name_key LIMIT 513";
+        if(playlistPath is not null)command.CommandText="SELECT c.collection_id,c.name,(SELECT count(*) FROM playlist.SavedLinks m WHERE m.collection_id=c.collection_id) FROM Collections c ORDER BY c.name_key LIMIT 513";
         using var rows=command.ExecuteReader();var result=new List<FileCollection>();while(rows.Read())result.Add(new(rows.GetString(0),rows.GetString(1),rows.GetInt64(2)));
         if(result.Count>512)throw new InvalidDataException("收藏夹数量超过 512 个，请先整理收藏夹。");return result;
     },cancellation);

@@ -608,7 +608,7 @@ public sealed partial class MainWindow
         await RefreshQuery();
         long leases=await Task.Run(()=>
         {
-            using var db=new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dataDirectory,"catalog","sessions.sqlite")};Mode=ReadOnly");db.Open();
+            using var db=new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(RuntimeDataDirectory,"catalog","sessions.sqlite")};Mode=ReadOnly");db.Open();
             using var command=db.CreateCommand();command.CommandText="SELECT SUM(active_leases) FROM ResultSessions";return Convert.ToInt64(command.ExecuteScalar());
         });
         report["publicationFaults"]=faults;report["leasesAfterRecovery"]=leases;
@@ -655,7 +655,7 @@ public sealed partial class MainWindow
     }
     private Task<long> ReadVerificationLeases()=>Task.Run(()=>
     {
-        using var db=new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dataDirectory,"catalog","sessions.sqlite")};Mode=ReadOnly");db.Open();
+        using var db=new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(RuntimeDataDirectory,"catalog","sessions.sqlite")};Mode=ReadOnly");db.Open();
         using var command=db.CreateCommand();command.CommandText="SELECT COALESCE(SUM(active_leases),0) FROM ResultSessions";return Convert.ToInt64(command.ExecuteScalar());
     });
     private async Task VerifyTreeLimit(Dictionary<string,object> report)

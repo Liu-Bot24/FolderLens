@@ -40,6 +40,8 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource scanStop=new(),queryStop=new(),selectionStop=new(),lifetime=new();
     private Task? scanTask;
     private string root="",rootId="",dataDirectory="";
+    private BrowsingSessionStorage? browsingStorage;
+    private string RuntimeDataDirectory=>browsingStorage?.DirectoryPath??dataDirectory;
     private long epoch,generation,selection,queryRequest;
     private bool updatingBrowser;
     private FileRow? selected;
@@ -110,16 +112,8 @@ public sealed partial class MainWindow : Window
             await InitializeNavigationTree();
             StartupStage("navigation");
             if(args.Contains("--verify-refresh")&&args.Contains("--verify-navigation-roots"))VerifyInitialNavigation();
-            catalog=await Task.Run(async()=>
-            {
-                var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));
-                try
-                {
-                    await store.Initialize(lifetime.Token,message=>DispatcherQueue.TryEnqueue(()=>{if(!closing)Status.Text=message;}));
-                    return store;
-                }
-                catch{await store.DisposeAsync();throw;}
-            });
+            browsingStorage=await BrowsingSessionStorage.Open(dataDirectory,lifetime.Token);
+            catalog=browsingStorage.Catalog;
             if(closing)return;
             StartupStage("catalog");
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
@@ -134,12 +128,12 @@ public sealed partial class MainWindow : Window
                 if(current is not null)worker=Path.Combine(current.FullName,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
             }
             verificationComponents["media"]=Path.GetRelativePath(AppContext.BaseDirectory,worker);
-            previewWorker=new(worker,Path.Combine(dataDirectory,"temp","preview"));thumbnailWorker=new(worker,Path.Combine(dataDirectory,"temp","thumbnails"),WorkerPriority.Visible);metadataWorker=new(worker,Path.Combine(dataDirectory,"temp","metadata"),WorkerPriority.Metadata);prefetchWorker=new(worker,Path.Combine(dataDirectory,"temp","prefetch"),WorkerPriority.Prefetch);
-            secondThumbnailWorker=new(worker,Path.Combine(dataDirectory,"temp","thumbnails-2"),WorkerPriority.Visible);
+            previewWorker=new(worker,Path.Combine(RuntimeDataDirectory,"temp","preview"));thumbnailWorker=new(worker,Path.Combine(RuntimeDataDirectory,"temp","thumbnails"),WorkerPriority.Visible);metadataWorker=new(worker,Path.Combine(RuntimeDataDirectory,"temp","metadata"),WorkerPriority.Metadata);prefetchWorker=new(worker,Path.Combine(RuntimeDataDirectory,"temp","prefetch"),WorkerPriority.Prefetch);
+            secondThumbnailWorker=new(worker,Path.Combine(RuntimeDataDirectory,"temp","thumbnails-2"),WorkerPriority.Visible);
             thumbnailPool.Enqueue(thumbnailWorker);thumbnailPool.Enqueue(secondThumbnailWorker);
             for(int i=2;i<WorkerResources.Shared.ThumbnailConcurrency;i++)
             {
-                var extra=new WorkerClient(worker,Path.Combine(dataDirectory,"temp","thumbnails-"+(i+1)),WorkerPriority.Visible);
+                var extra=new WorkerClient(worker,Path.Combine(RuntimeDataDirectory,"temp","thumbnails-"+(i+1)),WorkerPriority.Visible);
                 extraThumbnailWorkers.Add(extra);thumbnailPool.Enqueue(extra);
             }
             thumbnailCache=new(Path.Combine(dataDirectory,"cache","thumbnails"));await thumbnailCache.Initialize(lifetime.Token);
@@ -147,7 +141,7 @@ public sealed partial class MainWindow : Window
             providerIdentity=await thumbnailWorker.GetProviderIdentity(lifetime.Token);
             StartupStage("providerIdentity");
             capabilityTask=ReadRuntimeCapabilities();
-            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(dataDirectory,"temp","markdown"));
+            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","markdown"));
             verificationComponents["content"]=Path.GetRelativePath(AppContext.BaseDirectory,contentExecutable);
             verificationComponents["scan"]=Path.GetRelativePath(AppContext.BaseDirectory,ScanWorkerClient.FindExecutable()??Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"));
             string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!deployedVerification&&!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
@@ -232,7 +226,12 @@ public sealed partial class MainWindow : Window
                 if(requested!=rootChangeVersion||closing)return;
             }
             foreach(var finished in backgroundScans.Where(s=>s!=reusable&&s.Completion.IsCompleted).ToArray()){finished.Dispose();backgroundScans.Remove(finished);}
-            if(collectionScope){root=path;rootId=path;epoch=requested;}
+            if(collectionScope)
+            {
+                await catalog.RefreshPlaylist(path[11..],scanStop.Token);
+                if(requested!=rootChangeVersion||closing)return;
+                root=path;rootId=path;epoch=requested;
+            }
             else
             {
                 var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token,reusable is null?null:(reusable.RootId,reusable.Epoch));
@@ -317,7 +316,7 @@ public sealed partial class MainWindow : Window
             // A successful query or a dirty-subdirectory scan does not prove that a
             // previous root scan failure recovered. F5 performs the complete scope.
             if(force&&report.State=="ready")ClearScanError();
-            if(report.State is "ready" or "missing")
+            if(report.State is "ready" or "missing" or "partial")
             {
                 await RefreshQuery(preserveViewport:true);
                 if(rootVersion!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
@@ -716,7 +715,7 @@ public sealed partial class MainWindow : Window
         QualityLabel.Text=$"{info.VideoCodec??info.AudioCodec??"编码未知"} · {(info.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():"时长未知")}";
         if(kind=="video" || info.HasCover)
         {
-            string folder=Path.Combine(dataDirectory,"temp","covers");Directory.CreateDirectory(folder);string output=Path.Combine(folder,Guid.NewGuid().ToString("N")+".png");
+            string folder=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(folder);string output=Path.Combine(folder,Guid.NewGuid().ToString("N")+".png");
             int edge=kind=="video"?1024:512;
             try
             {
@@ -870,7 +869,7 @@ public sealed partial class MainWindow : Window
             var stat=(Length:properties.LogicalBytes,Modified:properties.ModifiedUtcTicks);
             if(stat.Length!=row.Item!.Bytes)throw new IOException("文件已变化，请刷新目录。");
             string representation=kind=="video"?"videoCover":kind=="audio"?"audioCover":FileKinds.Raw.Contains(Path.GetExtension(source))?"rawEmbedded":"thumbnail";
-            var cacheKey=new ThumbnailCacheKey(row.Item.EntryId,row.Item.Version,stat.Modified,stat.Length,edge,kind is "video" or "audio"?providerIdentity+"/"+MediaTools.CoverStrategyVersion:providerIdentity,representation);
+            var cacheKey=new ThumbnailCacheKey(row.Item.EntryId,row.Item.Version,stat.Modified,stat.Length,edge,kind is "video" or "audio"?providerIdentity+"/"+MediaTools.CoverStrategyVersion:providerIdentity,representation,SourceSignature:properties.SourceSignature);
             if(verifyThumbnailReadBarrier is not null)await verifyThumbnailReadBarrier(row,token);
             cacheLease=await thumbnailCache!.TryGet(cacheKey,token);Mark("cacheLookup");
             if(cacheLease is not null)
@@ -885,7 +884,7 @@ public sealed partial class MainWindow : Window
             }
             else if(kind is "video" or "audio")
             {
-                var info=await media!.Probe(source,token,WorkerPriority.Visible);if(kind=="audio"&&!info.HasCover)return;string directory=Path.Combine(dataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");await media.Cover(source,asset,info,token,edge);
+                var info=await media!.Probe(source,token,WorkerPriority.Visible);if(kind=="audio"&&!info.HasCover)return;string directory=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");await media.Cover(source,asset,info,token,edge);
             }
             else return;
             var cacheWrite=await thumbnailCache.StoreOptional(cacheKey,asset,token);cacheLease=cacheWrite.Lease;Mark("cacheStore");
@@ -1029,7 +1028,7 @@ public sealed partial class MainWindow : Window
             if(markdown is null)
             {
                 initializing=true;markdown=new WebView2();var view=markdown;MarkdownHost.Content=markdown;MarkdownHost.Visibility=Visibility.Visible;
-                markdownStage="environment";string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");var environment=await CoreWebView2Environment.CreateWithOptionsAsync(Directory.Exists(fixedRuntime)?fixedRuntime:null,Path.Combine(dataDirectory,"webview"),null).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);markdownStage="controller";await markdown.EnsureCoreWebView2Async(environment).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);
+                markdownStage="environment";string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");var environment=await CoreWebView2Environment.CreateWithOptionsAsync(Directory.Exists(fixedRuntime)?fixedRuntime:null,Path.Combine(RuntimeDataDirectory,"webview"),null).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);markdownStage="controller";await markdown.EnsureCoreWebView2Async(environment).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);
                 token.ThrowIfCancellationRequested();var core=markdown.CoreWebView2;core.Settings.IsScriptEnabled=false;core.Settings.AreHostObjectsAllowed=false;core.Settings.IsWebMessageEnabled=false;core.Settings.AreDevToolsEnabled=false;
                 core.NavigationCompleted+=(_,e)=>{if(!ReferenceEquals(markdown,view))return;RecordWebView($"NavigationCompleted success={e.IsSuccess} error={e.WebErrorStatus}");if(e.NavigationId==markdownNavigationId)navigationComplete?.TrySetResult(e.IsSuccess);};
                 core.ProcessFailed+=(_,e)=>
@@ -1127,7 +1126,8 @@ public sealed partial class MainWindow : Window
             if(verifyClosingState is not null)await Cleanup(verifyClosingState);
             await Cleanup(()=>prefetchSourceProbe.DisposeAsync().AsTask());
             foreach(var worker in new[]{prefetchWorker,previewWorker,thumbnailWorker,secondThumbnailWorker,metadataWorker,contentWorker}.Concat(extraThumbnailWorkers))if(worker is not null)await Cleanup(()=>worker.DisposeAsync().AsTask());
-            if(thumbnailCache is not null)await Cleanup(()=>thumbnailCache.DisposeAsync().AsTask());if(catalog is not null)await Cleanup(()=>catalog.DisposeAsync().AsTask());
+            if(thumbnailCache is not null)await Cleanup(()=>thumbnailCache.DisposeAsync().AsTask());
+            if(browsingStorage is not null)await Cleanup(()=>browsingStorage.DisposeAsync().AsTask());else if(catalog is not null)await Cleanup(()=>catalog.DisposeAsync().AsTask());
         }
         finally{try{if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))await File.WriteAllLinesAsync(Path.Combine(dataDirectory,"webview-events.log"),webviewEvents);}finally{if(InstanceBroker is not null)await InstanceBroker.DisposeAsync();finalWindowClose=true;Close();Application.Current.Exit();}}
     }
