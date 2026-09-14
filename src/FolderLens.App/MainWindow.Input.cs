@@ -251,23 +251,45 @@ public sealed partial class MainWindow
             if(selected.Kind=="video")
             {
                 if(control)return;
-                NavigateViewerWheel(delta);return;
+                await NavigateViewerWheel(delta);return;
             }
             string effectiveWheel=EffectiveViewerWheelBehavior();
             if(!control&&effectiveWheel=="next")
-            {NavigateViewerWheel(delta);return;}
+            {await NavigateViewerWheel(delta);return;}
             if(!control&&effectiveWheel=="pan")
             {bool horizontal=point.Properties.IsHorizontalMouseWheel||wheelBehavior=="next"&&viewerScaleIntent==ViewerScaleIntent.Height;PanViewerScreen(horizontal?new(delta*.75f,0):new(0,delta*.75f));await RefreshViewerPixels();return;}
             await ZoomViewerAt(EffectiveScale()*Math.Pow(1.2,delta/120.0),point.Position);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
     }
-    private void NavigateViewerWheel(int delta)
+    private CancellationTokenSource? wheelNavigationStop;
+    private FileRow? wheelNavigationAnchor;
+    private string? wheelNavigationSession;
+    private int wheelNavigationSteps;
+    private async Task NavigateViewerWheel(int delta)
     {
         wheelRemainder+=delta;
         if(Math.Abs(wheelRemainder)<120)return;
         int steps=wheelRemainder/120;wheelRemainder-=steps*120;
-        Navigate(-steps);
+        if(selected is not {} origin||catalog is null)return;
+        var source=results;var first=firstPageSequence;string? session=source is null?null:resultHandle?.Id;
+        int count=source?.Count??first.Length;if(count==0)return;
+        if(!ReferenceEquals(wheelNavigationAnchor,origin)||wheelNavigationSession!=session)wheelNavigationSteps=0;
+        wheelNavigationAnchor=origin;wheelNavigationSession=session;
+        wheelNavigationSteps=(int)Math.Clamp((long)wheelNavigationSteps-steps,-count,count);
+        wheelNavigationStop?.Cancel();
+        using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,selectionStop.Token,queryStop.Token);wheelNavigationStop=stop;
+        using var operation=browserWork.Enter();if(operation is null){wheelNavigationStop=null;return;}
+        long version=generation,selectionRequest=browserSelectionRequest;
+        try
+        {
+            long target=session is not null?await catalog.ReadMediaNavigationTarget(session,origin.Ordinal,wheelNavigationSteps,stop.Token)
+                :PreviewSequence.Move(first.Select(row=>row.Kind).ToArray(),(int)origin.Ordinal,wheelNavigationSteps);
+            if(stop.IsCancellationRequested||closing||version!=generation||selectionRequest!=browserSelectionRequest||!ReferenceEquals(selected,origin)||!ReferenceEquals(results,source)||source is null&&!ReferenceEquals(firstPageSequence,first))return;
+            if(target!=origin.Ordinal)Navigate(checked((int)(target-origin.Ordinal)));
+        }
+        catch(OperationCanceledException){}
+        finally{if(ReferenceEquals(wheelNavigationStop,stop)){wheelNavigationStop=null;wheelNavigationSteps=0;}}
     }
     private async void ViewerPointerDown(object sender,PointerRoutedEventArgs e)
     {

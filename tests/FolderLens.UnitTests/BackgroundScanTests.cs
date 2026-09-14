@@ -7,6 +7,21 @@ namespace FolderLens.UnitTests;
 public sealed class BackgroundScanTests
 {
     [Fact]
+    public async Task ReconciliationSharesTheFullScanBudgetAndReleasesSlotAfterFailure()
+    {
+        using var slots=new SemaphoreSlim(1,1);using var stop=new CancellationTokenSource();
+        var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scan=new BackgroundScan("a","a",1,new FilterSpec(),new ScanPriority(),slots,stop.Token,async token=>
+        {entered.SetResult();await Task.Delay(Timeout.Infinite,token);return new(0,0,0,"ready");});
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        bool reconciled=false;
+        var reconcile=BackgroundScan.WithSlot(slots,CancellationToken.None,_=>{reconciled=true;throw new IOException("fixture");});
+        Assert.False(reconciled);Assert.False(reconcile.IsCompleted);
+        scan.Cancel();await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>scan.Completion);
+        await Assert.ThrowsAsync<IOException>(()=>reconcile.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.True(reconciled);Assert.Equal(1,slots.CurrentCount);
+    }
+    [Fact]
     public async Task BrowserCancellationDoesNotRetireApplicationScanAndShutdownCancelsQueuedWork()
     {
         using var application=new CancellationTokenSource();using var browser=new CancellationTokenSource();using var slots=new SemaphoreSlim(1,1);
@@ -14,14 +29,14 @@ public sealed class BackgroundScanTests
         using var first=new BackgroundScan("a","a",1,new FilterSpec(),new ScanPriority(),slots,application.Token,async token=>
         {entered.SetResult();await Task.Delay(Timeout.Infinite,token);return new(0,0,0,"ready");});
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        bool secondStarted=false;
+        bool secondStarted=false,secondMonitorCreated=false;
         using var second=new BackgroundScan("b","b",1,new FilterSpec(),new ScanPriority(),slots,application.Token,token=>
-        {secondStarted=true;return Task.FromResult(new ScanProgress(0,0,0,"ready"));});
+        {secondStarted=true;return Task.FromResult(new ScanProgress(0,0,0,"ready"));},()=>{secondMonitorCreated=true;return null;});
         browser.Cancel();Assert.False(first.Cancelled);Assert.False(first.Completion.IsCompleted);Assert.False(secondStarted);
         application.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>first.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>second.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
-        Assert.False(secondStarted);Assert.Equal(1,slots.CurrentCount);
+        Assert.False(secondStarted);Assert.False(secondMonitorCreated);Assert.Equal(1,slots.CurrentCount);
     }
     [Fact]
     public async Task ExplicitCancelDoesNotCancelAnotherRoot()

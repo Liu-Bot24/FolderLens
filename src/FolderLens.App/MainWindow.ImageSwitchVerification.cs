@@ -75,12 +75,12 @@ public sealed partial class MainWindow
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         await SelectBrowserOrdinal(results!,0,lifetime.Token);await SetImmersive(true);
         wheelRemainder=0;var checks=new List<object>();var failures=new List<string>();
-        void Check(int delta,int expected)
+        async Task Check(int delta,int expected)
         {
-            NavigateViewerWheel(delta);bool passed=selected?.Ordinal==expected;
+            await NavigateViewerWheel(delta);bool passed=selected?.Ordinal==expected;
             checks.Add(new{delta,expected,actual=selected?.Ordinal,passed});if(!passed)failures.Add($"{delta}: {selected?.Ordinal} != {expected}");
         }
-        Check(-1200,10);Check(240,8);Check(-60,8);Check(-60,9);Check(-1200,11);Check(2400,0);
+        await Check(-1200,10);await Check(240,8);await Check(-60,8);await Check(-60,9);await Check(-1200,11);await Check(2400,0);
         report["checks"]=checks;report["failures"]=failures;
         if(failures.Count>0)throw new InvalidOperationException(string.Join("; ",failures));
         await WaitUntil(()=>!previewLoading&&previewReadySelection==selection,TimeSpan.FromSeconds(10));
