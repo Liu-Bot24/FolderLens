@@ -57,7 +57,7 @@ public sealed partial class MainWindow
                 player.MediaEnded+=(_,_)=>OnCurrent(()=>{AudioState.Text="播放结束。";UpdateAudioControls();});
                 player.MediaFailed+=(_,error)=>
                 {
-                    string message=$"内置试听失败（{error.Error}）。可重试，或使用外部播放器打开；若设备断开，请连接后重试。";
+                    string message=$"无法播放此音频。请检查音频设备，或用其他播放器打开。";
                     OnCurrent(()=>{StopAudio();AudioState.Text=message;});
                 };
                 AudioState.Text="正在打开音频…";
@@ -67,7 +67,7 @@ public sealed partial class MainWindow
             else if(player.PlaybackSession.PlaybackState==MediaPlaybackState.Playing)player.Pause();
             else player.Play();
         }
-        catch(Exception ex){if(current==selection&&!closing){StopAudio();AudioState.Text=$"无法试听：{ex.Message} 可使用外部播放器打开。";}}
+        catch(Exception ex){if(current==selection&&!closing){StopAudio();AudioState.Text=$"无法试听：{UserMessages.Error(ex)} 可使用外部播放器打开。";}}
     }
     private void ApplyAudioRate(){if(audio is not null&&PlaybackRate.SelectedItem is ComboBoxItem item)audio.PlaybackSession.PlaybackRate=double.Parse(item.Tag.ToString()!,System.Globalization.CultureInfo.InvariantCulture);}
     private void ChangeAudioRate(object sender,SelectionChangedEventArgs e)=>ApplyAudioRate();

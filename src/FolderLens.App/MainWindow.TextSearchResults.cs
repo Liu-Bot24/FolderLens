@@ -43,7 +43,7 @@ public sealed partial class MainWindow
             }
         }
         catch(OperationCanceledException){if(IsCurrent())TextSearchSummary.Text=$"已停止，保留 {textSearchRows.Count:N0} 处匹配，未遍历完整文档。";}
-        catch(Exception ex){if(IsCurrent())TextSearchSummary.Text="查找失败："+ex.Message;}
+        catch(Exception ex){if(IsCurrent())TextSearchSummary.Text="查找失败："+UserMessages.Error(ex);}
         finally{if(request==textSearchGeneration)textSearchRunning=false;}
     }
     private async void OpenTextSearchResult(object sender,ItemClickEventArgs e)

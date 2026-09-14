@@ -28,13 +28,13 @@ public sealed partial class MainWindow
         if(filter.Raw!="any")parts.Add(filter.Raw=="only"?"仅 RAW":"排除 RAW");
         if(filter.Animation!="any")parts.Add(filter.Animation=="animated"?"仅动图":"仅静态图");
         if(filter.CollectionId is null&&filter.MaxFolderLevels is {} levels)parts.Add($"最多查看 {levels} 层（当前文件夹为第 1 层）");
-        if(filter.Exclusions.Length>0)parts.Add($"排除 {filter.Exclusions.Length} 个目录规则");
+        if(filter.Exclusions.Length>0)parts.Add($"已设置 {filter.Exclusions.Length} 条文件夹排除条件");
         if(filter.DirectoryRules.Any(r=>r.Enabled))parts.Add($"文件夹筛选：{filter.DirectoryRules.Count(r=>r.Enabled)} 条规则");
         foreach(var date in filter.Dates)
             parts.Add(FolderLens.Core.DateRangeDisplay.Format(date));
         if(filter.AspectRatio is not null)parts.Add("已限制宽高比");
         if(filter.Orientation!="any")parts.Add("已限制图片方向");
-        if(filter.FrameRate is not null||filter.VideoCodecs.Length>0||filter.AudioCodecs.Length>0)parts.Add("已限制媒体编码或帧率");
+        if(filter.FrameRate is not null||filter.VideoCodecs.Length>0||filter.AudioCodecs.Length>0)parts.Add("已限制视频或音频编码、帧率");
         ActiveFilterSummary.Text="生效筛选："+string.Join(" · ",parts);
         ActiveFilterSummary.Visibility=parts.Count>0?Visibility.Visible:Visibility.Collapsed;
     }
@@ -106,7 +106,7 @@ public sealed partial class MainWindow
             exclusions.Children.Add(directoryEditor.View);
             if(legacyRules.Count>0)
             {
-                var legacySection=editor.Section("已保存的路径排除",false);
+                var legacySection=editor.Section("已排除的文件夹",false);
                 legacySection.Children.Add(new TextBlock{Text="这些路径继续生效。选择一条路径并点击删除即可取消排除。上方预览不包含这里的路径排除。",TextWrapping=TextWrapping.Wrap});
                 var legacyList=new ListView{MaxHeight=180,ItemsSource=legacyRules.Select(r=>r.RelativePath).ToArray()};legacySection.Children.Add(legacyList);
                 var removeLegacy=new Button{Content="删除选中路径",IsEnabled=false};
@@ -123,7 +123,7 @@ public sealed partial class MainWindow
             var error=new TextBlock{TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};
             error.Foreground=(Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
             var skip=new Button{Content="添加不扫描的文件夹…"};
-            skip.Click+=async(_,_)=>{try{string? path=await PickDirectory();if(path is null)return;if(!rules.Any(r=>r.RelativePath==path))rules.Add(new(path,"skipScan"));UpdateRules();}catch(Exception ex){error.Text=ex.Message;error.Visibility=Visibility.Visible;}};
+            skip.Click+=async(_,_)=>{try{string? path=await PickDirectory();if(path is null)return;if(!rules.Any(r=>r.RelativePath==path))rules.Add(new(path,"skipScan"));UpdateRules();}catch(Exception ex){error.Text=UserMessages.Error(ex);error.Visibility=Visibility.Visible;}};
             var remove=new Button{Content="删除选中规则",IsEnabled=false};list.SelectionChanged+=(_,_)=>remove.IsEnabled=list.SelectedIndex>=0;
             remove.Click+=(_,_)=>{if(list.SelectedIndex is var i&&i>=0){rules.RemoveAt(i);UpdateRules();}};
             skipSection.Children.Add(skip);skipSection.Children.Add(remove);
@@ -139,7 +139,7 @@ public sealed partial class MainWindow
                     if(closing||revision!=rootChangeVersion)throw new InvalidOperationException("当前目录已变化，请重新打开筛选。");
                     candidate=editor.Read(rules.Concat(legacyRules).ToArray()) with{DirectoryRules=directoryEditor.Read()};candidate.Validate();error.Visibility=Visibility.Collapsed;
                 }
-                catch(Exception ex){candidate=null;args.Cancel=true;error.Text=ex.Message;error.Visibility=Visibility.Visible;}
+                catch(Exception ex){candidate=null;args.Cancel=true;error.Text=UserMessages.Error(ex);error.Visibility=Visibility.Visible;}
             };
             advancedFilterDialog=dialog;
             ContentDialogResult result;

@@ -50,7 +50,7 @@ internal sealed partial class PlayerSettingsDialog : ContentDialog
         {
             choose.IsEnabled = false;
             try { if (await pick() is { } path && !closed) PathInput.Text = path; }
-            catch (Exception ex) { if (!closed) ShowError(ex.Message); }
+            catch (Exception ex) { if (!closed) ShowError(UserMessages.Error(ex)); }
             finally { if (!closed) choose.IsEnabled = true; }
         };
         PrimaryButtonClick += async (_, args) =>
@@ -83,7 +83,7 @@ internal sealed partial class PlayerSettingsDialog : ContentDialog
             Error.IsOpen = false; return true;
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { return false; }
-        catch (Exception ex) { if (!closed) ShowError(ex is TimeoutException ? "检查播放器路径超时，请确认该位置可访问。" : ex.Message); return false; }
+        catch (Exception ex) { if (!closed) ShowError(ex is TimeoutException ? "检查播放器路径超时，请确认该位置可访问。" : UserMessages.Error(ex)); return false; }
         finally { saving = false; if (!closed) { IsPrimaryButtonEnabled = true; Mode.IsEnabled = PathInput.IsEnabled = Playlists.IsEnabled = choose.IsEnabled = true; foreach (var button in detected.Children.OfType<Button>()) button.IsEnabled = true; } }
     }
 

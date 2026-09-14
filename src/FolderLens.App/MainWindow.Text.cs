@@ -24,7 +24,7 @@ public sealed partial class MainWindow
     {
         TextContent.FontSize=Math.Clamp(TextContent.FontSize+change,12,32);
         try{await ApplyMarkdownTextSize();}
-        catch(Exception ex){if(!closing)QualityLabel.Text="无法调整排版字号："+ex.Message;}
+        catch(Exception ex){if(!closing)QualityLabel.Text="无法调整排版字号："+UserMessages.Error(ex);}
     }
     private async Task ApplyMarkdownTextSize()
     {
@@ -75,7 +75,7 @@ public sealed partial class MainWindow
                 await Task.Delay(10,token);
             }
         }
-        catch(OperationCanceledException){}catch(Exception ex){if(current==selection&&version==textSessionGeneration&&!closing)TextLineStatus.Text="无法读取文本行号："+ex.Message;}
+        catch(OperationCanceledException){}catch(Exception ex){if(current==selection&&version==textSessionGeneration&&!closing)TextLineStatus.Text="无法读取文本行号："+UserMessages.Error(ex);}
     }
     private async Task DisposeTextSession()
     {

@@ -90,7 +90,7 @@ public sealed partial class MainWindow
             void SetEnabled(){foreach(var box in new[]{levels,field,direction,scope})box.IsEnabled=enabled.IsChecked==true;}
             SetEnabled();enabled.Checked+=(_,_)=>SetEnabled();enabled.Unchecked+=(_,_)=>SetEnabled();
             var panel=new StackPanel{Spacing=16,Width=430};panel.Children.Add(enabled);panel.Children.Add(options);
-            panel.Children.Add(new TextBlock{Text="组内文件继续使用主窗口的排序选项。图片始终穿透显示；根目录直接文件单列一组。",TextWrapping=TextWrapping.Wrap});
+            panel.Children.Add(new TextBlock{Text="组内文件继续使用主窗口的排序选项。图片仍按查看层级显示；当前文件夹中的文件单独成组。",TextWrapping=TextWrapping.Wrap});
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="文件夹分组",Content=panel,PrimaryButtonText="应用",CloseButtonText="取消"};
             if(await dialog.ShowAsync()!=ContentDialogResult.Primary)return;
             folderGrouping=new(enabled.IsChecked==true,Tag(levels),Tag(field),Tag(direction),Tag(scope));folderGrouping.Validate();UpdateGroupingButton();await RefreshQuery(preserveViewport:true);

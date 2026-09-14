@@ -57,7 +57,7 @@ public sealed partial class MainWindow
                 if(details.Streams.Length>0){Row("轨道",string.Join('\n',details.Streams.Select(stream=>$"#{stream.Index} {stream.Kind} · {stream.Codec}{(stream.IsDefault?" · 默认":"")}{(stream.AttachedPicture?" · 封面":"")}")));}
             }
             if(file.Kind is "audio" or "video"){Row("时长",file.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():null);Row("视频编码",file.VideoCodec);Row("音频编码",file.AudioCodec);Row("帧率",file.FrameRateNumerator is {} num&&file.FrameRateDenominator is >0?$"{num/(double)file.FrameRateDenominator:0.###} fps":null);}
-            var failures=file.FieldStates.Where(pair=>pair.Value.State is "failed" or "deferredOffline").Select(pair=>$"{pair.Key}: {pair.Value.ErrorCode}").ToArray();if(failures.Length>0)Row("未就绪信息",string.Join('\n',failures));
+            var failures=file.FieldStates.Where(pair=>pair.Value.State is "failed" or "deferredOffline").Select(pair=>(pair.Key switch{"imageGeometry"=>"图片尺寸","imageColor"=>"色彩信息","captureTime"=>"拍摄时间","animation"=>"动图信息","media"=>"音视频信息","identity"=>"文件格式",_=>"文件信息"})+"："+UserMessages.Error(new IOException(pair.Value.ErrorCode??"ProbeFailed"))).ToArray();if(failures.Length>0)Row("未能读取的信息",string.Join('\n',failures));
             await new ContentDialog{XamlRoot=Shell.XamlRoot,Title="文件属性",Content=new ScrollViewer{Content=panel,MaxHeight=620},CloseButtonText="关闭"}.ShowAsync();
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}

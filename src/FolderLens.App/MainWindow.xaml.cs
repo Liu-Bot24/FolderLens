@@ -365,11 +365,11 @@ public sealed partial class MainWindow : Window
                 // still queued. Do not freeze that temporary empty result.
                 if(first.Items.Count==0&&scanTask is {IsCompleted:false})
                 {
-                    ResultSummary.Text="正在穿透子目录寻找符合筛选的文件…";
+                    ResultSummary.Text="正在子文件夹中查找符合条件的文件…";
                     return;
                 }
                 PublishFirstPage(filter,first.Items);
-                ResultSummary.Text=$"首批 {first.Items.Count:N0} 项 · 正在固定完整浏览顺序…";
+                ResultSummary.Text=$"已显示前 {first.Items.Count:N0} 个文件，正在整理完整列表…";
                 if(verifyFirstPageBarrier is not null)await verifyFirstPageBarrier(queryToken);
             }
             queryPhase="createSnapshot";var handle=await catalog.CreateSnapshot(filter,epoch,gen,queryToken);
@@ -493,7 +493,7 @@ public sealed partial class MainWindow : Window
             published=true;
             if(!IsCurrent()||closing||!ReferenceEquals(results,nextResults)||!ReferenceEquals(resultHandle,handle))return;
             UpdateDirectoryScopeBanner(filter);
-            ResultSummary.Text=$"{(handle.IsPendingView?"待判断视图 · ":"")}已符合 {handle.ConfirmedMatchCount:N0} · 待判断 {handle.Pending:N0} · 无法判断 {handle.Unresolvable:N0}{(handle.Count==0?(scanTask is {IsCompleted:false}?" · 仍在扫描子目录，发现匹配文件后自动显示":" · 当前条件无匹配文件，请检查上方筛选条件"):"")}";
+            ResultSummary.Text=UserMessages.Results(handle.Count,handle.Pending,handle.Unresolvable,handle.IsPendingView)+(handle.Count==0?(scanTask is {IsCompleted:false}?" · 正在查找更多文件":" · 当前没有可显示的文件"):"");
             if(verifySelectionRestoreBarrier is not null)await verifySelectionRestoreBarrier();
             if(previousPath is not null)
             {
@@ -601,9 +601,9 @@ public sealed partial class MainWindow : Window
             if(cached is null)
             {
                 try{var embedded=await previewWorker!.Request(path,"rawEmbedded",Context(row,current),new(width,height),cancellation,Stamp(row));await PresentFit(embedded,current,cancellation);}
-                catch(Exception ex) when(CanRetainRawPreview(ex)){if(current==selection)QualityLabel.Text="没有可用的相机预览，正在读取 RAW 原始像素…";}
+                catch(Exception ex) when(CanRetainRawPreview(ex)){if(current==selection)QualityLabel.Text="没有可用的相机预览，正在读取 RAW 原图…";}
             }
-            if(current==selection&&rawPreviewOnly)QualityLabel.Text="相机内嵌预览 · 正在读取 RAW 原始像素…";
+            if(current==selection&&rawPreviewOnly)QualityLabel.Text="相机内嵌预览 · 正在读取 RAW 原图…";
         }
         if(raw||cached is null)
         {
@@ -616,16 +616,16 @@ public sealed partial class MainWindow : Window
                 if(row.Kind!="image")
                 {
                     await previewWorker.ReleaseAsset(reply);
-                    if(current==selection){ClearImage();ImageCanvas.Visibility=Visibility.Collapsed;QualityLabel.Text=$"{row.Detail} · 请使用外部打开查看此文件。";}
+                    if(current==selection){ClearImage();ImageCanvas.Visibility=Visibility.Collapsed;QualityLabel.Text=$"{row.Detail} · 请用其他应用打开此文件。";}
                     return;
                 }
                 await PresentFit(reply,current,cancellation);message=reply.Message;
                 verifyPreviewStage?.Invoke("presented");
             }
             catch(Exception ex) when(raw&&rawPreviewOnly&&current==selection&&CanRetainRawPreview(ex))
-            {QualityLabel.Text="相机内嵌预览 · 原始开发未完成："+ex.Message;SchedulePrefetch(current);return;}
+            {QualityLabel.Text="相机内嵌预览 · RAW 原图无法读取："+UserMessages.Error(ex);SchedulePrefetch(current);return;}
         }
-        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(message!.Quality=="rawDeveloped"?"RAW 开发适应屏幕":"清晰适应屏幕")}";}
+        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(message!.Quality=="rawDeveloped"?"RAW 原图 · 适应窗口":"清晰适应屏幕")}";}
         if(current==selection)
         {
             var metadata=message!.Metadata!.Value;bool animated=metadata.GetProperty("isAnimated").GetBoolean();imagePageCount=animated?1:metadata.GetProperty("pages").GetInt32();FrameTools.Visibility=animated||imagePageCount>1?Visibility.Visible:Visibility.Collapsed;AnimationButton.Visibility=ReplayAnimationButton.Visibility=animated?Visibility.Visible:Visibility.Collapsed;PreviousPageButton.Visibility=NextPageButton.Visibility=ImagePageLabel.Visibility=animated?Visibility.Collapsed:Visibility.Visible;ImagePageLabel.Text=$"1 / {imagePageCount}";
@@ -639,11 +639,11 @@ public sealed partial class MainWindow : Window
         token.ThrowIfCancellationRequested();if(current!=selection)return false;if(!rawPreviewOnly)return true;
         try
         {
-            QualityLabel.Text="正在重新读取 RAW 原始像素…";
+            QualityLabel.Text="正在重新读取 RAW 原图…";
             var reply=await previewWorker!.Request(SourcePath(row),"fit",Context(row,current),new(Math.Max(256,(int)(ImageCanvas.ActualWidth*Shell.XamlRoot.RasterizationScale)),Math.Max(256,(int)(ImageCanvas.ActualHeight*Shell.XamlRoot.RasterizationScale))),token,Stamp(row));
             await PresentFit(reply,current,token);return current==selection&&!rawPreviewOnly;
         }
-        catch(Exception ex) when(current==selection&&rawPreviewOnly&&CanRetainRawPreview(ex)){QualityLabel.Text="相机内嵌预览 · 原图仍不可用："+ex.Message;return false;}
+        catch(Exception ex) when(current==selection&&rawPreviewOnly&&CanRetainRawPreview(ex)){QualityLabel.Text="相机内嵌预览 · 原图仍不可用："+UserMessages.Error(ex);return false;}
     }
     private async Task AdvanceAnimation(bool open)
     {
@@ -1057,10 +1057,10 @@ public sealed partial class MainWindow : Window
                 };
                 initializing=false;
             }
-            if(current!=selection)return;markdownStage="navigation";markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 远程资源已阻止";}
+            if(current!=selection)return;markdownStage="navigation";markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 未加载网络资源";}
         }
         catch(OperationCanceledException){if(entered&&initializing)ReleaseMarkdownView();}
-        catch(Exception ex){RecordWebView($"MarkdownFailure stage={markdownStage} type={ex.GetType().Name}");if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"已切换完整原文模式：{ex.Message}";}}
+        catch(Exception ex){RecordWebView($"MarkdownFailure stage={markdownStage} type={ex.GetType().Name}");if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"无法按排版显示，已改为纯文本。{UserMessages.Error(ex)}";}}
         finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;UpdateReaderControls();ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
@@ -1090,9 +1090,9 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var filter=CurrentFilter();var views=await settings!.Load<Dictionary<string,SavedView>>("views.json")??[];var name=new TextBox{Header="视图名称",Text="我的视图",MaxLength=100};var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="保存视图",Content=name,PrimaryButtonText="保存",CloseButtonText="取消"};if(await dialog.ShowAsync()!=ContentDialogResult.Primary||string.IsNullOrWhiteSpace(name.Text))return;
-            if(views.ContainsKey(name.Text)){var confirm=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="替换同名视图？",Content=name.Text,PrimaryButtonText="替换",CloseButtonText="取消"};if(await confirm.ShowAsync()!=ContentDialogResult.Primary)return;}
-            views[name.Text]=CaptureView();await settings.Save("views.json",views);Status.Text="视图已保存。";
+            var filter=CurrentFilter();var views=await settings!.Load<Dictionary<string,SavedView>>("views.json")??[];var name=new TextBox{Header="浏览设置名称",Text="我的浏览设置",MaxLength=100};var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="保存浏览设置",Content=name,PrimaryButtonText="保存",CloseButtonText="取消"};if(await dialog.ShowAsync()!=ContentDialogResult.Primary||string.IsNullOrWhiteSpace(name.Text))return;
+            if(views.ContainsKey(name.Text)){var confirm=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="替换同名浏览设置？",Content=name.Text,PrimaryButtonText="替换",CloseButtonText="取消"};if(await confirm.ShowAsync()!=ContentDialogResult.Primary)return;}
+            views[name.Text]=CaptureView();await settings.Save("views.json",views);Status.Text="浏览设置已保存。";
         }catch(Exception ex){ShowError(ex);}
     }
     private async void RestoreView(object sender,RoutedEventArgs e)
@@ -1101,8 +1101,8 @@ public sealed partial class MainWindow : Window
     }
     private static void SelectTag(ComboBox box,string tag){foreach(ComboBoxItem item in box.Items)if(item.Tag.ToString()==tag){box.SelectedItem=item;break;}}
     public sealed record SavedView(string Root,FilterSpec Filter,string? SelectedPath=null,double ScrollOffset=0,bool Details=false,string? ScrollAnchorPath=null,PreviewBookmark? Preview=null);
-    private void ShowError(Exception ex){if(!closing)Status.Text=$"操作未完成：{ex.Message}";}
-    private void ShowPreviewError(Exception ex){if(!closing&&ReportDeviceLoss(ex))return;if(!closing)QualityLabel.Text=$"无法预览：{ex.Message}";if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView("PreviewError "+ex);}
+    private void ShowError(Exception ex){if(!closing)Status.Text=$"操作未完成：{UserMessages.Error(ex)}";}
+    private void ShowPreviewError(Exception ex){if(!closing&&ReportDeviceLoss(ex))return;if(!closing)QualityLabel.Text=$"无法预览：{UserMessages.Error(ex)}";if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView("PreviewError "+ex);}
     private bool finalWindowClose;
     private Task? shutdownTask;
     private void OnClosing(Microsoft.UI.Windowing.AppWindow sender,Microsoft.UI.Windowing.AppWindowClosingEventArgs args)

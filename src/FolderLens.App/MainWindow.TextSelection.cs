@@ -58,7 +58,7 @@ public sealed partial class MainWindow
             textCopyGeneration++;TextSelectionStatus.Text=$"已复制 {value.Length:N0} 个字符。";
         }
         catch(OperationCanceledException){if(IsCurrent())TextSelectionStatus.Text="复制已停止，剪贴板未更改。";}
-        catch(Exception ex){if(IsCurrent())TextSelectionStatus.Text="无法复制："+ex.Message;}
+        catch(Exception ex){if(IsCurrent())TextSelectionStatus.Text="无法复制："+UserMessages.Error(ex);}
         finally{if(request==textCopyGeneration)textCopyGeneration++;}
     }
 }
