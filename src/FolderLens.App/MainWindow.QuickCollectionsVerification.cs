@@ -76,14 +76,18 @@ public sealed partial class MainWindow
             for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var child=VisualTreeHelper.GetChild(parent,i);yield return child;foreach(var nested in Children(child))yield return nested;}
         }
         Button Star(FileRow row)=>Children((DependencyObject)FilesGrid.ContainerFromItem(row)).OfType<Button>().Single(b=>b.Content is FontIcon&&ReferenceEquals(b.DataContext,row));
-        var star=Star(first);if(!star.IsEnabled)throw new InvalidOperationException("已加载缩略图的星标未启用。");
+        var star=Star(first);if(!star.IsEnabled||star.Opacity!=0)throw new InvalidOperationException("初始星标应可交互但不可见。");
+        star.Tag=true;UpdateQuickCollectVisibility(star);if(star.Opacity!=1)throw new InvalidOperationException("进入右上角未显示星标。");
+        star.Tag=false;UpdateQuickCollectVisibility(star);if(star.Opacity!=0)throw new InvalidOperationException("离开右上角未隐藏星标。");
         ((IInvokeProvider)new ButtonAutomationPeer(star).GetPattern(PatternInterface.Invoke)).Invoke();
         for(int i=0;i<400&&(dialogs<2||quickCollectionBusy);i++)await Task.Delay(25);
         await ResolveRow(first,rootId,lifetime.Token);
         if(dialogs!=2||!quickCollectionUsed||!first.IsCollected||FilesGrid.SelectedItem!=second)throw new InvalidOperationException("星标按钮未完成首次收藏或改变了文件选择。");
         string id=lastCollectionTargets.Single();
         await QuickCollect(second);await QuickCollect(second);
-        if(dialogs!=2||(await catalog!.ReadCollections()).Single(c=>c.Id==id).Count!=2)throw new InvalidOperationException("后续快捷收藏重复弹窗或重复存储。");
+        if(dialogs!=2||second.IsCollected||(await catalog!.ReadCollections()).Single(c=>c.Id==id).Count!=1)throw new InvalidOperationException("第二次点击没有取消收藏。");
+        await QuickCollect(second);
+        if(dialogs!=2||!second.IsCollected||(await catalog.ReadCollections()).Single(c=>c.Id==id).Count!=2)throw new InvalidOperationException("取消后再次点击未沿用上次收藏夹。");
         await ResolveRow(second,rootId,lifetime.Token);
         FilesGrid.UpdateLayout();await Task.Delay(50);
         foreach(var row in new[]{first,second})
@@ -106,8 +110,13 @@ public sealed partial class MainWindow
             if(!await change(true))throw new InvalidOperationException("普通菜单更换收藏目标失败。");
         };
         await CollectFiles();string nextId=lastCollectionTargets.Single();
+        await QuickCollect(first);if(first.IsCollected)throw new InvalidOperationException("已收藏文件未取消收藏。");
         await QuickCollect(first);
         if(dialogs!=5||nextId==id||(await catalog.ReadCollections()).Single(c=>c.Id==nextId).Count!=2)throw new InvalidOperationException("快捷收藏未使用普通菜单最后成功选择的目标。");
+        await catalog.ChangeCollectionItems([id],[first.Item!],true);
+        await QuickCollect(first);
+        if(first.IsCollected||(await catalog.ReadCollectionFlags([first.Item!])).Single())throw new InvalidOperationException("取消星标未清除该文件的全部收藏归属。");
+        await QuickCollect(first);
         await catalog.DeleteCollection(id);RefreshCollectionBadges();await ResolveRow(first,rootId,lifetime.Token);
         if(!first.IsCollected)throw new InvalidOperationException("仍属于另一个收藏夹时星标被错误清除。");
         await catalog.DeleteCollection(nextId);RefreshCollectionBadges();await ResolveRow(first,rootId,lifetime.Token);
@@ -139,7 +148,7 @@ public sealed partial class MainWindow
         // All programmatic focus/activation paths in verification must be inert.
         if(WindowFocus.IsForeground(this)||FocusIfForeground(Search,FocusState.Programmatic)||WindowFocus.MayActivate(this,WindowFocus.Foreground))throw new InvalidOperationException("后台验证可以夺取输入焦点。");
         report["firstCancelDoesNotRemember"]=true;report["nativeStarButtonAndTopRightLayout"]=true;
-        report["repeatUsesLastCollectionWithoutDuplicates"]=true;report["ordinaryMenuAlwaysPresentsDialog"]=true;
+        report["secondClickRemovesAndThirdReusesTarget"]=true;report["cornerVisibilityState"]=true;report["ordinaryMenuAlwaysPresentsDialog"]=true;
         report["deletedTargetReprompts"]=true;report["backgroundFocusBlocked"]=true;
         report["ordinaryMenuUpdatesQuickTarget"]=true;report["multipleMembershipRetainsStar"]=true;
         report["foregroundDialogInteraction"]="NOT_RUN";report["doubaoVoiceSession"]="NOT_RUN";report["status"]="PASS";

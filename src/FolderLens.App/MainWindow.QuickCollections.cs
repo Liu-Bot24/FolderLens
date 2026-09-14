@@ -55,6 +55,15 @@ public sealed partial class MainWindow
         a.DirectoryId==b.DirectoryId&&a.DirectoryLocationId==b.DirectoryLocationId&&a.BindingRevision==b.BindingRevision&&
         a.SourceRootId==b.SourceRootId&&a.SourceRootPath==b.SourceRootPath&&a.SourceRootEpoch==b.SourceRootEpoch;
     private void QuickCollectDoubleTapped(object sender,DoubleTappedRoutedEventArgs args)=>args.Handled=true;
+    private void QuickCollectPointerEntered(object sender,PointerRoutedEventArgs args)
+    {if(sender is Button button){button.Tag=true;UpdateQuickCollectVisibility(button);}}
+    private void QuickCollectPointerExited(object sender,PointerRoutedEventArgs args)
+    {if(sender is Button button){button.Tag=false;UpdateQuickCollectVisibility(button);}}
+    private void QuickCollectFocusChanged(object sender,RoutedEventArgs args)
+    {if(sender is Button button)UpdateQuickCollectVisibility(button);}
+    private void QuickCollectUnloaded(object sender,RoutedEventArgs args)
+    {if(sender is Button button){button.Tag=false;button.Opacity=0;}}
+    private static void UpdateQuickCollectVisibility(Button button)=>button.Opacity=button.Tag is true||button.FocusState==FocusState.Keyboard?1:0;
     private async void QuickCollectClicked(object sender,RoutedEventArgs args)
     {
         if((sender as FrameworkElement)?.DataContext is not FileRow row)return;
@@ -63,16 +72,25 @@ public sealed partial class MainWindow
     private async Task QuickCollect(FileRow row)
     {
         using var work=browserWork.Enter();if(work is null||closing||catalog is null||row.Item is null||quickCollectionBusy)return;
-        var item=row.Item;quickCollectionBusy=true;row.SetQuickCollectBusy(true);
+        var item=row.Item;bool remove=row.IsCollected;quickCollectionBusy=true;row.SetQuickCollectBusy(true);
         try
         {
+            if(remove)
+            {
+                using var removeStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);removeStop.CancelAfter(TimeSpan.FromSeconds(30));
+                await catalog.RemoveItemFromCollections(item,removeStop.Token);
+                if(row.Item is {} current&&SameCollectionObservation(current,item))row.SetCollected(false);
+                RefreshCollectionBadges();await RefreshCollectionsTree();Status.Text="已取消收藏，原文件保留。";
+                if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
+                return;
+            }
             await RefreshCollectionsTree();
             if(!quickCollectionUsed||lastCollectionTargets.Length==0||lastCollectionTargets.Any(id=>!fileCollections.Any(c=>c.Id==id)))
             {await CollectFiles(row);return;}
             using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);stop.CancelAfter(TimeSpan.FromSeconds(30));
             var targets=lastCollectionTargets.ToArray();
             int added=await catalog.ChangeCollectionItems(targets,[item],true,stop.Token);
-            RefreshCollectionBadges();row.SetCollected(true);await RefreshCollectionsTree();
+            RefreshCollectionBadges();if(row.Item is {} selected&&SameCollectionObservation(selected,item))row.SetCollected(true);await RefreshCollectionsTree();
             Status.Text=(added==0?"已在收藏夹中：":"已收藏到：")+string.Join("、",targets.Select(CollectionLabel));
             if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
         }

@@ -16,7 +16,7 @@ public sealed class FileRow : ObservableObject
     private bool isCollected,quickCollectBusy;
     public bool IsCollected=>isCollected;
     public string CollectionGlyph=>isCollected?"\uE735":"\uE734";
-    public string CollectionHint=>isCollected?"已收藏 · 点击快速加入收藏夹":"快速收藏";
+    public string CollectionHint=>isCollected?"取消收藏（从所有收藏夹移除）":"快速收藏";
     public bool QuickCollectEnabled=>Item is not null&&!quickCollectBusy;
     public void SetCollected(bool value){if(SetProperty(ref isCollected,value)){OnPropertyChanged(nameof(IsCollected));OnPropertyChanged(nameof(CollectionGlyph));OnPropertyChanged(nameof(CollectionHint));}}
     public void SetQuickCollectBusy(bool value){quickCollectBusy=value;OnPropertyChanged(nameof(QuickCollectEnabled));}
