@@ -54,9 +54,9 @@ public sealed partial class MainWindow
         }
         else if(replacingRoot||queryBusy||scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested)
         {
-            BrowserEmptyTitle.Text=replacingRoot?"正在打开文件夹":scanTask is {IsCompleted:false}?"正在扫描子文件夹":"正在查找符合条件的文件";
+            BrowserEmptyTitle.Text=activeBackgroundScan is {} currentScan&&scanScheduler.IsWaiting(currentScan.RootId)?"正在安排此文件夹的扫描":replacingRoot?"正在打开文件夹":scanTask is {IsCompleted:false}?"正在扫描子文件夹":"正在查找符合条件的文件";
             BrowserEmptyDescription.Text="发现符合条件的文件后会自动显示，无需手动刷新。";
-            BrowserEmptyDetail.Text=Status.Text;
+            BrowserEmptyDetail.Text=ScanStatusDescription();
         }
         else
         {

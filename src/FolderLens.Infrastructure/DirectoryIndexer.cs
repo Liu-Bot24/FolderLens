@@ -13,6 +13,19 @@ public sealed class RootIdentityChangedException():IOException("文件夹或所�
 public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExecutable=null)
 {
     public ScanPriority Priority {get;}=new();
+    public ScanScheduler? Scheduler {get;init;}
+    private async Task<T> Scheduled<T>(string root,CancellationToken token,Func<Task<T>> work)
+    {using var turn=Scheduler is null?null:await Scheduler.Enter(root,token).ConfigureAwait(false);return await work().ConfigureAwait(false);}
+    private async IAsyncEnumerable<ScanDirectoryPacket> ScheduledPackets(string root,IAsyncEnumerable<ScanDirectoryPacket> packets,[EnumeratorCancellation]CancellationToken token)
+    {
+        await using var iterator=packets.GetAsyncEnumerator(token);
+        while(true)
+        {
+            using var turn=Scheduler is null?null:await Scheduler.Enter(root,token).ConfigureAwait(false);
+            if(!await iterator.MoveNextAsync().ConfigureAwait(false))yield break;
+            yield return iterator.Current;
+        }
+    }
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PathProbeOverride {get;set;}
     public TimeSpan RenameLookupTime { get; private set; }
     public TimeSpan BatchWriteTime { get; private set; }
@@ -63,7 +76,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             while(true)
             {
                 cancellation.ThrowIfCancellationRequested();
-                var queued=await catalog.Write(c=>
+                var queued=await Scheduled(rootId,cancellation,()=>catalog.Write(c=>
                 {
                     using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
                     using var cmd=c.CreateCommand();cmd.Transaction=t;
@@ -90,7 +103,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                         Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND directory_id=$id",("$scan",scanId),("$id",found.Id));
                     }
                     t.Commit();return next;
-                },cancellation).ConfigureAwait(false);
+                },cancellation)).ConfigureAwait(false);
                 if(queued is not {} work)break;
                 string relative=work.Path,id=work.Id,path=Path.Combine(root,relative);long directoryEntries=0;bool terminal=false;
                 await SetDirectoryState(rootId,epoch,scanId,id,"enumerating",null,0,cancellation).ConfigureAwait(false);
@@ -99,7 +112,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 try
                 {
                     var packets=worker is null?ReadLocal(path,allowCloud,cancellation):worker.Read(path,allowCloud,cancellation);
-                    await foreach(var packet in packets.ConfigureAwait(false))
+                    await foreach(var packet in ScheduledPackets(rootId,packets,cancellation).ConfigureAwait(false))
                     {
                         cancellation.ThrowIfCancellationRequested();
                         if(packet.State=="started")

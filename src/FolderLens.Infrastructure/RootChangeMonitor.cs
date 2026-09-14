@@ -6,6 +6,7 @@ namespace FolderLens.Infrastructure;
 public sealed class RootChangeMonitor : IDisposable
 {
     private readonly string root;
+    private readonly string[] ignoredDirectories;
     private readonly Action dirty;
     private readonly ScanDirtyDirectories? store;
     private readonly string? rootId;
@@ -19,9 +20,10 @@ public sealed class RootChangeMonitor : IDisposable
     private int attempt,ticking,disposed,tokenDisposed;
     private long lastEvent,nextReconnect,lastTick=Environment.TickCount64,lastPeriodic=Environment.TickCount64,lastSignal;
     public string? LastError {get;private set;}
-    public RootChangeMonitor(string root,Action dirty,CatalogStore? catalog=null,string? rootId=null,long epoch=0)
+    public RootChangeMonitor(string root,Action dirty,CatalogStore? catalog=null,string? rootId=null,long epoch=0,string[]? ignoredDirectories=null)
     {
         this.root=PathRules.ValidateSource(root);this.dirty=dirty;this.rootId=rootId;this.epoch=epoch;
+        this.ignoredDirectories=ignoredDirectories??[];
         if(catalog is not null&&rootId is not null)store=new(catalog);
         timer=new(Tick,null,0,500);
     }
@@ -31,10 +33,16 @@ public sealed class RootChangeMonitor : IDisposable
     }
     private void AddParent(string path,string reason)
     {
+        if(ignoredDirectories.Any(directory=>IsIgnoredPath(path,directory)))return;
         string relative=Path.GetRelativePath(root,Path.GetDirectoryName(path)??root);
         if(relative==".")relative="";
         if(relative==".."||relative.StartsWith("..\\",StringComparison.Ordinal))return;
         Add(new(relative,reason));
+    }
+    internal static bool IsIgnoredPath(string path,string directory)
+    {
+        string prefix=Path.GetFullPath(directory).TrimEnd('\\','/');string full=Path.GetFullPath(path);
+        return full.Equals(prefix,StringComparison.OrdinalIgnoreCase)||full.StartsWith(prefix+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase);
     }
     public void MarkDirty()=>Add(new("","ExplicitReconcile",true));
     private void Add(DirectoryChangeHint hint)
