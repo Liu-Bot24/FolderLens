@@ -255,7 +255,9 @@ public sealed partial class MainWindow : Window
             }
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
-            if(resultHandle is {} oldHandle)await catalog.ReleaseSnapshot(oldHandle.Id);
+            var oldHandle=resultHandle;resultHandle=null;
+            if(oldHandle is not null)await catalog.ReleaseSnapshot(oldHandle.Id);
+            if(requested!=rootChangeVersion||closing)return;
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
             if(collectionScope){await RefreshQuery();Status.Text="正在浏览收藏夹；原文件保留在各自目录。";return;}
             string activeRoot=root,activeId=rootId;long activeEpoch=epoch;

@@ -40,10 +40,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
             ScanRecovery.Recover(c,t);
             ScanRenames.Ensure(c,t);ScanDirtyDirectories.Ensure(c,t);
-            Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanQueue(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,scan_id TEXT NOT NULL,directory_id TEXT NOT NULL,relative_path TEXT NOT NULL,subtree INTEGER NOT NULL,path_depth INTEGER NOT NULL,branch TEXT NOT NULL,UNIQUE(scan_id,directory_id))");
-            Execute(c,t,"CREATE INDEX IF NOT EXISTS temp.IX_ScanQueue_Branch ON ScanQueue(scan_id,branch,path_depth,queue_id)");
-            Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanBranches(scan_id TEXT NOT NULL,branch TEXT NOT NULL,last_turn INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scan_id,branch))");
-            Execute(c,t,"CREATE INDEX IF NOT EXISTS temp.IX_ScanBranches_Turn ON ScanBranches(scan_id,last_turn,branch)");
+            ScanQueueScheduling.Ensure(c,t);
             using var policy=c.CreateCommand();policy.Transaction=t;policy.CommandText="SELECT cloud_policy FROM Roots WHERE root_id=$id";policy.Parameters.AddWithValue("$id",rootId);allowCloud=(string?)policy.ExecuteScalar()=="explicitAllowed";
             Execute(c,t,"INSERT INTO ScanRuns(scan_id,root_id,root_epoch,state,started_utc_ticks) VALUES($scan,$root,$epoch,'running',$now)",("$scan",scanId),("$root",rootId),("$epoch",epoch),("$now",DateTime.UtcNow.Ticks));
             ScanRecovery.Own(c,t,scanId);
@@ -84,13 +81,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     if(preferred){using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);}
                     if(next is null)
                     {
-                        cmd.CommandText="""
-                            SELECT directory_id,relative_path,subtree FROM temp.ScanQueue
-                            WHERE scan_id=$scan AND branch=(SELECT b.branch FROM temp.ScanBranches b
-                                WHERE b.scan_id=$scan AND EXISTS(SELECT 1 FROM temp.ScanQueue q WHERE q.scan_id=$scan AND q.branch=b.branch)
-                                ORDER BY b.last_turn,b.branch LIMIT 1)
-                            ORDER BY path_depth,queue_id LIMIT 1
-                            """;
+                        cmd.CommandText=ScanQueueScheduling.NextSql;
                         using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);
                     }
                     if(next is {} found)
