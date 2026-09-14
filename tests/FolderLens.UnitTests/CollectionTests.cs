@@ -60,7 +60,7 @@ public sealed class CollectionTests
             await catalog.Initialize();
             Assert.Single(Directory.GetFiles(data,"*.pre-v6-*.bak"));
             Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
-            Assert.Equal(6,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
+            Assert.Equal(7,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
             await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=physical_identity";return cmd.ExecuteNonQuery();});
             Assert.Equal(0,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM RepairWrites";return (long)cmd.ExecuteScalar()!;}));
             repairedVersion=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA schema_version";return (long)cmd.ExecuteScalar()!;});
@@ -148,6 +148,7 @@ public sealed class CollectionTests
             UPDATE Files SET physical_identity='volume:shared-file',relative_path='sub\file1.jpg' WHERE entry_id='000000000001';
             UPDATE Files SET physical_identity='volume:shared-file',root_id='child',directory_id='child-dir',relative_path='FILE1.JPG' WHERE entry_id='000000000002';
             """;return command.ExecuteNonQuery();});
+        await catalog.Write(c=>{using var t=c.BeginTransaction();CatalogStore.BindDirectoryLocation(c,t,"benchmark-dir","volume:shared-parent","fixture:shared");CatalogStore.BindDirectoryLocation(c,t,"child-dir","volume:shared-parent","fixture:shared");t.Commit();return true;});
         var collection=await catalog.CreateCollection("Approved");var ids=new[]{collection.Id};
         await catalog.ChangeCollectionMembers(ids,["000000000001"],true);
         Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids},1,1)).Count);

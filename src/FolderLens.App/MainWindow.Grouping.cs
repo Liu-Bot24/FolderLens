@@ -171,7 +171,7 @@ public sealed partial class MainWindow
             if((oldGroup is null||newGroup is not null)&&edits.TryGetValue(id,out var edit)&&edit.MapOldIndex(checked((int)(ordinal-(oldGroup?.Start??0)))) is {} mapped)
                 next.Retain(row,(newGroup?.Start??0)+mapped,newGroup);
             else if(row.Item is {} old&&matched.TryGetValue(old.EntryId,out var item)&&old.Version==item.Version&&old.RelativePath==item.RelativePath&&old.Bytes==item.Bytes&&old.Allocated==item.Allocated&&old.Kind==item.Kind)
-                next.Retain(row,item.Ordinal,item.Group);
+                next.Retain(row,item);
         }
     }
 }

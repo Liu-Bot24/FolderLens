@@ -8,6 +8,20 @@ namespace FolderLens.UnitTests;
 
 public sealed class SnapshotRefreshTests
 {
+    [Fact] public async Task PathRevisionChangeIsNotAnUnchangedSharedRange()
+    {
+        await using var catalog=await Fixture();var filter=new FilterSpec{RootId="benchmark"};
+        var before=await catalog.CreateSnapshot(filter,1,1);
+        var unchanged=await catalog.CreateSnapshot(filter,1,2);
+        Assert.Equal(0,(await catalog.CompareSnapshots(before,unchanged,[],[],CancellationToken.None))[""].Removed);
+        await Change(catalog,"UPDATE Files SET path_revision=path_revision+2 WHERE entry_id='000000000003'");
+        var after=await catalog.CreateSnapshot(filter,1,3);
+        var changes=await catalog.CompareSnapshots(before,after,[],[],CancellationToken.None);
+        Assert.Equal(new SnapshotSplice(2,1,1),changes[""]);
+        var refined=(await catalog.RefineSnapshotChanges(before,after,[],[],changes,CancellationToken.None))[""];
+        Assert.NotNull(refined);Assert.Equal(new RangeEdit(2,1,1),Assert.Single(refined));
+        Assert.Equal(3,(await catalog.ReadSnapshotEntries(after.Id,["000000000003"],CancellationToken.None)).Single().PathRevision);
+    }
     [Fact] public async Task IdentityRefinementPreservesInteriorFilesButRejectsChangedVersionsAndReorders()
     {
         await using var catalog=await Fixture();var filter=new FilterSpec{RootId="benchmark"};

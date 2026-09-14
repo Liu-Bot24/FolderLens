@@ -17,14 +17,14 @@ internal static class MigrationCheck
         long wrongKeys=Count("SELECT count(*) FROM Files WHERE length(location_key)<>67 OR substr(location_key,1,3)<>'v5:'");
         long mismatches=Count("""
             WITH expected AS (
-                SELECT m.collection_id,coalesce(f.location_key,m.location_key) location_key
+                SELECT m.collection_id,coalesce(f.location_key,m.location_key) location_key,b.location_id directory_location_id
                 FROM prior.CollectionMembers m LEFT JOIN prior.Files old ON old.entry_id=m.entry_id
-                LEFT JOIN Files f ON f.entry_id=m.entry_id WHERE old.entry_state IS NOT 'missing'
-            ), missing AS (SELECT * FROM expected EXCEPT SELECT collection_id,location_key FROM CollectionMembers),
-            extra AS (SELECT collection_id,location_key FROM CollectionMembers EXCEPT SELECT * FROM expected)
+                JOIN Files f ON f.entry_id=m.entry_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE old.entry_state IS NOT 'missing'
+            ), missing AS (SELECT * FROM expected EXCEPT SELECT collection_id,location_key,directory_location_id FROM CollectionMembers),
+            extra AS (SELECT collection_id,location_key,directory_location_id FROM CollectionMembers EXCEPT SELECT * FROM expected)
             SELECT (SELECT count(*) FROM missing)+(SELECT count(*) FROM extra)
             """);
-        bool pass=version==6&&oldFiles==files&&oldCollections==collections&&integrity=="ok"&&wrongKeys==0&&mismatches==0;
+        bool pass=version==7&&oldFiles==files&&oldCollections==collections&&integrity=="ok"&&wrongKeys==0&&mismatches==0;
         var result=new{status=pass?"PASS":"FAIL",version,oldFiles,files,oldCollections,collections,integrity,wrongKeys,membershipMismatches=mismatches};
         string json=JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true});File.WriteAllText(Path.Combine(directory,"migration-check.json"),json);Console.WriteLine(json);return pass?0:1;
     }

@@ -93,14 +93,6 @@ public sealed partial class CatalogStore
         command.ExecuteNonQuery();cancellation.ThrowIfCancellationRequested();transaction.Commit();
         OperationMigrationMeasured?.Invoke("identityHistoryMigration",timer.Elapsed.TotalMilliseconds);
     }
-    private static void RepairLocationUpdateTrigger(SqliteConnection connection)
-    {
-        using var command=connection.CreateCommand();command.CommandText="SELECT sql FROM sqlite_master WHERE type='trigger' AND name='Files_Location_Update'";
-        if(string.Equals((string?)command.ExecuteScalar(),FileLocationUpdateTrigger.TrimEnd(';'),StringComparison.Ordinal))return;
-        using var transaction=connection.BeginTransaction();command.Transaction=transaction;
-        command.CommandText="DROP TRIGGER IF EXISTS Files_Location_Update;"+FileLocationUpdateTrigger;
-        command.ExecuteNonQuery();transaction.Commit();
-    }
     private static void MigrateCollectionLocations(SqliteConnection connection,bool existing,CancellationToken cancellation,Action<string>? progress)
     {
         var timer=Stopwatch.StartNew();

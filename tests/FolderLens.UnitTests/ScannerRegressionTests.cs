@@ -9,6 +9,90 @@ namespace FolderLens.UnitTests;
 public sealed class ScannerRegressionTests
 {
     [Theory]
+    [InlineData("rename",false)]
+    [InlineData("rename",true)]
+    [InlineData("move",false)]
+    [InlineData("move",true)]
+    [InlineData("missing",false)]
+    [InlineData("missing",true)]
+    public async Task ConfirmedRenameRejectsOldSelectionFromOverlappingRoot(string change,bool bulk)
+    {
+        string source=Fixture(),child=Path.Combine(source,"child");Directory.CreateDirectory(child);
+        File.WriteAllText(Path.Combine(child,"before.txt"),"shared file");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();
+        var scanner=new DirectoryIndexer(catalog,Worker());
+        long parentEpoch=await catalog.OpenRoot("parent",source),childEpoch=await catalog.OpenRoot("child",child);
+        await scanner.Scan("parent",source,parentEpoch,true,[],null,CancellationToken.None);
+        await scanner.Scan("child",child,childEpoch,true,[],null,CancellationToken.None);
+        var parent=(await catalog.ReadFirstPage(new(){RootId="parent",Kinds=[]})).Items.Single();
+        var stale=(await catalog.ReadFirstPage(new(){RootId="child",Kinds=[]})).Items.Single();
+        var oldSnapshot=await catalog.CreateSnapshot(new(){RootId="child",Kinds=[]},childEpoch,1);await catalog.RetainSnapshot(oldSnapshot.Id);
+        string tag=(await catalog.CreateCollection("overlap rename")).Id;
+        await catalog.ChangeCollectionItems([tag],[parent],true);
+        Assert.True((await catalog.ReadCollectionFlags([stale])).Single());
+        string destination=change=="rename"?Path.Combine(child,"after.txt"):Path.Combine(change=="move"?source:Fixture(),"after.txt");
+        File.Move(Path.Combine(child,"before.txt"),destination);
+        await scanner.Scan("parent",source,parentEpoch,true,[],null,CancellationToken.None);
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+        try{await Assert.ThrowsAsync<IOException>(()=>bulk?catalog.ChangeCollectionSelection([tag],oldSnapshot.Id,[new(0,1)],true):catalog.ChangeCollectionItems([tag],[stale],true));}
+        finally{await catalog.ReleaseSnapshot(oldSnapshot.Id);}
+        if(change!="rename")File.WriteAllText(Path.Combine(child,"fresh.txt"),"newly observed file");
+        await scanner.Scan("child",child,childEpoch,true,[],null,CancellationToken.None);
+        var fresh=(await catalog.ReadFirstPage(new(){RootId="child",Kinds=[]})).Items.Single();
+        Assert.Equal(1,await catalog.ChangeCollectionItems([tag],[fresh],true));
+    }
+    [Fact] public async Task OpeningRenamedRootDoesNotInheritOldCollections()
+    {
+        string parent=Fixture(),before=Path.Combine(parent,"before"),after=Path.Combine(parent,"after");
+        Directory.CreateDirectory(before);File.WriteAllText(Path.Combine(before,"file.txt"),"root rename");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();var scanner=new DirectoryIndexer(catalog,Worker());
+        long epoch=await catalog.OpenRoot("before",before);await scanner.Scan("before",before,epoch,true,[],null,CancellationToken.None);
+        var item=(await catalog.ReadFirstPage(new(){RootId="before",Kinds=[]})).Items.Single();
+        string tag=(await catalog.CreateCollection("root rename")).Id;await catalog.ChangeCollectionItems([tag],[item],true);
+        Directory.Move(before,after);
+        epoch=await catalog.OpenRoot("after",after);await scanner.Scan("after",after,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(0,(await catalog.CreateSnapshot(new(){RootId="after",Kinds=[],IncludeCollections=[tag]},epoch,1)).Count);
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+    }
+    [Theory]
+    [InlineData("offline")]
+    [InlineData("inaccessible")]
+    public async Task UnknownOldRootKeepsItsTagsWithoutGrantingThemToNewRoot(string failure)
+    {
+        string parent=Fixture(),before=Path.Combine(parent,"before"),after=Path.Combine(parent,"after");
+        Directory.CreateDirectory(before);File.WriteAllText(Path.Combine(before,"file.txt"),"unknown root location");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();var scanner=new DirectoryIndexer(catalog,Worker());
+        long epoch=await catalog.OpenRoot("old",before);await scanner.Scan("old",before,epoch,true,[],null,CancellationToken.None);
+        var old=(await catalog.ReadFirstPage(new(){RootId="old",Kinds=[]})).Items.Single();
+        string tag=(await catalog.CreateCollection("independent choices")).Id;await catalog.ChangeCollectionItems([tag],[old],true);
+        Directory.Move(before,after);
+        // Fault only the old-path metadata observation, never the actual directory
+        // enumeration or identity of the newly opened generated root.
+        scanner.PathProbeOverride=(path,cancellation)=>path==before?Task.FromResult(new ScanDirectoryPacket(failure,[],"InjectedUnavailable")):Task.Run(()=>ScanPathProbe.Read(path),cancellation);
+        epoch=await catalog.OpenRoot("new",after);await scanner.Scan("new",after,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+        long inherited=(await catalog.CreateSnapshot(new(){RootId="new",Kinds=[],IncludeCollections=[tag]},epoch,1)).Count;
+        var current=(await catalog.ReadFirstPage(new(){RootId="new",Kinds=[]})).Items.Single();
+        int explicitlyAdded=await catalog.ChangeCollectionItems([tag],[current],true);
+        Assert.Equal(0,inherited);Assert.Equal(1,explicitlyAdded);
+        Assert.Equal(2,(await catalog.ReadCollections()).Single().Count);
+    }
+    [Fact] public async Task ConfirmedRemovedExcludedSubtreeClearsCollections()
+    {
+        string source=Fixture(),child=Path.Combine(source,"child");Directory.CreateDirectory(child);File.WriteAllText(Path.Combine(child,"file.txt"),"excluded subtree");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();var scanner=new DirectoryIndexer(catalog,Worker());
+        long epoch=await catalog.OpenRoot("excluded",source);await scanner.Scan("excluded",source,epoch,true,[],null,CancellationToken.None);
+        var item=(await catalog.ReadFirstPage(new(){RootId="excluded",Kinds=[]})).Items.Single();
+        string tag=(await catalog.CreateCollection("excluded subtree")).Id;await catalog.ChangeCollectionItems([tag],[item],true);
+        await scanner.Scan("excluded",source,epoch,false,[],null,CancellationToken.None);
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+        // Move generated fixture outside the scanned root: a complete parent
+        // enumeration now confirms that this child no longer exists there.
+        Directory.Move(child,Path.Combine(Fixture(),"moved"));
+        await scanner.Scan("excluded",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+    }
+    [Theory]
     [InlineData("😀", "B")]
     [InlineData("中文😀", "新目录😀")]
     [InlineData("普通中文", "新目录")]

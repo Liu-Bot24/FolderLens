@@ -15,7 +15,7 @@ public sealed partial class CatalogStore
         CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionInsert AFTER INSERT ON main.CollectionMembers BEGIN UPDATE CollectionRevision SET value=value+1; END;
         CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionDelete AFTER DELETE ON main.CollectionMembers BEGIN UPDATE CollectionRevision SET value=value+1; END;
         CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionUpdate AFTER UPDATE ON main.CollectionMembers
-        WHEN OLD.collection_id IS NOT NEW.collection_id OR OLD.location_key IS NOT NEW.location_key OR OLD.entry_id IS NOT NEW.entry_id
+        WHEN OLD.collection_id IS NOT NEW.collection_id OR OLD.location_key IS NOT NEW.location_key OR OLD.entry_id IS NOT NEW.entry_id OR OLD.directory_location_id IS NOT NEW.directory_location_id
         BEGIN UPDATE CollectionRevision SET value=value+1; END;
         """);
     public Task<long> ReadCollectionRevision(CancellationToken cancellation=default)=>writer.Execute(c=>Scalar(c,"SELECT value FROM temp.CollectionRevision"),cancellation);
@@ -23,18 +23,18 @@ public sealed partial class CatalogStore
     {
         if(items.Count>256)throw new ArgumentException("收藏状态批次过大。");
         using var command=c.CreateCommand();command.CommandText="""
-            SELECT EXISTS(SELECT 1 FROM Files f JOIN Roots r ON r.root_id=f.root_id
+            SELECT EXISTS(SELECT 1 FROM Files f JOIN Roots r ON r.root_id=f.root_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id JOIN DirectoryLocations l ON l.location_id=b.location_id
                 WHERE f.entry_id=$entry AND f.file_version=$version AND f.path_revision=$revision AND f.relative_path=$path
-                AND f.root_id=$root AND r.root_epoch=$epoch AND f.entry_state<>'missing'
-                AND EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key))
+                AND f.root_id=$root AND r.root_epoch=$epoch AND f.entry_state<>'missing' AND l.state='active' AND b.location_id=$location AND b.binding_revision=$binding
+                AND EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id)))
             """;
-        foreach(string parameter in new[]{"$entry","$version","$revision","$path","$root","$epoch"})command.Parameters.AddWithValue(parameter,DBNull.Value);
+        foreach(string parameter in new[]{"$entry","$version","$revision","$path","$root","$epoch","$location","$binding"})command.Parameters.AddWithValue(parameter,DBNull.Value);
         var flags=new bool[items.Count];for(int i=0;i<items.Count;i++)
         {
             cancellation.ThrowIfCancellationRequested();var item=items[i];
             command.Parameters["$entry"].Value=item.EntryId;command.Parameters["$version"].Value=item.Version;command.Parameters["$revision"].Value=item.PathRevision;
             command.Parameters["$path"].Value=item.RelativePath;command.Parameters["$root"].Value=(object?)item.SourceRootId??DBNull.Value;command.Parameters["$epoch"].Value=(object?)item.SourceRootEpoch??DBNull.Value;
-            flags[i]=(long)command.ExecuteScalar()! == 1;
+            command.Parameters["$location"].Value=(object?)item.DirectoryLocationId??DBNull.Value;command.Parameters["$binding"].Value=item.BindingRevision;flags[i]=(long)command.ExecuteScalar()! == 1;
         }
         return flags;
     },cancellation);
@@ -105,7 +105,7 @@ public sealed partial class CatalogStore
     public Task<bool> DeleteCollection(string id,CancellationToken cancellation=default)=>writer.Execute(c=>Execute(c,"DELETE FROM Collections WHERE collection_id=$id",("$id",id))==1,cancellation);
     public Task<string> RelativeCollectionDirectory(string id,string path,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
     {
-        using var command=c.CreateCommand();command.CommandText="SELECT DISTINCT r.display_path FROM Roots r JOIN Files f ON f.root_id=r.root_id JOIN CollectionMembers m ON m.location_key=f.location_key WHERE m.collection_id=$id ORDER BY length(r.display_path) DESC";command.Parameters.AddWithValue("$id",id);
+        using var command=c.CreateCommand();command.CommandText="SELECT DISTINCT r.display_path FROM Roots r JOIN Files f ON f.root_id=r.root_id JOIN CollectionMembers m ON m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id) WHERE m.collection_id=$id ORDER BY length(r.display_path) DESC";command.Parameters.AddWithValue("$id",id);
         using var rows=command.ExecuteReader();while(rows.Read())
         {
             cancellation.ThrowIfCancellationRequested();string relative=Path.GetRelativePath(rows.GetString(0),path);
@@ -128,28 +128,28 @@ public sealed partial class CatalogStore
         using(var check=c.CreateCommand())
         {
             check.Transaction=transaction;
-            check.CommandText="SELECT f.entry_state,f.file_version,f.path_revision,f.relative_path,f.directory_id,f.root_id,r.display_path,r.root_epoch FROM Files f JOIN Roots r ON r.root_id=f.root_id WHERE f.entry_id=$entry";
+            check.CommandText="SELECT f.entry_state,f.file_version,f.path_revision,f.relative_path,f.directory_id,f.root_id,r.display_path,r.root_epoch,b.location_id,b.binding_revision,l.state FROM Files f JOIN Roots r ON r.root_id=f.root_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id JOIN DirectoryLocations l ON l.location_id=b.location_id WHERE f.entry_id=$entry";
             check.Parameters.AddWithValue("$entry","");
             foreach(string entry in entryIds.Distinct())
             {
                 cancellation.ThrowIfCancellationRequested();check.Parameters["$entry"].Value=entry;using var row=check.ExecuteReader();
-                if(!row.Read()||(add&&row.GetString(0)=="missing"))throw StaleCollectionSelection();
+                if(!row.Read()||(add&&(row.GetString(0)=="missing"||row.GetString(10)!="active")))throw StaleCollectionSelection();
                 if(observed is not null)foreach(var item in observed.Where(i=>i.EntryId==entry))
-                    if(row.GetInt64(1)!=item.Version||row.GetInt64(2)!=item.PathRevision||row.GetString(3)!=item.RelativePath||row.GetString(4)!=item.DirectoryId||row.GetString(5)!=item.SourceRootId||row.GetString(6)!=item.SourceRootPath||row.GetInt64(7)!=item.SourceRootEpoch)throw StaleCollectionSelection();
+                    if(row.GetInt64(1)!=item.Version||row.GetInt64(2)!=item.PathRevision||row.GetString(3)!=item.RelativePath||row.GetString(4)!=item.DirectoryId||row.GetString(5)!=item.SourceRootId||row.GetString(6)!=item.SourceRootPath||row.GetInt64(7)!=item.SourceRootEpoch||row.GetString(8)!=item.DirectoryLocationId||row.GetInt64(9)!=item.BindingRevision)throw StaleCollectionSelection();
             }
         }
         using var command=c.CreateCommand();command.Transaction=transaction;
         command.CommandText=add?"""
-            INSERT INTO CollectionMembers(collection_id,location_key,entry_id,added_utc_ticks)
-            SELECT $collection,location_key,entry_id,$now FROM Files WHERE entry_id=$entry
-            ON CONFLICT(collection_id,location_key) DO NOTHING
-            """:"DELETE FROM CollectionMembers WHERE collection_id=$collection AND location_key=(SELECT location_key FROM Files WHERE entry_id=$entry)";
+            INSERT INTO CollectionMembers(collection_id,location_key,entry_id,added_utc_ticks,directory_location_id)
+            SELECT $collection,f.location_key,f.entry_id,$now,b.location_id FROM Files f JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_id=$entry
+            ON CONFLICT(collection_id,directory_location_id,location_key) DO NOTHING
+            """:"DELETE FROM CollectionMembers WHERE collection_id=$collection AND (directory_location_id,location_key)=(SELECT b.location_id,f.location_key FROM Files f JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_id=$entry)";
         command.Parameters.AddWithValue("$collection","");command.Parameters.AddWithValue("$entry","");if(add)command.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
         foreach(string collection in collectionIds.Distinct())foreach(string entry in entryIds.Distinct())
         {cancellation.ThrowIfCancellationRequested();command.Parameters["$collection"].Value=collection;command.Parameters["$entry"].Value=entry;changed+=command.ExecuteNonQuery();}
         cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;
     },cancellation);
-    internal const string CollectionSelectionRowsSql="FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i CROSS JOIN Files f WHERE i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count') AND f.entry_id=i.entry_id";
+    internal const string CollectionSelectionRowsSql="FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i CROSS JOIN Files f CROSS JOIN DirectoryLocationBindings b WHERE b.directory_id=f.directory_id AND i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count') AND f.entry_id=i.entry_id";
     private static IOException StaleCollectionSelection()=>new("所选文件已更改或不存在，请刷新结果后重新选择；本次收藏修改未提交。");
     public Task<int> ChangeCollectionSelection(string[] collectionIds,string sessionId,IReadOnlyList<OrdinalRange> ranges,bool add,CancellationToken cancellation=default)=>writer.Execute(c=>
     {
@@ -166,14 +166,14 @@ public sealed partial class CatalogStore
             command.Parameters.AddWithValue("$add",add?1:0);
             command.CommandText="""
                 SELECT 1 FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i
-                LEFT JOIN Files f ON f.entry_id=i.entry_id LEFT JOIN Roots r ON r.root_id=f.root_id
+                LEFT JOIN Files f ON f.entry_id=i.entry_id LEFT JOIN Roots r ON r.root_id=f.root_id LEFT JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id LEFT JOIN DirectoryLocations l ON l.location_id=b.location_id
                 WHERE i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count')
-                AND (f.entry_id IS NULL OR ($add=1 AND f.entry_state='missing') OR f.file_version IS NOT i.observed_version OR f.path_revision IS NOT i.observed_path_revision OR f.relative_path IS NOT i.snapshot_relative_path OR f.directory_id IS NOT i.directory_id OR f.root_id IS NOT i.source_root_id OR r.display_path IS NOT i.source_root_path OR r.root_epoch IS NOT i.source_root_epoch) LIMIT 1
+                AND (f.entry_id IS NULL OR ($add=1 AND (f.entry_state='missing' OR l.state IS NOT 'active')) OR b.location_id IS NOT i.observed_directory_location_id OR b.binding_revision IS NOT i.observed_binding_revision OR f.file_version IS NOT i.observed_version OR f.path_revision IS NOT i.observed_path_revision OR f.relative_path IS NOT i.snapshot_relative_path OR f.directory_id IS NOT i.directory_id OR f.root_id IS NOT i.source_root_id OR r.display_path IS NOT i.source_root_path OR r.root_epoch IS NOT i.source_root_epoch) LIMIT 1
                 """;
             if(command.ExecuteScalar() is not null)throw StaleCollectionSelection();
-            command.CommandText="CREATE TEMP TABLE SelectedCollectionLocations(location_key TEXT PRIMARY KEY,entry_id TEXT NOT NULL); INSERT INTO temp.SelectedCollectionLocations SELECT f.location_key,min(f.entry_id) "+CollectionSelectionRowsSql+" GROUP BY f.location_key";
+            command.CommandText="CREATE TEMP TABLE SelectedCollectionLocations(location_key TEXT NOT NULL,entry_id TEXT NOT NULL,directory_location_id TEXT NOT NULL,PRIMARY KEY(directory_location_id,location_key)); INSERT INTO temp.SelectedCollectionLocations SELECT f.location_key,min(f.entry_id),b.location_id "+CollectionSelectionRowsSql+" GROUP BY b.location_id,f.location_key";
             command.ExecuteNonQuery();
-            command.CommandText=add?"INSERT INTO CollectionMembers SELECT $collection,location_key,entry_id,$now FROM temp.SelectedCollectionLocations WHERE true ON CONFLICT(collection_id,location_key) DO NOTHING":"DELETE FROM CollectionMembers WHERE collection_id=$collection AND location_key IN(SELECT location_key FROM temp.SelectedCollectionLocations)";
+            command.CommandText=add?"INSERT INTO CollectionMembers SELECT $collection,location_key,entry_id,$now,directory_location_id FROM temp.SelectedCollectionLocations WHERE true ON CONFLICT(collection_id,directory_location_id,location_key) DO NOTHING":"DELETE FROM CollectionMembers WHERE collection_id=$collection AND (directory_location_id,location_key) IN(SELECT directory_location_id,location_key FROM temp.SelectedCollectionLocations)";
             int changed=0;foreach(string id in collectionIds.Distinct()){cancellation.ThrowIfCancellationRequested();command.Parameters["$collection"].Value=id;changed+=command.ExecuteNonQuery();}
             command.CommandText="DROP TABLE temp.SelectedCollectionLocations";command.ExecuteNonQuery();
             cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;

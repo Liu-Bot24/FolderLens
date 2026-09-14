@@ -11,6 +11,26 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private async Task VerifyCollectionObservationRefresh(string source,Dictionary<string,object> report)
+    {
+        await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
+        monitor?.Dispose();monitor=null;DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());FilesGrid.UpdateLayout();
+        await WaitUntil(()=>visible.Any(r=>r.Item is not null&&r.Thumbnail is not null),TimeSpan.FromSeconds(10));
+        var row=visible.First(r=>r.Item is not null&&r.Thumbnail is not null);
+        var image=row.Thumbnail;var itemsSource=FilesGrid.ItemsSource;var container=FilesGrid.ContainerFromItem(row);
+        var old=row.Item!;string previousSession=resultHandle!.Id;
+        await catalog!.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET path_revision=path_revision+2 WHERE entry_id=$id";command.Parameters.AddWithValue("$id",old.EntryId);return command.ExecuteNonQuery();});
+        await RefreshQuery(scanPreview:true);
+        var authority=(await catalog.ReadSnapshotEntries(resultHandle!.Id,[old.EntryId],lifetime.Token)).Single();
+        report["snapshotChanged"]=resultHandle.Id!=previousSession;report["authoritativeRevision"]=authority.PathRevision;report["rowRevision"]=row.Item!.PathRevision;
+        if(resultHandle.Id==previousSession||row.Item.PathRevision!=authority.PathRevision||row.Item.PathRevision!=old.PathRevision+2)throw new InvalidOperationException("新快照已经发布，但保留行仍使用旧路径修订。");
+        if(!ReferenceEquals(itemsSource,FilesGrid.ItemsSource)||!ReferenceEquals(image,row.Thumbnail)||!ReferenceEquals(container,FilesGrid.ContainerFromItem(row))||!ReferenceEquals(row,results![checked((int)authority.Ordinal)]))throw new InvalidOperationException("更新观察值破坏了行、图片、容器或列表源的保留。");
+        string tag=(await catalog.CreateCollection("刷新观察值验证")).Id;
+        lastCollectionTargets=[tag];quickCollectionUsed=true;await QuickCollect(row);
+        if(!row.IsCollected)throw new InvalidOperationException("新观察值快捷收藏失败。");
+        if(await catalog.ChangeCollectionSelection([tag],resultHandle.Id,[new(authority.Ordinal,1)],true)!=0)throw new InvalidOperationException("普通与快捷收藏没有使用同一观察结果。");
+        report["nativeRowThumbnailContainerAndSourceRetained"]=true;report["quickAndBulkAgree"]=true;report["status"]="PASS";
+    }
     private async Task VerifyQuickCollections(string source,Dictionary<string,object> report)
     {
         await OpenRoot(Path.Combine(source,"A"));if(metadataTask is not null)await metadataTask;await RefreshQuery();
