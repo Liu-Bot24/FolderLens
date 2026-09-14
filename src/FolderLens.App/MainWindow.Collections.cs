@@ -172,7 +172,33 @@ public sealed partial class MainWindow
         includedCollectionIds=includedCollectionIds.Where(value=>value!=id).ToArray();
         excludedCollectionIds=excludedCollectionIds.Where(value=>value!=id).ToArray();
         RefreshCollectionBadges();await RefreshCollectionsTree();
-        if(affected)await RefreshQuery(preserveViewport:true);
+        if(activeCollectionId==id)await LeaveDeletedCollection(id);
+        else if(affected)await RefreshQuery(preserveViewport:true);
+    }
+    private async Task LeaveDeletedCollection(string id)
+    {
+        long requested=++rootChangeVersion;
+        scanStop.Cancel();queryStop.Cancel();selectionStop.Cancel();prefetchStop.Cancel();
+        await rootChangeGate.WaitAsync(lifetime.Token);
+        try
+        {
+            if(closing||requested!=rootChangeVersion||activeCollectionId!=id)return;
+            await ReturnToBrowser();
+            if(closing||requested!=rootChangeVersion||activeCollectionId!=id)return;
+            ClearResultSelection();CancelThumbnails();ClearPrefetchedImages();ClearImage();
+            AttachBrowserView(null);results?.Dispose();results=null;
+            groupedBrowserSource?.Dispose();groupedBrowserSource=null;browserGroups=null;
+            if(viewerStrip is not null)viewerStrip.ItemsSource=null;
+            var old=resultHandle;resultHandle=null;
+            activeCollectionId=null;root=rootId="";activeTreeRoot=null;replacingRoot=false;generation++;queryBusy=false;
+            if(advanced is not null)advanced=advanced with{CollectionId=null,RootId="",DirectoryScope=""};
+            lastAppliedFilter=null;RootPath.Text="";RootPath.IsReadOnly=false;
+            GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=true;FolderTree.SelectedNode=collectionsTreeRoot;
+            browserEmptyError=browserScanError=null;ResultSummary.Text="尚未打开目录";
+            UpdatePathPresentationControl();UpdateNavigationButtons();UpdateBrowserEmptyState();
+            if(old is not null)await catalog!.ReleaseSnapshot(old.Id);
+        }
+        finally{rootChangeGate.Release();}
     }
     private async Task<ContentDialogResult> ShowCollectionDialog(ContentDialog dialog)
     {

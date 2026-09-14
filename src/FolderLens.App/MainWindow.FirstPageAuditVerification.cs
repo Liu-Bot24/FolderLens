@@ -19,7 +19,26 @@ public sealed partial class MainWindow
         FileRow? row=null,later=null;
         try
         {
-            if(scenario=="selected")
+            if(scenario=="slideshow")
+            {
+                await OpenRoot(source);if(metadataTask is not null)await metadataTask;
+                await ResetFirstPageFixture();
+                var filter=CurrentFilter();var first=await catalog!.ReadFirstPage(filter);
+                PublishFirstPage(filter,first.Items);
+                var start=firstPageSequence.First(item=>item.Kind=="image");await SelectPreview(start);
+                var finished=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var interval=slideTimer!.Interval;verifySlideTickCompleted=()=>finished.TrySetResult();
+                try
+                {
+                    slideShow=true;slideTimer.Interval=TimeSpan.FromMilliseconds(1);slideTimer.Start();
+                    await finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                    if(results is not null||selected is null||selected.Ordinal<=start.Ordinal||selected.Kind!="image")
+                        throw new InvalidOperationException("首批列表幻灯片未向后选择图片。");
+                }
+                finally{slideShow=false;slideTimer.Stop();slideTimer.Interval=interval;verifySlideTickCompleted=null;}
+                report["slideshowAdvancesBeforeFullSnapshot"]=true;
+            }
+            else if(scenario=="selected")
             {
                 await OpenRoot(source);if(metadataTask is not null)await metadataTask;
                 foreach(bool details in new[]{false,true})

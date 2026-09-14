@@ -67,6 +67,11 @@ public sealed partial class MainWindow
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,(uint)bitmap.PixelWidth,(uint)bitmap.PixelHeight,96,96,(await bitmap.GetPixelsAsync()).ToArray());await encoder.FlushAsync();
         }
         finally{Shell.Children.Remove(panel);}
+        await OpenCollection(collection.Id);await DeleteCollectionAndRefresh(collection.Id);
+        if(activeCollectionId is not null||rootId.Length!=0||resultHandle is not null||selected is not null||RootPath.IsReadOnly||FilesGrid.Items.Count!=0)
+            throw new InvalidOperationException("删除当前收藏夹后仍保留失效浏览页面。");
+        if(!File.Exists(image)||!File.Exists(copy))throw new InvalidOperationException("删除收藏夹影响源文件。");
+        report["deletedActiveCollectionReturnsToEmptyBrowser"]=true;
         report["crossRootPreview"]=true;report["batchSelection"]=true;report["textAndPresentationCategory"]=true;report["excludeInBothScopes"]=true;report["status"]="PASS";
     }
 }

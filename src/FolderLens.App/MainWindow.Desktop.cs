@@ -53,24 +53,27 @@ public sealed partial class MainWindow
         slideTimer=DispatcherQueue.CreateTimer();slideTimer.Interval=TimeSpan.FromSeconds(5);slideTimer.IsRepeating=false;
         slideTimer.Tick+=async(_,_)=>
         {
-            if(slideTickStop is {IsCancellationRequested:false}||closing||!slideShow||results is null||selected is null)return;
+            if(slideTickStop is {IsCancellationRequested:false}||closing||!slideShow||selected is null)return;
             using var operation=browserWork.Enter();if(operation is null)return;
             using var tick=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,selectionStop.Token);slideTickStop=tick;
-            var source=results;var origin=selected;long request=slideRequest,selectedRequest=browserSelectionRequest;
-            bool IsCurrent()=>!tick.IsCancellationRequested&&!closing&&slideShow&&request==slideRequest&&selectedRequest==browserSelectionRequest&&ReferenceEquals(results,source)&&ReferenceEquals(selected,origin);
+            var source=results;var first=firstPageSequence;var origin=selected;long request=slideRequest,selectedRequest=browserSelectionRequest;
+            bool IsCurrent()=>!tick.IsCancellationRequested&&!closing&&slideShow&&request==slideRequest&&selectedRequest==browserSelectionRequest&&ReferenceEquals(results,source)&&(source is not null||ReferenceEquals(firstPageSequence,first))&&ReferenceEquals(selected,origin);
             try
             {
-                for(long index=origin.Ordinal+1;index<source.Count;index++)
+                int? next=await SlideshowSequence.Next(source?.Count??first.Length,checked((int)origin.Ordinal),async(index,token)=>
                 {
-                    var row=(FileRow)source[(int)index]!;if(verifySlideAdvanceBarrier is not null)await verifySlideAdvanceBarrier(tick.Token);if(!IsCurrent())return;await source.EnsureLoaded(row,tick.Token);
-                    if(!IsCurrent())return;
-                    if(row.Kind!="image")continue;
-                    Navigate(checked((int)(index-origin.Ordinal)));return;
-                }
+                    var row=source is not null?(FileRow)source[index]!:first[index];
+                    if(verifySlideAdvanceBarrier is not null)await verifySlideAdvanceBarrier(token);
+                    if(!IsCurrent())throw new OperationCanceledException();
+                    if(source is not null)await source.EnsureLoaded(row,token);
+                    if(!IsCurrent())throw new OperationCanceledException();
+                    return row.Kind=="image";
+                },tick.Token);
+                if(next is {} index&&IsCurrent()){Navigate(checked(index-(int)origin.Ordinal));return;}
                 if(IsCurrent()){slideShow=false;Status.Text="幻灯片已到末尾。";}
             }
             catch(OperationCanceledException){}catch(Exception ex){if(IsCurrent()){ShowError(ex);slideShow=false;}else RecordWebView("Retired slideshow tick failed: "+ex.GetType().Name);}
-            finally{if(ReferenceEquals(slideTickStop,tick))slideTickStop=null;verifySlideTickCompleted?.Invoke();}
+            finally{if(ReferenceEquals(slideTickStop,tick))slideTickStop=null;if(slideShow&&!closing&&selected?.Kind=="image"&&!previewLoading)slideTimer.Start();verifySlideTickCompleted?.Invoke();}
         };
         ImageCanvas.SizeChanged+=(_,_)=>ImageCanvas.Invalidate();
         FilesGrid.SizeChanged+=(_,_)=>UpdateGridPresentation();

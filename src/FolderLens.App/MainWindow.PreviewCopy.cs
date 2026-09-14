@@ -34,6 +34,10 @@ public sealed partial class MainWindow
             if(selected is null||values.Count!=2||values[0]!=selected.Name||values[1]!=SourcePath(selected)||!Path.IsPathFullyQualified(values[1]))throw new InvalidOperationException("预览点击复制未使用文件名和完整源路径。");
             if(PreviewCopyFeedback.Visibility!=Visibility.Visible||PreviewCopyFeedback.Text!="已复制完整路径")throw new InvalidOperationException("预览复制缺少可见反馈。");
             report["previewCopyValuesAndFeedback"]=true;report["systemClipboardWrite"]="NOT_RUN";
+            writePreviewClipboard=_=>throw new System.Runtime.InteropServices.COMException("Clipboard busy");
+            CopyPath(this,new RoutedEventArgs());
+            if(!Status.Text.StartsWith("操作未完成"))throw new InvalidOperationException("菜单复制失败未显示错误。");
+            report["menuClipboardFailureHandled"]=true;
         }
         finally{writePreviewClipboard=original;}
     }

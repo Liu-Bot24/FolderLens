@@ -379,8 +379,10 @@ public sealed partial class MainWindow
         {
             if(rawPreviewOnly)
             {
-                if(!await EnsureDevelopedRaw(selected,current,token)){if(revision==viewerGestureRevision&&current==selection){lensPending=false;PreviewSurface.SetMagnifierQuality("相机预览 · 原图不可用");}return;}
-                if(revision!=viewerGestureRevision||current!=selection)return;UpdateViewerMagnifier();
+                await EnsureEmbeddedRawResolution(selected,current,token,nativeSize:true);
+                if(revision!=viewerGestureRevision||current!=selection)return;
+                lensPending=false;PreviewSurface.InvalidateMagnifier();
+                PreviewSurface.SetMagnifierQuality($"相机预览 · {viewerPressZoom.Percent:0.##}%");return;
             }
             while(lensPending&&viewerGesture==ViewerGesture.Magnifier&&revision==viewerGestureRevision)
             {
