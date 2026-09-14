@@ -17,6 +17,31 @@ public sealed partial class MainWindow
     private IReadOnlyList<FileCollection> fileCollections=[];
     private string? activeCollectionId;
     private string[] includedCollectionIds=[],excludedCollectionIds=[];
+    private long scannedCollectionRevision=-1;
+    private bool collectionScanRefreshRequested;
+    private Task? collectionScanRefreshTask;
+    private Task RefreshCollectionsAfterScan()
+    {
+        collectionScanRefreshRequested=true;
+        return collectionScanRefreshTask is {IsCompleted:false}?collectionScanRefreshTask:collectionScanRefreshTask=RefreshCollectionsAfterScanCore();
+    }
+    private async Task RefreshCollectionsAfterScanCore()
+    {
+        using var operation=browserWork.Enter();if(operation is null||catalog is null)return;
+        try
+        {
+            while(collectionScanRefreshRequested&&!closing)
+            {
+                collectionScanRefreshRequested=false;
+                long revision=await catalog.ReadCollectionRevision(lifetime.Token);
+                if(revision==scannedCollectionRevision)continue;
+                await RefreshCollectionsTree();if(closing)return;
+                RefreshCollectionBadges();scannedCollectionRevision=revision;
+            }
+        }
+        catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
+        catch(Exception error){if(!closing)ShowError(error);}
+    }
     private void EnsureCollectionsTreeRoot()
     {
         if(collectionsTreeRoot is null){collectionsTreeRoot=new(){Content=new NavigationGroup("收藏夹"),IsExpanded=true};FolderTree.RootNodes.Insert(0,collectionsTreeRoot);}

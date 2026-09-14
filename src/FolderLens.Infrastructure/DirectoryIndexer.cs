@@ -235,10 +235,10 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     {using var t=c.BeginTransaction();EnsureEpoch(c,t,root,epoch);Exclude(c,t,root,scan,directory,path,reason);t.Commit();return true;},cancellation);
     private static void Exclude(SqliteConnection c,SqliteTransaction t,string root,string scan,string directory,string path,string reason)
     {
-        Execute(c,t,"UPDATE Directories SET entry_state='excluded' WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,$len)=$prefix)",("$root",root),("$path",path),("$len",path.Length+1),("$prefix",path+"\\"));
-        Execute(c,t,"UPDATE DirectoryScans SET state='excluded',error_code=$reason WHERE scan_id=$scan AND directory_id IN (SELECT directory_id FROM Directories WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,$len)=$prefix))",("$scan",scan),("$root",root),("$reason",reason),("$path",path),("$len",path.Length+1),("$prefix",path+"\\"));
-        Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND ($path='' OR relative_path=$path OR substr(relative_path,1,$len)=$prefix)",("$scan",scan),("$path",path),("$len",path.Length+1),("$prefix",path+"\\"));
-        Execute(c,t,"UPDATE Files SET entry_state='excluded' WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,$len)=$prefix)",("$root",root),("$path",path),("$len",path.Length+1),("$prefix",path+"\\"));
+        Execute(c,t,"UPDATE Directories SET entry_state='excluded' WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,length($prefix))=$prefix)",("$root",root),("$path",path),("$prefix",path+"\\"));
+        Execute(c,t,"UPDATE DirectoryScans SET state='excluded',error_code=$reason WHERE scan_id=$scan AND directory_id IN (SELECT directory_id FROM Directories WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,length($prefix))=$prefix))",("$scan",scan),("$root",root),("$reason",reason),("$path",path),("$prefix",path+"\\"));
+        Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND ($path='' OR relative_path=$path OR substr(relative_path,1,length($prefix))=$prefix)",("$scan",scan),("$path",path),("$prefix",path+"\\"));
+        Execute(c,t,"UPDATE Files SET entry_state='excluded' WHERE root_id=$root AND ($path='' OR relative_path=$path OR substr(relative_path,1,length($prefix))=$prefix)",("$root",root),("$path",path),("$prefix",path+"\\"));
     }
     private static bool Within(string path,string excluded)=>excluded.Length==0||PathRules.IsWithinRelative(path,excluded.Replace('/','\\').TrimEnd('\\'));
     private static string AddDirectory(SqliteConnection c,SqliteTransaction t,string root,string path,string? parent,string scan,string caseMode="unknown",bool enqueue=true,string? physicalIdentity=null)

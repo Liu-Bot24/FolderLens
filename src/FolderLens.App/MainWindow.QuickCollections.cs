@@ -12,8 +12,24 @@ public sealed partial class MainWindow
     private Func<ContentDialog,Func<bool,Task<bool>>,Task>? verifyCollectionDialog;
     private void RefreshCollectionBadges()
     {
-        collectionChangeVersion++;
-        foreach(var row in visible.ToArray())_=LoadRowProperties(row,refresh:true);
+        long version=++collectionChangeVersion;
+        _=RefreshCollectionBadgesCore(version);
+    }
+    private async Task RefreshCollectionBadgesCore(long version)
+    {
+        using var operation=browserWork.Enter();if(operation is null||catalog is null)return;
+        try
+        {
+            var rows=visible.Where(row=>row.Item is not null).Select(row=>(Row:row,Item:row.Item!)).ToArray();
+            foreach(var batch in rows.Chunk(256))
+            {
+                var flags=await catalog.ReadCollectionFlags(batch.Select(value=>value.Item).ToArray(),lifetime.Token);
+                if(closing||version!=collectionChangeVersion)return;
+                for(int i=0;i<batch.Length;i++)if(ReferenceEquals(batch[i].Row.Item,batch[i].Item))batch[i].Row.SetCollected(flags[i]);
+            }
+        }
+        catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
+        catch(Exception error){if(!closing)ShowError(error);}
     }
     private void QuickCollectDoubleTapped(object sender,DoubleTappedRoutedEventArgs args)=>args.Handled=true;
     private async void QuickCollectClicked(object sender,RoutedEventArgs args)
