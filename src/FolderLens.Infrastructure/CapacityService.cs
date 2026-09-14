@@ -21,12 +21,22 @@ public sealed class CapacityService(CatalogStore catalog)
     {
         using var transaction=c.BeginTransaction(deferred:true);using var state=c.CreateCommand();state.Transaction=transaction;state.CommandText="SELECT scan_state,catalog_revision FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";state.Parameters.AddWithValue("$root",root);
         string status;long revision;using(var row=state.ExecuteReader()){if(!row.Read())throw new InvalidOperationException("该根目录没有可用的索引统计。");status=row.GetString(0);revision=row.GetInt64(1);}
-        using var directories=c.CreateCommand();directories.Transaction=transaction;directories.CommandText="SELECT relative_path FROM Directories WHERE root_id=$root AND entry_state='present'";directories.Parameters.AddWithValue("$root",root);var paths=new List<string>();using(var reader=directories.ExecuteReader())while(reader.Read()){cancellation.ThrowIfCancellationRequested();paths.Add(reader.GetString(0));}
-        IEnumerable<CapacityFile> Files()
+        IEnumerable<DirectoryCapacity> Directories()
         {
-            using var cmd=c.CreateCommand();cmd.Transaction=transaction;cmd.CommandText="SELECT relative_path,logical_bytes,allocated_bytes FROM Files WHERE root_id=$root AND entry_state='present'";cmd.Parameters.AddWithValue("$root",root);using var rows=cmd.ExecuteReader();while(rows.Read()){cancellation.ThrowIfCancellationRequested();yield return new(rows.GetString(0),rows.GetInt64(1),rows.IsDBNull(2)?null:rows.GetInt64(2));}
+            using var cmd=c.CreateCommand();cmd.Transaction=transaction;
+            // Use the existing directory index. Transfer one aggregate per directory, not one path/object per file.
+            cmd.CommandText="""
+                SELECT d.relative_path,COUNT(f.entry_id),COALESCE(SUM(f.logical_bytes),0),
+                    COALESCE(SUM(f.allocated_bytes),0),COUNT(f.entry_id)-COUNT(f.allocated_bytes)
+                FROM Directories d LEFT JOIN Files f INDEXED BY IX_Files_Directory
+                    ON f.root_id=d.root_id AND f.directory_id=d.directory_id AND f.entry_state='present'
+                WHERE d.root_id=$root AND (d.entry_state='present' OR f.entry_id IS NOT NULL)
+                GROUP BY d.directory_id
+                """;
+            cmd.Parameters.AddWithValue("$root",root);using var rows=cmd.ExecuteReader();
+            while(rows.Read()){cancellation.ThrowIfCancellationRequested();yield return new(rows.GetString(0),rows.GetInt64(1),rows.GetInt64(2),rows.GetInt64(3),rows.GetInt64(4));}
         }
-        var result=Capacity.Build(Files(),paths,cancellation);transaction.Commit();return new CapacityReport(root,status,result){Revision=revision};
+        var result=Capacity.BuildDirectories(Directories(),cancellation);transaction.Commit();return new CapacityReport(root,status,result){Revision=revision};
     },cancellation);
     public async Task<CapacityReport> Result(ResultHandle handle,CancellationToken cancellation)
     {

@@ -7,6 +7,21 @@ namespace FolderLens.UnitTests;
 public sealed class CapacityServiceTests
 {
     [Fact]
+    public async Task DirectoryAggregateMatchesFileStreamIncludingUnknownAllocationAndMissingRows()
+    {
+        await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")));
+        await catalog.Initialize();await catalog.SeedBenchmark(200);
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET allocated_bytes=CASE WHEN entry_id LIKE '%1' THEN NULL ELSE logical_bytes+100 END; UPDATE Files SET entry_state='missing' WHERE entry_id LIKE '%2'";return cmd.ExecuteNonQuery();});
+        var expected=await catalog.Read(c=>
+        {
+            using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,logical_bytes,allocated_bytes FROM Files WHERE root_id='benchmark' AND entry_state='present'";
+            using var reader=cmd.ExecuteReader();var files=new List<CapacityFile>();while(reader.Read())files.Add(new(reader.GetString(0),reader.GetInt64(1),reader.IsDBNull(2)?null:reader.GetInt64(2)));
+            return Capacity.Build(files).Single(r=>r.RelativePath=="");
+        });
+        var report=await new CapacityService(catalog).EntireRoot("benchmark",CancellationToken.None);
+        Assert.Equal(expected,report.Rows.Single(r=>r.RelativePath==""));Assert.True(expected.AllocationUnknown>0);Assert.Equal(180,expected.SubtreeFiles);
+    }
+    [Fact]
     public async Task ScanTerminationChangesLiveStampWithoutChangingFrozenResult()
     {
         await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")));

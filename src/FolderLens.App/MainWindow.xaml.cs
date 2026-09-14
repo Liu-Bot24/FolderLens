@@ -212,7 +212,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
     }
-    private void CancelScan(object sender,RoutedEventArgs e){scanStop.Cancel();Status.Text="正在取消扫描；已发现的索引将保留。";}
+    private void CancelScan(object sender,RoutedEventArgs e){activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在取消扫描；已发现的索引将保留。";}
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
@@ -232,22 +232,37 @@ public sealed partial class MainWindow : Window
             FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在打开文件夹…";
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
-            monitor?.Dispose();monitor=null;
-            await RootTaskRetirement.Wait(scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
+            if(!backgroundScans.Any(s=>ReferenceEquals(s.Monitor,monitor)))monitor?.Dispose();monitor=null;
+            bool ownedScan=backgroundScans.Any(s=>ReferenceEquals(s.Completion,scanTask));
+            await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
             if(requested!=rootChangeVersion)return;
             scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            activeBackgroundScan=null;
+            var reusable=collectionScope?null:backgroundScans.FirstOrDefault(s=>string.Equals(s.Path,path,StringComparison.Ordinal)&&!s.Completion.IsCompleted);
+            if(reusable is not null&&(reusable.Cancelled||forceRefresh||!reusable.Policy.HasSameScanPolicy(CurrentFilter())))
+            {
+                reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;
+                if(requested!=rootChangeVersion||closing)return;
+            }
+            foreach(var finished in backgroundScans.Where(s=>s!=reusable&&s.Completion.IsCompleted).ToArray()){finished.Dispose();backgroundScans.Remove(finished);}
             if(collectionScope){root=path;rootId=path;epoch=requested;}
-            else {var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;}
+            else
+            {
+                var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token,reusable is null?null:(reusable.RootId,reusable.Epoch));
+                if(reusable is not null&&(opened.RootId!=reusable.RootId||opened.Epoch!=reusable.Epoch))
+                {reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;}
+                if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=reusable;
+            }
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
             if(resultHandle is {} oldHandle)await catalog.ReleaseSnapshot(oldHandle.Id);
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
             if(collectionScope){await RefreshQuery();Status.Text="正在浏览收藏夹；原文件保留在各自目录。";return;}
             string activeRoot=root,activeId=rootId;long activeEpoch=epoch;
-            try{monitor=new(root,()=>DispatcherQueue.TryEnqueue(()=>{if(requested!=rootChangeVersion||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,rootId,epoch);}catch(IOException){Status.Text="目录监听暂不可用；可手动刷新核对。";}
+            try{monitor=reusable?.Monitor??new(root,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,rootId,epoch);}catch(IOException){Status.Text="目录监听暂不可用；可手动刷新核对。";}
             var report=new Progress<ScanProgress>(p=>
             {
-                if(activeId!=rootId || activeEpoch!=epoch || requested!=rootChangeVersion || closing)return;
+                if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
                 Status.Text=$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
                 if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
@@ -260,9 +275,20 @@ public sealed partial class MainWindow : Window
             ExclusionSpec[] exclusions=ScanExclusions();
             string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var rootToken=scanStop.Token;
-            scanTask=Task.Run(()=>new DirectoryIndexer(catalog,scanWorker).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,rootToken,forceRefresh));
+            if(reusable is null)
+            {
+                var indexer=new DirectoryIndexer(catalog,scanWorker);
+                activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,backgroundScanSlots,lifetime.Token,
+                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token,forceRefresh)){Monitor=monitor};
+                backgroundScans.Add(activeBackgroundScan);
+            }
+            scanTask=activeBackgroundScan!.Completion;
+            var openedScanTask=scanTask;
+            PreferScanDirectory(activeId,CurrentFilter().DirectoryScope);
             UpdateBrowserEmptyState();
-            await scanTask;
+            rootChangeGate.Release();acquired=false;
+            await RefreshQuery(preserveViewport:true,scanPreview:true);
+            await openedScanTask;
             if(verifyScanBarrier is not null)await verifyScanBarrier(rootToken);
             if(requested!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
             if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
@@ -320,7 +346,7 @@ public sealed partial class MainWindow : Window
         browserEmptyError=null;UpdateBrowserEmptyState();
         try
         {
-            FilterSpec filter=CurrentFilter();attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
+            FilterSpec filter=CurrentFilter();if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
             var activeList=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
             int firstVisible=activeList.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
             string? viewportPath=preserveViewport&&firstVisible>=0&&firstVisible<activeList.Items.Count?BrowserPath(activeList.Items[firstVisible] as FileRow):null;
@@ -1088,6 +1114,7 @@ public sealed partial class MainWindow : Window
             await Cleanup(CloseCapacityWindow);
             if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true)));
             await Cleanup(()=>retired);
+            await Cleanup(RetireBackgroundScans);
             await Cleanup(DisposeMarkdownView);await Cleanup(DisposeTextSession);
             foreach(var task in new[]{scanTask,metadataTask,prefetchTask,capabilityTask,treeRefreshTask,physicalTreeTask})if(task is not null)await Cleanup(()=>task);
             if(thumbnailWorkCount>0)await Cleanup(()=>thumbnailsIdle.Task);

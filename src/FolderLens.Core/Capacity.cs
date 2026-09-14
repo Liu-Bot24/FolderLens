@@ -1,6 +1,7 @@
 namespace FolderLens.Core;
 
 public sealed record CapacityFile(string RelativePath,long LogicalBytes,long? AllocatedBytes);
+public sealed record DirectoryCapacity(string RelativePath,long Files,long LogicalBytes,long AllocatedKnown,long AllocationUnknown);
 public sealed record CapacityRow(string RelativePath,long DirectFiles,long SubtreeFiles,long DirectLogical,long SubtreeLogical,long DirectAllocatedKnown,long SubtreeAllocatedKnown,long AllocationUnknown);
 public sealed record CapacityViewRow(string RelativePath,string Label,long Files,long KnownBytes,long UnknownCount,double? Fraction,bool IsDirectFiles);
 
@@ -21,6 +22,21 @@ public static class Capacity
             if(!rows.TryGetValue(directory,out var direct))rows[directory]=direct=new();
             checked{direct.DirectFiles++;direct.Files++;direct.DirectLogical+=file.LogicalBytes;direct.Logical+=file.LogicalBytes;direct.DirectAllocated+=file.AllocatedBytes??0;direct.Allocated+=file.AllocatedBytes??0;if(file.AllocatedBytes is null)direct.Unknown++;}
         }
+        return Rollup(rows,cancellation);
+    }
+    public static IReadOnlyList<CapacityRow> BuildDirectories(IEnumerable<DirectoryCapacity> directories,CancellationToken cancellation=default)
+    {
+        var rows=new Dictionary<string,Accumulator>(StringComparer.Ordinal){[""]=new()};
+        foreach(var directory in directories)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if(directory.Files<0||directory.LogicalBytes<0||directory.AllocatedKnown<0||directory.AllocationUnknown<0||directory.AllocationUnknown>directory.Files)throw new ArgumentOutOfRangeException(nameof(directories));
+            rows[directory.RelativePath]=new(){DirectFiles=directory.Files,Files=directory.Files,DirectLogical=directory.LogicalBytes,Logical=directory.LogicalBytes,DirectAllocated=directory.AllocatedKnown,Allocated=directory.AllocatedKnown,Unknown=directory.AllocationUnknown};
+        }
+        return Rollup(rows,cancellation);
+    }
+    private static IReadOnlyList<CapacityRow> Rollup(Dictionary<string,Accumulator> rows,CancellationToken cancellation)
+    {
         // Visit ancestors once per directory, not once per file. Include parents
         // of empty directories so they remain navigable in a complete hierarchy.
         foreach(string path in rows.Keys.ToArray())

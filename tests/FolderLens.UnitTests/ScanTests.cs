@@ -6,7 +6,7 @@ namespace FolderLens.UnitTests;
 
 public sealed class ScanTests
 {
-    [Fact] public async Task NestedImagesAppearBeforeAllSiblingManifestsAreScanned()
+    [Fact] public async Task FairScanVisitsSiblingDirectoriesBeforeDescendingFurther()
     {
         string fixture=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N")),source=Path.Combine(fixture,"source");
         for(int i=0;i<24;i++)
@@ -23,7 +23,7 @@ public sealed class ScanTests
             if(images>0)filesAtFirstImage=p.Files;
         });
         var scanner=new DirectoryIndexer(catalog);var result=await scanner.Scan("root",source,epoch,true,[],progress,CancellationToken.None);
-        Assert.Equal("ready",result.State);Assert.Equal(48,result.Files);Assert.NotNull(filesAtFirstImage);Assert.InRange(filesAtFirstImage.Value,1,3);
+        Assert.Equal("ready",result.State);Assert.Equal(48,result.Files);Assert.NotNull(filesAtFirstImage);Assert.Equal(25,filesAtFirstImage.Value);
         var recursive=await catalog.CreateSnapshot(new FilterSpec{RootId="root"},epoch,1);Assert.Equal(24,recursive.Count);
         var direct=await catalog.CreateSnapshot(new FilterSpec{RootId="root",Recursive=false},epoch,2);Assert.Equal(0,direct.Count);
     }

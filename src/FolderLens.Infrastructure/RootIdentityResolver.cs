@@ -7,7 +7,7 @@ public sealed record OpenedRoot(string RootId,long Epoch,string Availability,boo
 /// <summary>Preserves a separate indexed root for each observed volume/directory identity at the same display path.</summary>
 public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorkerExecutable=null,TimeSpan? operationTimeout=null)
 {
-    public async Task<OpenedRoot> Open(string path,CancellationToken cancellation=default)
+    public async Task<OpenedRoot> Open(string path,CancellationToken cancellation=default,(string RootId,long Epoch)? ongoingScan=null)
     {
         path=PathRules.ValidateSource(path);
         var previous=await catalog.Read(c=>
@@ -49,12 +49,13 @@ public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorker
             using var open=c.CreateCommand();open.Transaction=transaction;open.CommandText="""
             INSERT INTO Roots(root_id,display_path,canonical_key,volume_identity,root_epoch,availability,scan_state,last_checked_utc_ticks)
             VALUES($id,$path,$key,$identity,1,$availability,'notStarted',$now)
-            ON CONFLICT(root_id) DO UPDATE SET root_epoch=root_epoch+1,availability=excluded.availability,
+            ON CONFLICT(root_id) DO UPDATE SET root_epoch=CASE WHEN Roots.root_id=$ongoing AND Roots.root_epoch=$epoch THEN Roots.root_epoch ELSE Roots.root_epoch+1 END,availability=excluded.availability,
                 volume_identity=COALESCE(excluded.volume_identity,Roots.volume_identity),last_checked_utc_ticks=excluded.last_checked_utc_ticks
             RETURNING root_epoch;
             """;
             open.Parameters.AddWithValue("$id",id);open.Parameters.AddWithValue("$path",path);open.Parameters.AddWithValue("$key",physical is null?path:path+"\0"+physical);
             open.Parameters.AddWithValue("$identity",(object?)physical??DBNull.Value);open.Parameters.AddWithValue("$availability",availability);open.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
+            open.Parameters.AddWithValue("$ongoing",ongoingScan?.RootId??"");open.Parameters.AddWithValue("$epoch",ongoingScan?.Epoch??-1);
             long epoch=(long)open.ExecuteScalar()!;transaction.Commit();return new OpenedRoot(id,epoch,availability,changed,hasIndex);
         },cancellation).ConfigureAwait(false);
     }
