@@ -277,6 +277,16 @@ public sealed class ScannerRegressionTests
         Assert.Equal(resolved,await probe.ResolveImage(root,document,"图片.png",CancellationToken.None));
         Assert.Equal(3,(await probe.Read(image,CancellationToken.None)).Length);
     }
+    [Fact] public async Task ReopeningOngoingScanPreservesEpochButStillChecksPhysicalIdentity()
+    {
+        string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();
+        var resolver=new RootIdentityResolver(catalog,Worker());var first=await resolver.Open(source);
+        var same=await resolver.Open(source,ongoingScan:(first.RootId,first.Epoch));Assert.Equal(first.RootId,same.RootId);Assert.Equal(first.Epoch,same.Epoch);
+        Directory.Move(source,source+"-old");Directory.CreateDirectory(source);
+        var replaced=await resolver.Open(source,ongoingScan:(first.RootId,first.Epoch));Assert.NotEqual(first.RootId,replaced.RootId);Assert.True(replaced.IdentityChanged);
+        var reopened=await resolver.Open(source);Assert.Equal(replaced.Epoch+1,reopened.Epoch);
+    }
     [Fact] public async Task RootReplacementRetainsOldIndexAndRejectsNewVolumeContext()
     {
         string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"old.jpg"),"old");

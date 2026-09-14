@@ -24,6 +24,7 @@ public sealed class CapacityDisplayRow(CapacityViewRow row,bool complete=true)
 public sealed partial class CapacityWindow : Window
 {
     private readonly CatalogStore catalog;
+    private readonly Action<string>? preferScan;
     private readonly string rootId;
     private readonly ResultHandle? snapshot;
     private readonly CancellationTokenSource lifetime;
@@ -60,9 +61,9 @@ public sealed partial class CapacityWindow : Window
     private readonly ListView ranking=new(){SelectionMode=ListViewSelectionMode.Single};
     private readonly ItemsControl shares=new();
 
-    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse)
+    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse,Action<string>? preferScan=null)
     {
-        this.catalog=catalog;this.rootId=rootId;snapshot=retainedSnapshot;
+        this.catalog=catalog;this.rootId=rootId;snapshot=retainedSnapshot;this.preferScan=preferScan;
         lifetime=CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Title="目录容量 · FolderLens";AppWindow.Resize(new Windows.Graphics.SizeInt32(1180,820));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory,"Assets","FolderLens.ico"));
@@ -162,7 +163,7 @@ public sealed partial class CapacityWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button,label);
     }
     private void SaveSelection(){if(ranking.SelectedItem is CapacityDisplayRow row)selectedPaths[directory]=row.Value.RelativePath;}
-    private void Navigate(string path){SaveSelection();directory=path;descendants.IsChecked=false;QueueRender();}
+    private void Navigate(string path){SaveSelection();directory=path;descendants.IsChecked=false;preferScan?.Invoke(path);QueueRender();}
     private async Task CheckForUpdates()
     {
         if(closed||scope.SelectedIndex!=0||!work.IsCompleted||report is null)return;

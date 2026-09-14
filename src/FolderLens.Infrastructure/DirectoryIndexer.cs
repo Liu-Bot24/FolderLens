@@ -9,9 +9,10 @@ namespace FolderLens.Infrastructure;
 public sealed record ScanProgress(long Files,long Directories,long Errors,string State);
 public sealed class RootIdentityChangedException():IOException("根目录的卷或创建身份已改变；保留旧索引，请以新的根上下文打开。");
 
-/// <summary>Disk-backed depth-first traversal reaches nested content early; only a completed directory can reconcile unseen entries.</summary>
+/// <summary>Disk-backed fair traversal; only a completed directory can reconcile unseen entries.</summary>
 public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExecutable=null)
 {
+    public ScanPriority Priority {get;}=new();
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PathProbeOverride {get;set;}
     public TimeSpan RenameLookupTime { get; private set; }
     public TimeSpan BatchWriteTime { get; private set; }
@@ -39,8 +40,10 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
             ScanRecovery.Recover(c,t);
             ScanRenames.Ensure(c,t);ScanDirtyDirectories.Ensure(c,t);
-            Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanQueue(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,scan_id TEXT NOT NULL,directory_id TEXT NOT NULL,relative_path TEXT NOT NULL,subtree INTEGER NOT NULL,path_depth INTEGER NOT NULL,UNIQUE(scan_id,directory_id))");
-            Execute(c,t,"CREATE INDEX IF NOT EXISTS temp.IX_ScanQueue_Order ON ScanQueue(scan_id,path_depth DESC,queue_id)");
+            Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanQueue(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,scan_id TEXT NOT NULL,directory_id TEXT NOT NULL,relative_path TEXT NOT NULL,subtree INTEGER NOT NULL,path_depth INTEGER NOT NULL,branch TEXT NOT NULL,UNIQUE(scan_id,directory_id))");
+            Execute(c,t,"CREATE INDEX IF NOT EXISTS temp.IX_ScanQueue_Branch ON ScanQueue(scan_id,branch,path_depth,queue_id)");
+            Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanBranches(scan_id TEXT NOT NULL,branch TEXT NOT NULL,last_turn INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scan_id,branch))");
+            Execute(c,t,"CREATE INDEX IF NOT EXISTS temp.IX_ScanBranches_Turn ON ScanBranches(scan_id,last_turn,branch)");
             using var policy=c.CreateCommand();policy.Transaction=t;policy.CommandText="SELECT cloud_policy FROM Roots WHERE root_id=$id";policy.Parameters.AddWithValue("$id",rootId);allowCloud=(string?)policy.ExecuteScalar()=="explicitAllowed";
             Execute(c,t,"INSERT INTO ScanRuns(scan_id,root_id,root_epoch,state,started_utc_ticks) VALUES($scan,$root,$epoch,'running',$now)",("$scan",scanId),("$root",rootId),("$epoch",epoch),("$now",DateTime.UtcNow.Ticks));
             ScanRecovery.Own(c,t,scanId);
@@ -59,15 +62,42 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 if(rootState.State!="present"){availability=rootState.State=="inaccessible"?"inaccessible":"offline";throw new IOException("根目录当前不可用，保留待核对范围。");}
                 await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT volume_identity FROM Roots WHERE root_id=$id";cmd.Parameters.AddWithValue("$id",rootId);if(cmd.ExecuteScalar() is string expected&&rootState.PhysicalIdentity is string actual&&expected!=actual)throw new RootIdentityChangedException();return true;},cancellation).ConfigureAwait(false);
             }
+            long turn=0;
             while(true)
             {
                 cancellation.ThrowIfCancellationRequested();
                 var queued=await catalog.Write(c=>
                 {
                     using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
-                    using var cmd=c.CreateCommand();cmd.Transaction=t;cmd.CommandText="SELECT q.directory_id,q.relative_path,q.subtree FROM temp.ScanQueue q JOIN DirectoryScans s ON s.scan_id=q.scan_id AND s.directory_id=q.directory_id WHERE q.scan_id=$scan AND s.state='queued' ORDER BY q.path_depth DESC,q.queue_id LIMIT 1";cmd.Parameters.AddWithValue("$scan",scanId);
-                    (string Id,string Path,bool Subtree)? next=null;using(var row=cmd.ExecuteReader())if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);
-                    if(next is {} found)Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND directory_id=$id",("$scan",scanId),("$id",found.Id));
+                    using var cmd=c.CreateCommand();cmd.Transaction=t;
+                    string priority=Priority.RelativePath;
+                    // Three preferred turns, then a fair turn: the visible subtree cannot starve its siblings.
+                    bool preferred=priority.Length>0&&++turn%4!=0;
+                    cmd.CommandText=preferred?"""
+                        SELECT directory_id,relative_path,subtree FROM temp.ScanQueue
+                        WHERE scan_id=$scan AND (relative_path=$path OR substr(relative_path,1,length($path)+1)=$path||'\'
+                            OR relative_path='' OR substr($path,1,length(relative_path)+1)=relative_path||'\')
+                        ORDER BY path_depth,queue_id LIMIT 1
+                        """:"";
+                    cmd.Parameters.AddWithValue("$scan",scanId);cmd.Parameters.AddWithValue("$path",priority);
+                    (string Id,string Path,bool Subtree)? next=null;
+                    if(preferred){using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);}
+                    if(next is null)
+                    {
+                        cmd.CommandText="""
+                            SELECT directory_id,relative_path,subtree FROM temp.ScanQueue
+                            WHERE scan_id=$scan AND branch=(SELECT b.branch FROM temp.ScanBranches b
+                                WHERE b.scan_id=$scan AND EXISTS(SELECT 1 FROM temp.ScanQueue q WHERE q.scan_id=$scan AND q.branch=b.branch)
+                                ORDER BY b.last_turn,b.branch LIMIT 1)
+                            ORDER BY path_depth,queue_id LIMIT 1
+                            """;
+                        using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);
+                    }
+                    if(next is {} found)
+                    {
+                        Execute(c,t,"UPDATE temp.ScanBranches SET last_turn=(SELECT COALESCE(MAX(last_turn),0)+1 FROM temp.ScanBranches WHERE scan_id=$scan) WHERE scan_id=$scan AND branch=$branch",("$scan",scanId),("$branch",ScanPriority.Branch(found.Path)));
+                        Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND directory_id=$id",("$scan",scanId),("$id",found.Id));
+                    }
                     t.Commit();return next;
                 },cancellation).ConfigureAwait(false);
                 if(queued is not {} work)break;
@@ -148,6 +178,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 Execute(c,t,"UPDATE DirectoryScans SET state=$state,error_code=$error WHERE scan_id=$scan AND state IN ('queued','enumerating')",("$state",outcome=="cancelled"?"cancelled":"failed"),("$error",outcome=="cancelled"?"Cancelled":"ScanTerminated"),("$scan",scanId));
                 Execute(c,t,"UPDATE Roots SET scan_state=$state,availability=$availability,last_checked_utc_ticks=$now WHERE root_id=$root AND root_epoch=$epoch",("$state",outcome),("$availability",availability),("$now",DateTime.UtcNow.Ticks),("$root",rootId),("$epoch",epoch));
                 Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan",("$scan",scanId));
+                Execute(c,t,"DELETE FROM temp.ScanBranches WHERE scan_id=$scan",("$scan",scanId));
                 Execute(c,t,"DELETE FROM ScanOwners WHERE scan_id=$scan",("$scan",scanId));
                 Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");t.Commit();return true;
             }).ConfigureAwait(false);
@@ -256,7 +287,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     private static void Queue(SqliteConnection c,SqliteTransaction t,string scan,string id,string path,bool subtree)
     {
         Execute(c,t,"INSERT OR IGNORE INTO DirectoryScans(scan_id,directory_id,state) VALUES($scan,$id,'queued')",("$scan",scan),("$id",id));
-        Execute(c,t,"INSERT OR IGNORE INTO temp.ScanQueue(scan_id,directory_id,relative_path,subtree,path_depth) VALUES($scan,$id,$path,$subtree,$depth)",("$scan",scan),("$id",id),("$path",path),("$subtree",subtree?1:0),("$depth",path.Length==0?0:path.Count(character=>character is '\\' or '/')+1));
+        string branch=ScanPriority.Branch(path);
+        Execute(c,t,"INSERT OR IGNORE INTO temp.ScanBranches(scan_id,branch) VALUES($scan,$branch)",("$scan",scan),("$branch",branch));
+        Execute(c,t,"INSERT OR IGNORE INTO temp.ScanQueue(scan_id,directory_id,relative_path,subtree,path_depth,branch) VALUES($scan,$id,$path,$subtree,$depth,$branch)",("$scan",scan),("$id",id),("$path",path),("$subtree",subtree?1:0),("$depth",path.Length==0?0:path.Count(character=>character is '\\' or '/')+1),("$branch",branch));
     }
     private static void EnsureEpoch(SqliteConnection c,SqliteTransaction t,string root,long epoch)
     {using var cmd=c.CreateCommand();cmd.Transaction=t;cmd.CommandText="SELECT root_epoch FROM Roots WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",root);if((long?)cmd.ExecuteScalar()!=epoch)throw new OperationCanceledException("Root epoch changed.");}
