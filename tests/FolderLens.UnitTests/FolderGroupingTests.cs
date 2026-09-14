@@ -42,6 +42,19 @@ public sealed class FolderGroupingTests
     }
 
     [Fact]
+    public async Task BrowseDepthLimitsGroupedResultsAndStartsAgainAtScopedDirectory()
+    {
+        await using var catalog=await Fixture();
+        var filter=new FilterSpec{RootId="benchmark",MaxFolderLevels=2,Grouping=new(true)};
+        var snapshot=await catalog.CreateSnapshot(filter,1,1);
+        Assert.Equal(new[]{"", "A", "B"},(await catalog.ReadGroups(snapshot.Id)).Select(g=>g.RelativePath).Order());
+        Assert.Equal(3,snapshot.Count);
+        var scoped=await catalog.CreateSnapshot(filter with{DirectoryScope="A"},1,2);
+        Assert.Equal(4,scoped.Count);
+        Assert.Equal(new[]{"A",@"A\X",@"A\Y"},(await catalog.ReadGroups(scoped.Id)).Select(g=>g.RelativePath).Order());
+    }
+
+    [Fact]
     public async Task NonBmpDirectoryNamesUseSqliteCharacterBoundariesForScopeAndExclusion()
     {
         await using var catalog=await Fixture();

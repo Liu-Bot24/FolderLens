@@ -14,8 +14,8 @@ public sealed partial class MainWindow
         if(filter.CollectionId is {} collection)parts.Add("收藏夹："+CollectionLabel(collection));
         if(filter.IncludeCollections.Length>0)parts.Add("包含收藏："+string.Join("、",filter.IncludeCollections.Select(CollectionLabel)));
         if(filter.ExcludeCollections.Length>0)parts.Add("排除收藏："+string.Join("、",filter.ExcludeCollections.Select(CollectionLabel)));
-        Search.PlaceholderText=filter.SearchScope=="nameAndPath"?"搜索文件名或相对路径…":"搜索文件名…";
-        if(!string.IsNullOrWhiteSpace(filter.NamePathQuery))parts.Add((filter.SearchScope=="nameAndPath"?"文件名或路径：":"文件名：")+filter.NamePathQuery);
+        Search.PlaceholderText="搜索文件名…";
+        if(!string.IsNullOrWhiteSpace(filter.NamePathQuery))parts.Add("文件名："+filter.NamePathQuery);
         foreach(var range in filter.Ranges)
         {
             string label=range.Key switch{"logicalBytes"=>"大小","allocatedBytes"=>"占用空间","width"=>"宽度","height"=>"高度","longEdge"=>"长边","shortEdge"=>"短边","pixelCount"=>"像素数","durationMs"=>"时长（毫秒）",_=>range.Key};
@@ -27,7 +27,7 @@ public sealed partial class MainWindow
         if(filter.FileExtensions.Length>0)parts.Add("扩展名："+string.Join("、",filter.FileExtensions.Select(value=>new ExtensionOption(value).Label)));
         if(filter.Raw!="any")parts.Add(filter.Raw=="only"?"仅 RAW":"排除 RAW");
         if(filter.Animation!="any")parts.Add(filter.Animation=="animated"?"仅动图":"仅静态图");
-        if(!filter.Recursive)parts.Add("不穿透子目录");
+        if(filter.CollectionId is null&&filter.MaxFolderLevels is {} levels)parts.Add($"最多查看 {levels} 层（当前文件夹为第 1 层）");
         if(filter.Exclusions.Length>0)parts.Add($"排除 {filter.Exclusions.Length} 个目录规则");
         if(filter.DirectoryRules.Any(r=>r.Enabled))parts.Add($"文件夹筛选：{filter.DirectoryRules.Count(r=>r.Enabled)} 条规则");
         foreach(var date in filter.Dates)

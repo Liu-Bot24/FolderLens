@@ -36,6 +36,8 @@ public sealed partial class MainWindow
             if(enabled is {} value)item.IsEnabled=value;
         }
         CapacityButton.IsEnabled=folder&&activeCollectionId is null;
+        WindowPreviewButton.IsEnabled=FullScreenPreviewButton.IsEnabled=file;
+        BrowseDepthButton.IsEnabled=activeCollectionId is null;
         PreviewFit.IsEnabled=PreviewActual.IsEnabled=PreviewRotate.IsEnabled=CanUseViewerAction(ViewerAction.Fit);
         foreach(var item in viewerActionButtons)item.Button.IsEnabled=CanUseViewerAction(item.Action);
         foreach(var list in new ListViewBase[]{FilesGrid,FilesList})

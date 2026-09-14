@@ -153,7 +153,6 @@ public sealed partial class MainWindow
         Place(Search,narrow?2:compact?1:0,layout==0?3:0,narrow?7:compact?4:1);
         Place(QuickFiltersButton,narrow?3:compact?1:0,narrow?0:4,narrow?2:1);
         Place(DetailsMode,narrow?3:compact?1:0,narrow?2:5,narrow?2:1);
-        Place(LargePreviewButton,narrow?3:compact?1:0,narrow?4:6,narrow?3:1);
     }
     private double GridCardWidth
     {
@@ -187,7 +186,7 @@ public sealed partial class MainWindow
     private async Task ResetBrowserFilters()
     {
         includedCollectionIds=[];excludedCollectionIds=[];UpdateCollectionFilterLabel();
-        suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;SearchPath.IsChecked=false;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
+        suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
         MinSize.Value=MaxSize.Value=MinWidth.Value=MinHeight.Value=double.NaN;suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
     }
     private async void ParentRoot(object sender,RoutedEventArgs e){if(activeCollectionId is not null){ManageCollections(sender,e);return;}var parent=Directory.GetParent(root);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}

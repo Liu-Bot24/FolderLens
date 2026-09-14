@@ -18,6 +18,14 @@ public sealed partial class MainWindow
         await RefreshQuery();await LoadFormatChoices();
         if(FormatPicker is not DropDownButton||FormatOptions.SelectionMode!=ListViewSelectionMode.Multiple)
             throw new InvalidOperationException("格式没有使用可多选的选择控件。");
+        if(FormatPicker.HorizontalContentAlignment!=HorizontalAlignment.Left||FormatChoicesFlyout.Placement!=Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft)
+            throw new InvalidOperationException("格式文字与弹层没有沿左边缘对齐。");
+        if(WindowPreviewButton.Parent!=FullScreenPreviewButton.Parent||!PreviewHeader.Children.Contains((UIElement)WindowPreviewButton.Parent))
+            throw new InvalidOperationException("两种预览入口没有集中在左侧预览区域。");
+        if(!double.IsNaN(PreviewActual.Width)||PreviewActual.MinWidth<48)
+            throw new InvalidOperationException("100%仍使用图标按钮的固定窄宽度。");
+        var legacySearch=CurrentFilter() with{SearchScope="nameAndPath"};ApplySavedFilter(legacySearch);
+        if(CurrentFilter().SearchScope!="name")throw new InvalidOperationException("旧视图仍恢复了路径搜索。");
         var imageOptions=FormatOptions.Items.Cast<ExtensionOption>().ToArray();
         if(imageOptions.Length!=1||imageOptions[0].Extension!="png")throw new InvalidOperationException("图片分类扩展名不正确。");
         FormatOptions.SelectedItems.Add(imageOptions[0]);

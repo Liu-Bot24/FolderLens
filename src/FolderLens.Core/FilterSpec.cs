@@ -31,6 +31,8 @@ public sealed record FilterSpec
     public string[] IncludeCollections { get; init; } = [];
     public string[] ExcludeCollections { get; init; } = [];
     public bool Recursive { get; init; } = true;
+    // View limit only: the selected directory counts as level 1. Null includes all levels.
+    public int? MaxFolderLevels { get; init; }
     public string DirectoryScope { get; init; } = "";
     public bool ScopeDirectFiles { get; init; }
     public string[] Kinds { get; init; } = ["image"];
@@ -66,6 +68,7 @@ public sealed record FilterSpec
         if(IncludeCollections.Distinct(StringComparer.Ordinal).Count()!=IncludeCollections.Length||ExcludeCollections.Distinct(StringComparer.Ordinal).Count()!=ExcludeCollections.Length)throw new ArgumentException("收藏夹筛选不应重复。");
         if(CollectionId is not null&&Grouping.Enabled)throw new ArgumentException("收藏夹浏览不按物理目录分组。");
         Grouping.Validate();
+        if(MaxFolderLevels is <1 or >32767)throw new ArgumentException("查看层级必须是 1 至 32767 的整数，或所有层级。");
         if(FileExtensions.Length>64||FileExtensions.Distinct(StringComparer.Ordinal).Count()!=FileExtensions.Length||FileExtensions.Any(e=>e.Length>255||e!=e.ToLowerInvariant()||e.Any(c=>char.IsControl(c)||"\\/:*?\"<>|".Contains(c))))throw new ArgumentException("扩展名选择无效。");
         _=new DirectoryRuleSet(DirectoryRules);
         if(Extensions.Length>64||Extensions.Any(e=>!Regex.IsMatch(e,"^[a-z0-9][a-z0-9._+-]{0,31}$",RegexOptions.CultureInvariant)))throw new ArgumentException("扩展名筛选无效。");

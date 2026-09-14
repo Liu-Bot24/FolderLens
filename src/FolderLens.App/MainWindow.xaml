@@ -168,7 +168,21 @@
       <Button Style="{StaticResource NavigationButtonStyle}" Grid.Column="4" Click="CancelScan" ToolTipService.ToolTip="停止扫描，保留已发现的文件" AutomationProperties.Name="停止扫描" AutomationProperties.AutomationId="CancelScan"><FontIcon Glyph="&#xE71A;" FontSize="16" /></Button>
       <Button Grid.Column="5" Content="打开文件夹" Click="PickRoot" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" AutomationProperties.AutomationId="OpenFolder" />
       <TextBox x:Name="RootPath" Grid.Column="6" PlaceholderText="选择一个文件夹，透视所有子目录" KeyDown="RootPathKeyDown" ToolTipService.ToolTip="当前文件夹；输入路径后按 Enter 打开（Ctrl+L）" AutomationProperties.AutomationId="RootPath" />
-      <Button x:Name="CapacityButton" Grid.Column="7" Content="目录容量" Click="ShowCapacity" ToolTipService.ToolTip="查看子文件夹大小、占比和排名" AutomationProperties.AutomationId="ShowCapacity" />
+      <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="6">
+        <DropDownButton x:Name="BrowseDepthButton" Content="查看层级：所有层级" ToolTipService.ToolTip="当前文件夹算第 1 层；限制向下显示的层数，不中断后台扫描" AutomationProperties.Name="查看层级">
+          <DropDownButton.Flyout><MenuFlyout Placement="BottomEdgeAlignedLeft">
+            <RadioMenuFlyoutItem Text="所有层级" Tag="all" GroupName="BrowseDepth" IsChecked="True" Click="ChooseBrowseDepth" />
+            <RadioMenuFlyoutItem Text="1 层（仅当前文件夹）" Tag="1" GroupName="BrowseDepth" Click="ChooseBrowseDepth" />
+            <RadioMenuFlyoutItem Text="2 层" Tag="2" GroupName="BrowseDepth" Click="ChooseBrowseDepth" />
+            <RadioMenuFlyoutItem Text="3 层" Tag="3" GroupName="BrowseDepth" Click="ChooseBrowseDepth" />
+            <RadioMenuFlyoutItem Text="4 层" Tag="4" GroupName="BrowseDepth" Click="ChooseBrowseDepth" />
+            <RadioMenuFlyoutItem Text="5 层" Tag="5" GroupName="BrowseDepth" Click="ChooseBrowseDepth" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Text="自定义层数…" Click="CustomBrowseDepth" />
+          </MenuFlyout></DropDownButton.Flyout>
+        </DropDownButton>
+        <Button x:Name="CapacityButton" Content="目录容量" Click="ShowCapacity" ToolTipService.ToolTip="查看子文件夹大小、占比和排名" AutomationProperties.AutomationId="ShowCapacity" />
+      </StackPanel>
     </Grid>
     <Grid x:Name="BodyGrid" Grid.Row="2">
       <Grid.RowDefinitions>
@@ -260,12 +274,11 @@
                     <Grid ColumnSpacing="16" RowSpacing="10">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                      <CheckBox x:Name="SearchPath" Content="同时搜索相对路径" Grid.ColumnSpan="2" />
                       <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="6">
                         <TextBlock Text="格式（扩展名）" />
-                    <DropDownButton x:Name="FormatPicker" Content="全部格式" HorizontalAlignment="Stretch" AutomationProperties.Name="选择文件格式">
+                    <DropDownButton x:Name="FormatPicker" Content="全部格式" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" AutomationProperties.Name="选择文件格式">
                       <DropDownButton.Flyout>
-                        <Flyout x:Name="FormatChoicesFlyout" Opening="OpenFormatChoices" Closed="CloseFormatChoices">
+                        <Flyout x:Name="FormatChoicesFlyout" Placement="BottomEdgeAlignedLeft" Opening="OpenFormatChoices" Closed="CloseFormatChoices">
                           <StackPanel Width="220" Spacing="8">
                             <TextBlock x:Name="FormatChoicesStatus" TextWrapping="Wrap" />
                             <ListView x:Name="FormatOptions" SelectionMode="Multiple" DisplayMemberPath="Label" SelectionChanged="FormatSelectionChanged" MaxHeight="240" AutomationProperties.Name="扩展名，可多选" />
@@ -286,8 +299,7 @@
                       <NumberBox x:Name="MinWidth" Grid.Row="4" Header="最小宽度 · px" Minimum="0" />
                       <NumberBox x:Name="MinHeight" Grid.Row="4" Grid.Column="1" Header="最小高度 · px" Minimum="0" />
                       <CheckBox x:Name="ShowHidden" Grid.Row="5" Content="显示隐藏文件" />
-                      <CheckBox x:Name="Recursive" Grid.Row="5" Grid.Column="1" Content="包含子文件夹" IsChecked="True" />
-                      <CheckBox x:Name="PendingView" Grid.Row="6" Content="查看待判断文件" />
+                      <CheckBox x:Name="PendingView" Grid.Row="6" Content="包含信息尚未读全的文件" ToolTipService.ToolTip="尺寸、格式等信息尚未读全，暂时无法判断是否符合筛选条件的文件也会显示" />
                       <Button x:Name="CollectionFilterButton" Grid.Row="6" Grid.Column="1" Content="收藏标签：不限" Click="ConfigureCollectionFilter" HorizontalAlignment="Stretch" />
                     </Grid>
                   </ScrollViewer>
@@ -304,7 +316,6 @@
             </Button.Flyout>
           </Button>
           <ToggleButton Grid.Column="5" x:Name="DetailsMode" Content="详情" Click="ToggleView" ToolTipService.ToolTip="切换缩略图网格 / 文件详情列表" />
-          <Button x:Name="LargePreviewButton" Grid.Column="6" Content="放大预览" Click="TogglePreview" ToolTipService.ToolTip="在窗口内放大查看所选文件；Esc 返回列表" />
         </Grid>
         <StackPanel Grid.Row="1">
         <InfoBar x:Name="BrowserScanErrorBar" Title="文件夹扫描未完成" Severity="Error" IsOpen="False" IsClosable="False" AutomationProperties.AutomationId="BrowserScanError">
@@ -373,6 +384,10 @@
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel Spacing="2" x:Name="PreviewHeader">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,5">
+            <Button x:Name="WindowPreviewButton" Content="窗口预览" Click="TogglePreview" ToolTipService.ToolTip="在当前窗口内查看所选文件；Esc 返回文件列表" />
+            <Button x:Name="FullScreenPreviewButton" Content="全屏预览" Click="ToggleFullScreen" ToolTipService.ToolTip="全屏查看所选文件（F11）；Esc 返回文件列表" />
+          </StackPanel>
           <Button x:Name="CopyPreviewNameButton" Tag="name" Click="CopyPreviewLabel" IsEnabled="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制文件名" AutomationProperties.Name="复制文件名"><TextBlock x:Name="FileTitle" Text="预览" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /></Button>
           <TextBlock x:Name="PreviewCopyFeedback" Visibility="Collapsed" FontSize="11" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" AutomationProperties.LiveSetting="Polite" />
           <TextBlock x:Name="QualityLabel" Text="单击文件即可查看" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
@@ -380,14 +395,13 @@
         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,5,0,6" x:Name="PreviewActions">
           <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource PreviewActionButtonStyle}" /></StackPanel.Resources>
-          <Button x:Name="PreviewReturn" Width="Auto" MinWidth="100" Padding="8,2" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭放大预览，保留目录和浏览位置（Esc）" />
+          <Button x:Name="PreviewReturn" Width="Auto" MinWidth="100" Padding="8,2" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭窗口预览，保留目录和浏览位置（Esc）" />
           <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
           <Button Click="Next" ToolTipService.ToolTip="下一个文件（PageDown）" AutomationProperties.Name="下一个文件"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
           <Button x:Name="PreviewFit" Width="Auto" MinWidth="64" Padding="6,2" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
-          <Button x:Name="PreviewActual" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
+          <Button x:Name="PreviewActual" Width="Auto" MinWidth="48" Padding="6,2" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
           <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
           <Button x:Name="PreviewExternalPlayer" Content="播放" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用本地播放器打开当前视频" />
-          <Button Click="ToggleFullScreen" ToolTipService.ToolTip="全屏 / 窗口查看（F11）；Esc 返回列表" AutomationProperties.Name="全屏查看"><FontIcon Glyph="&#xE740;" FontSize="16" /></Button>
         </StackPanel>
         </ScrollViewer>
         <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="#20242B">

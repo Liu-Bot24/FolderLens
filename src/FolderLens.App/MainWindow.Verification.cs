@@ -207,11 +207,11 @@ public sealed partial class MainWindow
             if(!ancestor.Children.Any(node=>node.Content is FolderNode item&&item.Path==third))throw new InvalidOperationException("重新展开祖先时，旧索引移除了新出现的兄弟目录。");
             report["ancestorUsesCurrentPhysicalChildren"]=true;
             string shallow=Path.Combine(dataDirectory,"shallow"),nested=Path.Combine(shallow,"nested");Directory.CreateDirectory(nested);await File.WriteAllBytesAsync(Path.Combine(nested,"image.png"),png);
-            Recursive.IsChecked=false;await OpenRoot(shallow);
+            browseDepth=1;UpdateBrowseDepthLabel();await OpenRoot(shallow);
             if(resultHandle?.Count!=0)throw new InvalidOperationException("不递归时错误显示了嵌套图片。");
-            Recursive.IsChecked=true;await ApplyBrowserFilters();
-            if(resultHandle?.Count!=1)throw new InvalidOperationException("开启递归后没有补扫并显示嵌套图片。");
-            report["recursiveEnableScannedChildren"]=true;
+            await ApplyBrowseDepth(null);
+            if(resultHandle?.Count!=1)throw new InvalidOperationException("切换所有层级后没有显示已扫描的嵌套图片。");
+            report["browseDepthReusesScannedChildren"]=true;
             if(viewerPressZoom.Percent!=250||!viewerPressZoom.UsesWholeImage(true)||viewerPressZoom.UsesWholeImage(false))throw new InvalidOperationException("按住放大默认值与模式不匹配。");
             if(SortField.Items.Cast<ComboBoxItem>().Any(item=>Equals(item.Tag,"durationMs")))throw new InvalidOperationException("图片排序仍包含时长。");
             sortDescending=false;UpdateSortDirectionIndicator();if(((RotateTransform)SortDirectionIcon.RenderTransform).Angle!=0)throw new InvalidOperationException("升序指示错误。");

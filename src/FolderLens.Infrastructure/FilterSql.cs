@@ -51,6 +51,11 @@ public static class FilterSql
         string? directoryPrefix=directory.Length==0?null:Param(directory+"\\");
         if(directoryPrefix is not null)Known($"substr(f.relative_path,1,length({directoryPrefix}))={directoryPrefix}");
         if (!filter.Recursive||filter.ScopeDirectFiles) Known(directoryPrefix is null?"instr(f.relative_path,'\\')=0":$"instr(substr(f.relative_path,length({directoryPrefix})+1),'\\')=0");
+        if(filter.CollectionId is null&&filter.MaxFolderLevels is {} levels)
+        {
+            int scopeDepth=directory.Length==0?0:directory.Count(c=>c=='\\')+1;
+            Known($"length(f.relative_path)-length(replace(f.relative_path,'\\',''))<={Param(scopeDepth+levels-1)}");
+        }
         if (!filter.ShowHidden) Known("(f.file_attributes & 2)=0");
         Set("f.kind",filter.Kinds);
         Set("lower(ltrim(f.extension,'.'))",filter.Extensions);
@@ -99,7 +104,8 @@ public static class FilterSql
             string col = date.Clock=="captureWall" ? "f.capture_wall_ticks" : Columns[date.Field];
             Nullable(col,$"{col}>={Param(FilterSpec.DateTicks(date.StartInclusive,date.Clock))} AND {col}<{Param(FilterSpec.DateTicks(date.EndExclusive,date.Clock))}",date.Field == "captured" ? "captureTime" : "");
         }
-        foreach (string word in FilterSpec.Words(filter.NamePathQuery)) Known($"instr(lens_fold({(filter.SearchScope=="name" ? "f.name" : "f.relative_path")}),{Param(word.ToUpperInvariant())})>0");
+        // Old saved views may still carry nameAndPath; search now always means filename.
+        foreach (string word in FilterSpec.Words(filter.NamePathQuery)) Known($"instr(lens_fold(f.name),{Param(word.ToUpperInvariant())})>0");
         foreach (var rule in filter.Exclusions)
         {
             string dir=rule.RelativePath.Replace('/','\\');

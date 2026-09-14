@@ -177,7 +177,7 @@ public sealed partial class MainWindow : Window
         if(!double.IsNaN(MinWidth.Value))ranges["width"]=new(checked((long)MinWidth.Value),ranges.GetValueOrDefault("width")?.Max);
         if(!double.IsNaN(MinHeight.Value))ranges["height"]=new(checked((long)MinHeight.Value),ranges.GetValueOrDefault("height")?.Max);
         string category=Tag(Category);
-        var filter=(advanced??new FilterSpec()) with{RootId=rootId,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=Recursive.IsChecked==true,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope=SearchPath.IsChecked==true?"nameAndPath":"name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
+        var filter=(advanced??new FilterSpec()) with{RootId=rootId,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
     }
     private async void PickRoot(object sender,RoutedEventArgs e)
     {
@@ -225,7 +225,7 @@ public sealed partial class MainWindow : Window
             if(recordHistory&&rootId.Length>0&&!string.Equals(root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??CaptureView());
             if(!preserveDirectoryScope&&!string.Equals(root,path,StringComparison.Ordinal)&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
             DirectoryScopePanel.Visibility=Visibility.Collapsed;
-            activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=Recursive.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
+            activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
             if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
             RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):path;if(!collectionScope)ShowTreeRoot(path);else activeTreeRoot=null;UpdateNavigationButtons();
             browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
@@ -256,7 +256,7 @@ public sealed partial class MainWindow : Window
                 }
             });
             Status.Text="正在扫描；文件总量尚未确定。";
-            bool recursive=Recursive.IsChecked==true;scannedPolicy=CurrentFilter();
+            bool recursive=true;scannedPolicy=CurrentFilter();
             ExclusionSpec[] exclusions=ScanExclusions();
             string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var rootToken=scanStop.Token;
@@ -278,7 +278,7 @@ public sealed partial class MainWindow : Window
     {
         using var operation=browserWork.Enter();if(operation is null)return;
         if(closing||replacingRoot||scanStop.IsCancellationRequested||catalog is null||scanTask is {IsCompleted:false}||!reconcilePending)return;reconcilePending=false;
-        string activeRoot=root,activeId=rootId;long activeEpoch=epoch;bool recursive=Recursive.IsChecked==true;var exclusions=ScanExclusions();
+        string activeRoot=root,activeId=rootId;long activeEpoch=epoch;bool recursive=true;var exclusions=ScanExclusions();
         var rootToken=scanStop.Token;long rootVersion=rootChangeVersion;
         try
         {
