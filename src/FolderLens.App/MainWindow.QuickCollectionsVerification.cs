@@ -73,6 +73,14 @@ public sealed partial class MainWindow
         verifyCollectionDialog=(_,_)=>{dialogs++;return Task.CompletedTask;};
         await QuickCollect(first);if(dialogs!=6)throw new InvalidOperationException("上次收藏夹删除后没有重新选择。");
         verifyCollectionDialog=null;
+        string staleTarget=(await catalog.CreateCollection("旧选择拒绝验证")).Id;
+        lastCollectionTargets=[staleTarget];quickCollectionUsed=true;
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET entry_state='missing',file_version=file_version+1 WHERE entry_id=$id";cmd.Parameters.AddWithValue("$id",first.Item!.EntryId);return cmd.ExecuteNonQuery();});
+        bool staleRejected=false;try{await QuickCollect(first);}catch(IOException){staleRejected=true;}
+        if(!staleRejected||first.IsCollected||(await catalog.ReadCollections()).Single(c=>c.Id==staleTarget).Count!=0)throw new InvalidOperationException("失效缩略图仍显示快捷收藏成功。");
+        await QuickCollect(second);
+        if(!second.IsCollected||(await catalog.ReadCollections()).Single(c=>c.Id==staleTarget).Count!=1)throw new InvalidOperationException("拒绝失效选择后正常快捷收藏不可用。");
+        report["staleQuickSelectionRejectedWithoutFalseStar"]=true;
         // All programmatic focus/activation paths in verification must be inert.
         if(WindowFocus.IsForeground(this)||FocusIfForeground(Search,FocusState.Programmatic)||WindowFocus.MayActivate(this,WindowFocus.Foreground))throw new InvalidOperationException("后台验证可以夺取输入焦点。");
         report["firstCancelDoesNotRemember"]=true;report["nativeStarButtonAndTopRightLayout"]=true;

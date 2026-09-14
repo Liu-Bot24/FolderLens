@@ -64,7 +64,7 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe)
         if(id is null&&!item.Directory)
         {using var previous=c.CreateCommand();previous.Transaction=t;previous.CommandText="SELECT last_version FROM ScanPathVersions WHERE root_id=$root AND relative_path=$path";previous.Parameters.AddWithValue("$root",root);previous.Parameters.AddWithValue("$path",path);return previous.ExecuteScalar() is long last?checked(last+1):1;}
         if(id is null||physical is null||physical==item.PhysicalIdentity)return version;
-        if(item.Directory)RetireTree(c,t,id);else RetireFile(c,t,id);
+        if(item.Directory)RetireTree(c,t,root,id);else RetireFile(c,t,id);
         return checked(version+1);
     }
     private static void RetireFile(SqliteConnection c,SqliteTransaction t,string id)
@@ -73,20 +73,20 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe)
         DirectoryIndexer.Execute(c,t,"INSERT OR IGNORE INTO ScanRetiredStates SELECT 'file',entry_id,entry_state FROM Files WHERE entry_id=$id",("$id",id));
         DirectoryIndexer.Execute(c,t,"UPDATE Files SET canonical_key=relative_path||char(0)||'retired:'||entry_id,entry_state='missing',file_version=file_version+1 WHERE entry_id=$id",("$id",id));
     }
-    private static void TreeIds(SqliteConnection c,SqliteTransaction t,string id)
+    private static void TreeIds(SqliteConnection c,SqliteTransaction t,string root,string id)
     {
         DirectoryIndexer.Execute(c,t,"CREATE TEMP TABLE IF NOT EXISTS ScanTreeIds(id TEXT PRIMARY KEY); DELETE FROM temp.ScanTreeIds;");
-        DirectoryIndexer.Execute(c,t,"WITH RECURSIVE tree(id) AS (SELECT $id UNION ALL SELECT d.directory_id FROM Directories d JOIN tree ON d.parent_id=tree.id) INSERT INTO temp.ScanTreeIds SELECT id FROM tree",("$id",id));
+        DirectoryIndexer.Execute(c,t,"WITH RECURSIVE tree(id) AS (SELECT $id UNION ALL SELECT d.directory_id FROM tree CROSS JOIN Directories d WHERE d.root_id=$root AND d.parent_id=tree.id) INSERT INTO temp.ScanTreeIds SELECT id FROM tree",("$id",id),("$root",root));
     }
-    private static void RetireTree(SqliteConnection c,SqliteTransaction t,string id)
+    private static void RetireTree(SqliteConnection c,SqliteTransaction t,string root,string id)
     {
-        TreeIds(c,t,id);
-        RememberTreeVersions(c,t);
-        DirectoryIndexer.Execute(c,t,"INSERT OR IGNORE INTO ScanRetiredStates SELECT 'file',entry_id,entry_state FROM Files WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds); INSERT OR IGNORE INTO ScanRetiredStates SELECT 'directory',directory_id,entry_state FROM Directories WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds);");
-        DirectoryIndexer.Execute(c,t,"UPDATE Files SET canonical_key=relative_path||char(0)||'retired:'||entry_id,entry_state='missing',file_version=file_version+1 WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds); UPDATE Directories SET canonical_key=relative_path||char(0)||'retired:'||directory_id,entry_state='missing' WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds);");
+        TreeIds(c,t,root,id);
+        RememberTreeVersions(c,t,root);
+        DirectoryIndexer.Execute(c,t,"INSERT OR IGNORE INTO ScanRetiredStates SELECT 'file',entry_id,entry_state FROM Files WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds); INSERT OR IGNORE INTO ScanRetiredStates SELECT 'directory',directory_id,entry_state FROM Directories WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds);",("$root",root));
+        DirectoryIndexer.Execute(c,t,"UPDATE Files SET canonical_key=relative_path||char(0)||'retired:'||entry_id,entry_state='missing',file_version=file_version+1 WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds); UPDATE Directories SET canonical_key=relative_path||char(0)||'retired:'||directory_id,entry_state='missing' WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds);",("$root",root));
     }
     private static void RememberFileVersion(SqliteConnection c,SqliteTransaction t,string id)=>DirectoryIndexer.Execute(c,t,"INSERT INTO ScanPathVersions SELECT root_id,relative_path,file_version FROM Files WHERE entry_id=$id ON CONFLICT(root_id,relative_path) DO UPDATE SET last_version=max(last_version,excluded.last_version)",("$id",id));
-    private static void RememberTreeVersions(SqliteConnection c,SqliteTransaction t)=>DirectoryIndexer.Execute(c,t,"INSERT INTO ScanPathVersions SELECT root_id,relative_path,file_version FROM Files WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds) ON CONFLICT(root_id,relative_path) DO UPDATE SET last_version=max(last_version,excluded.last_version)");
+    private static void RememberTreeVersions(SqliteConnection c,SqliteTransaction t,string root)=>DirectoryIndexer.Execute(c,t,"INSERT INTO ScanPathVersions SELECT root_id,relative_path,file_version FROM Files WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds) ON CONFLICT(root_id,relative_path) DO UPDATE SET last_version=max(last_version,excluded.last_version)",("$root",root));
     public static string IdForPath(SqliteConnection c,SqliteTransaction t,string root,string path,bool directory)
     {
         using var cmd=c.CreateCommand();cmd.Transaction=t;cmd.CommandText=directory?"SELECT directory_id FROM Directories WHERE root_id=$r AND canonical_key=$p":"SELECT entry_id FROM Files WHERE root_id=$r AND canonical_key=$p";cmd.Parameters.AddWithValue("$r",root);cmd.Parameters.AddWithValue("$p",path);
@@ -106,12 +106,12 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe)
         }
         // A directory rename retains every descendant identity and snapshot reference; only paths and sort keys advance.
         string old=move.OldPath;string prefix=old+"\\";
-        using(var target=c.CreateCommand()){target.Transaction=t;target.CommandText="SELECT directory_id FROM Directories WHERE root_id=$root AND canonical_key=$path AND directory_id<>$id";target.Parameters.AddWithValue("$root",root);target.Parameters.AddWithValue("$path",path);target.Parameters.AddWithValue("$id",move.EntryId);if(target.ExecuteScalar() is string occupied)RetireTree(c,t,occupied);}
-        TreeIds(c,t,move.EntryId);
-        RememberTreeVersions(c,t);
-        DirectoryIndexer.Execute(c,t,"UPDATE Files SET relative_path=$new||substr(relative_path,$suffix),canonical_key=$new||substr(relative_path,$suffix),path_sort_key=scan_natural($new||substr(relative_path,$suffix)),path_revision=path_revision+1,entry_state=coalesce((SELECT original_state FROM ScanRetiredStates s WHERE s.kind='file' AND s.entry_id=Files.entry_id),entry_state) WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds)",("$new",path),("$suffix",old.Length+1));
-        DirectoryIndexer.Execute(c,t,"UPDATE Directories SET relative_path=$new||substr(relative_path,$suffix),canonical_key=$new||substr(relative_path,$suffix),path_revision=path_revision+1,parent_id=CASE WHEN directory_id=$id THEN $parent ELSE parent_id END,name=CASE WHEN directory_id=$id THEN $name ELSE name END,entry_state=coalesce((SELECT original_state FROM ScanRetiredStates s WHERE s.kind='directory' AND s.entry_id=Directories.directory_id),entry_state) WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds)",("$new",path),("$suffix",old.Length+1),("$id",move.EntryId),("$parent",parent),("$name",Path.GetFileName(path)));
-        DirectoryIndexer.Execute(c,t,"DELETE FROM ScanRetiredStates WHERE (kind='directory' AND entry_id IN (SELECT id FROM temp.ScanTreeIds)) OR (kind='file' AND entry_id IN (SELECT entry_id FROM Files WHERE directory_id IN (SELECT id FROM temp.ScanTreeIds)))");
+        using(var target=c.CreateCommand()){target.Transaction=t;target.CommandText="SELECT directory_id FROM Directories WHERE root_id=$root AND canonical_key=$path AND directory_id<>$id";target.Parameters.AddWithValue("$root",root);target.Parameters.AddWithValue("$path",path);target.Parameters.AddWithValue("$id",move.EntryId);if(target.ExecuteScalar() is string occupied)RetireTree(c,t,root,occupied);}
+        TreeIds(c,t,root,move.EntryId);
+        RememberTreeVersions(c,t,root);
+        DirectoryIndexer.Execute(c,t,"UPDATE Files SET relative_path=$new||substr(relative_path,$suffix),canonical_key=$new||substr(relative_path,$suffix),path_sort_key=scan_natural($new||substr(relative_path,$suffix)),path_revision=path_revision+1,entry_state=coalesce((SELECT original_state FROM ScanRetiredStates s WHERE s.kind='file' AND s.entry_id=Files.entry_id),entry_state) WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds)",("$root",root),("$new",path),("$suffix",old.Length+1));
+        DirectoryIndexer.Execute(c,t,"UPDATE Directories SET relative_path=$new||substr(relative_path,$suffix),canonical_key=$new||substr(relative_path,$suffix),path_revision=path_revision+1,parent_id=CASE WHEN directory_id=$id THEN $parent ELSE parent_id END,name=CASE WHEN directory_id=$id THEN $name ELSE name END,entry_state=coalesce((SELECT original_state FROM ScanRetiredStates s WHERE s.kind='directory' AND s.entry_id=Directories.directory_id),entry_state) WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds)",("$root",root),("$new",path),("$suffix",old.Length+1),("$id",move.EntryId),("$parent",parent),("$name",Path.GetFileName(path)));
+        DirectoryIndexer.Execute(c,t,"DELETE FROM ScanRetiredStates WHERE (kind='directory' AND entry_id IN (SELECT id FROM temp.ScanTreeIds)) OR (kind='file' AND entry_id IN (SELECT entry_id FROM Files WHERE root_id=$root AND directory_id IN (SELECT id FROM temp.ScanTreeIds)))",("$root",root));
         DirectoryIndexer.Execute(c,t,"UPDATE temp.ScanQueue SET relative_path=$new||substr(relative_path,$suffix) WHERE directory_id IN (SELECT directory_id FROM Directories WHERE root_id=$root) AND (relative_path=$old OR substr(relative_path,1,$length)=$prefix)",("$root",root),("$new",path),("$suffix",old.Length+1),("$old",old),("$length",prefix.Length),("$prefix",prefix));
     }
 }

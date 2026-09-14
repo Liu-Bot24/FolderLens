@@ -8,6 +8,42 @@ namespace FolderLens.UnitTests;
 
 public sealed class ScannerRegressionTests
 {
+    [Fact] public async Task DirectoryRenameWorkDoesNotScaleWithUnrelatedFiles()
+    {
+        string source=Fixture();Directory.CreateDirectory(Path.Combine(source,"A","child"));File.WriteAllText(Path.Combine(source,"A","child","kept.txt"),"rename fixture");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();long epoch=await catalog.OpenRoot("rename-scope",source);
+        var scanner=new DirectoryIndexer(catalog,Worker());await scanner.Scan("rename-scope",source,epoch,true,[],null,CancellationToken.None);
+        async Task<long> MeasureRename(string from,string to)
+        {
+            long steps=0;
+            await catalog.Write(c=>{SQLitePCL.raw.sqlite3_progress_handler(c.Handle,100,_=>{steps++;return 0;},null);return true;});
+            try{Directory.Move(Path.Combine(source,from),Path.Combine(source,to));await scanner.Scan("rename-scope",source,epoch,true,[],null,CancellationToken.None);return steps;}
+            finally{await catalog.Write(c=>{SQLitePCL.raw.sqlite3_progress_handler(c.Handle,0,null,null);return true;});}
+        }
+        long small=await MeasureRename("A","B");
+        await catalog.SeedBenchmark(5000);
+        var current=await catalog.CreateSnapshot(new(){RootId="rename-scope",Kinds=[]},epoch,1);var item=(await catalog.ReadPage(current.Id,0)).Single();string tag=(await catalog.CreateCollection("renamed")).Id;await catalog.ChangeCollectionMembers([tag],[item.EntryId],true);
+        long large=await MeasureRename("B","C");
+        Assert.True(large<small*2+10,$"SQLite progress callbacks (100 VM instructions each): baseline={small}, with 5000 unrelated files={large}");
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+        Assert.Equal(5000,(await catalog.CreateSnapshot(new(){RootId="benchmark"},1,2)).Count);
+    }
+    [Fact] public async Task UnchangedRescanDoesNotRewriteCollectionLocationKeys()
+    {
+        string source=Fixture();File.WriteAllText(Path.Combine(source,"stable.txt"),"scan fixture");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();long epoch=await catalog.OpenRoot("stable",source);
+        var scanner=new DirectoryIndexer(catalog,Worker());await scanner.Scan("stable",source,epoch,true,[],null,CancellationToken.None);
+        var snapshot=await catalog.CreateSnapshot(new(){RootId="stable",Kinds=[]},epoch,1);var item=(await catalog.ReadPage(snapshot.Id,0)).Single();
+        string tag=(await catalog.CreateCollection("stable membership")).Id;await catalog.ChangeCollectionMembers([tag],[item.EntryId],true);
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="CREATE TEMP TABLE LocationWrites(value INTEGER);CREATE TEMP TRIGGER ObserveLocationWrites AFTER UPDATE OF location_key ON Files BEGIN INSERT INTO LocationWrites VALUES(1);END;";return cmd.ExecuteNonQuery();});
+        await scanner.Scan("stable",source,epoch,true,[],null,CancellationToken.None);
+        long writes=await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM LocationWrites";return (long)cmd.ExecuteScalar()!;});
+        Assert.Equal(0,writes);
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+        File.Move(Path.Combine(source,"stable.txt"),Path.Combine(source,"renamed.txt"));
+        await scanner.Scan("stable",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+    }
     [Fact] public async Task ReopeningKnownDirectoryDoesNotResetObservedCaseMode()
     {
         string source=Fixture();File.WriteAllText(Path.Combine(source,"image.jpg"),"scan fixture");

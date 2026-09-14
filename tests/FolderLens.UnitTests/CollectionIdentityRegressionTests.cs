@@ -7,6 +7,29 @@ namespace FolderLens.UnitTests;
 public sealed class CollectionIdentityRegressionTests
 {
     [Theory]
+    [InlineData("volume:file-A",1)]
+    [InlineData("volume:file-B",0)]
+    public async Task IdentityObservationGapPreservesUnknownButNeverTransfersToReplacement(string observed,int expected)
+    {
+        string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();await catalog.SeedBenchmark(1);
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="INSERT INTO ScanDirectoryIdentities VALUES('benchmark-dir','volume:parent');UPDATE Files SET physical_identity='volume:file-A'";return cmd.ExecuteNonQuery();});
+            string tag=(await catalog.CreateCollection("identity gap")).Id;
+            await catalog.ChangeCollectionMembers([tag],["000000000001"],true);
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=NULL";return cmd.ExecuteNonQuery();});
+            Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+            Assert.Null(await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT physical_identity FROM Files";return cmd.ExecuteScalar() is string value?value:null;}));
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=$observed";cmd.Parameters.AddWithValue("$observed",observed);return cmd.ExecuteNonQuery();});
+            Assert.Equal(expected,(await catalog.ReadCollections()).Single().Count);
+        }
+    }
+    [Theory]
     [InlineData(2)]
     [InlineData(3)]
     public async Task CyclicFileRenamesRemoveOldCollectionsWithoutFollowingFiles(int count)

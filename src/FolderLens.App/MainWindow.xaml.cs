@@ -971,7 +971,7 @@ public sealed partial class MainWindow : Window
     {
         if(selected?.Item is null||contentWorker is null)return;
         var documentRow=selected;string document=SourcePath(documentRow),documentRoot=SourceRootPath(documentRow),documentRootId=SourceRootId(documentRow);long documentEpoch=SourceRootEpoch(documentRow);
-        ImageReply? reply=null;bool entered=false,initializing=false;
+        ImageReply? reply=null;bool entered=false,initializing=false;string markdownStage="render";
         try
         {
             await markdownLoadGate.WaitAsync(token);entered=true;if(current!=selection||closing)return;
@@ -1000,7 +1000,7 @@ public sealed partial class MainWindow : Window
             if(markdown is null)
             {
                 initializing=true;markdown=new WebView2();var view=markdown;MarkdownHost.Content=markdown;MarkdownHost.Visibility=Visibility.Visible;
-                string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");var environment=await CoreWebView2Environment.CreateWithOptionsAsync(Directory.Exists(fixedRuntime)?fixedRuntime:null,Path.Combine(dataDirectory,"webview"),null).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);await markdown.EnsureCoreWebView2Async(environment).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);
+                markdownStage="environment";string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");var environment=await CoreWebView2Environment.CreateWithOptionsAsync(Directory.Exists(fixedRuntime)?fixedRuntime:null,Path.Combine(dataDirectory,"webview"),null).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);markdownStage="controller";await markdown.EnsureCoreWebView2Async(environment).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);
                 token.ThrowIfCancellationRequested();var core=markdown.CoreWebView2;core.Settings.IsScriptEnabled=false;core.Settings.AreHostObjectsAllowed=false;core.Settings.IsWebMessageEnabled=false;core.Settings.AreDevToolsEnabled=false;
                 core.NavigationCompleted+=(_,e)=>{if(!ReferenceEquals(markdown,view))return;RecordWebView($"NavigationCompleted success={e.IsSuccess} error={e.WebErrorStatus}");if(e.NavigationId==markdownNavigationId)navigationComplete?.TrySetResult(e.IsSuccess);};
                 core.ProcessFailed+=(_,e)=>
@@ -1023,10 +1023,10 @@ public sealed partial class MainWindow : Window
                 };
                 initializing=false;
             }
-            if(current!=selection)return;markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 远程资源已阻止";}
+            if(current!=selection)return;markdownStage="navigation";markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 远程资源已阻止";}
         }
         catch(OperationCanceledException){if(entered&&initializing)ReleaseMarkdownView();}
-        catch(Exception ex){if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"已切换完整原文模式：{ex.Message}";}}
+        catch(Exception ex){RecordWebView($"MarkdownFailure stage={markdownStage} type={ex.GetType().Name}");if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"已切换完整原文模式：{ex.Message}";}}
         finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;UpdateReaderControls();ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}

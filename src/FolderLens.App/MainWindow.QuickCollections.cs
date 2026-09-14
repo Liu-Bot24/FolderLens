@@ -32,7 +32,7 @@ public sealed partial class MainWindow
             {await CollectFiles(row);return;}
             using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);stop.CancelAfter(TimeSpan.FromSeconds(30));
             var targets=lastCollectionTargets.ToArray();
-            int added=await catalog.ChangeCollectionMembers(targets,[item.EntryId],true,stop.Token);
+            int added=await catalog.ChangeCollectionItems(targets,[item],true,stop.Token);
             RefreshCollectionBadges();row.SetCollected(true);await RefreshCollectionsTree();
             Status.Text=(added==0?"已在收藏夹中：":"已收藏到：")+string.Join("、",targets.Select(CollectionLabel));
             if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
