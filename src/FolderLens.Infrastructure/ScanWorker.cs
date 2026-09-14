@@ -169,7 +169,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         foreach(string arg in new[]{"serve",pipeName,instance,nonce})info.ArgumentList.Add(arg);
         try
         {
-            process=Process.Start(info)??throw new IOException("无法启动目录扫描进程。");job=new WorkerJob(256L*1024*1024);job.Assign(process);
+            process=Process.Start(info)??throw new IOException("无法启动目录扫描进程。");job=new WorkerJob(256L*1024*1024);job.Assign(process);BackgroundProcessPriority.Apply(process);
             var connected=pipe.WaitForConnectionAsync(cancellation);
             var exited=process.WaitForExitAsync(cancellation);
             if(await Task.WhenAny(connected,exited).ConfigureAwait(false)==exited)

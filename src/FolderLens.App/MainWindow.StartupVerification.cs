@@ -16,6 +16,7 @@ public sealed partial class MainWindow
     {
         if(!Environment.GetCommandLineArgs().Contains("--verify-startup-profile"))return;
         FolderLens.Infrastructure.DatabaseExecutor.OperationMeasured=(name,ms)=>startupDatabase.AddOrUpdate(name,(1,ms,ms),(_,prior)=>(prior.Count+1,prior.Total+ms,Math.Max(prior.Maximum,ms)));
+        FolderLens.Infrastructure.CatalogStore.OperationMigrationMeasured=(name,ms)=>startupDatabase.AddOrUpdate("migration."+name,(1,ms,ms),(_,prior)=>(prior.Count+1,prior.Total+ms,Math.Max(prior.Maximum,ms)));
         startupClock=Stopwatch.StartNew();startupHeartbeat=DispatcherQueue.CreateTimer();startupHeartbeat.Interval=TimeSpan.FromMilliseconds(16);
         startupHeartbeat.Tick+=(_,_)=>
         {

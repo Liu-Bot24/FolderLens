@@ -82,13 +82,17 @@ function Invoke-LoggedProcess {
     $LogBase = Resolve-ProjectPath $LogBase
     New-Item -ItemType Directory -Force -Path (Split-Path $LogBase -Parent) | Out-Null
     $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $FilePath
-    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    if(-not ('FolderLensLoggedProcessJob' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'LoggedProcessJob.cs')}
+    $job=New-Object FolderLensLoggedProcessJob
+    $commandArguments=($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.FileName = Get-ScriptShell
+    $start.Arguments = (@('-NoProfile','-File',(Join-Path $PSScriptRoot 'Invoke-SupervisedProcess.ps1')) | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
     $start.WorkingDirectory = $WorkingDirectory
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = $true
     $start.EnvironmentVariables.Clear()
     foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
         $start.EnvironmentVariables[$entry.Key.ToUpperInvariant()] = $entry.Value
@@ -99,15 +103,20 @@ function Invoke-LoggedProcess {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $outFile = [IO.File]::Create($LogBase + '.stdout.log')
     $errFile = [IO.File]::Create($LogBase + '.stderr.log')
-    $code=-1; $peak=0; $timedOut=$false; $failure=$null; $started=$false
+    $code=-1; $peak=0; $timedOut=$false; $failure=$null; $started=$false; $stdout=$null; $stderr=$null
     try {
         if (-not $process.Start()) { throw "Could not start $FilePath" }
         $started=$true
+        $job.Assign($process)
         $stdout = $process.StandardOutput.BaseStream.CopyToAsync($outFile)
         $stderr = $process.StandardError.BaseStream.CopyToAsync($errFile)
+        $configuration=@{executable=$FilePath;arguments=$commandArguments;workingDirectory=$WorkingDirectory} | ConvertTo-Json -Compress
+        $process.StandardInput.Write($configuration)
+        $process.StandardInput.Close()
         if(-not $process.WaitForExit($TimeoutSeconds*1000)) {
             $timedOut=$true
-            Stop-LoggedProcessTree $process
+            $job.Terminate()
+            if(-not $process.WaitForExit(5000)){throw 'Supervised process did not exit after job termination.'}
         }
         $peak = $process.PeakWorkingSet64
         $drained=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr))
@@ -115,15 +124,22 @@ function Invoke-LoggedProcess {
         $code = if($timedOut){124}else{$process.ExitCode}
     } catch {
         $failure=$_.Exception.ToString();$code=if($timedOut){124}else{1}
-        if($started -and -not $process.HasExited) {
-            try { Stop-LoggedProcessTree $process }
+        if($started) {
+            try {
+                $job.Terminate()
+                if(-not $process.WaitForExit(5000)){throw 'Launcher did not exit after job termination.'}
+                if($stdout -and $stderr){
+                    $drained=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr))
+                    if(-not $drained.Wait(5000)){throw 'Output remained open after job termination.'}
+                }
+            }
             catch { $failure+="`nProcess tree cleanup failed: "+$_.Exception.ToString() }
         }
-    } finally { $outFile.Dispose(); $errFile.Dispose(); $process.Dispose() }
+    } finally { $job.Dispose(); $outFile.Dispose(); $errFile.Dispose(); $process.Dispose() }
     $watch.Stop()
     $result = [ordered]@{ executable=$FilePath; arguments=$Arguments; workingDirectory=$WorkingDirectory;
         startedUtc=$began.ToString('o'); elapsedMs=$watch.Elapsed.TotalMilliseconds; exitCode=$code;
-        processPeakWorkingSetBytes=$peak; stdout=$LogBase+'.stdout.log'; stderr=$LogBase+'.stderr.log';
+        launcherPeakWorkingSetBytes=$peak; stdout=$LogBase+'.stdout.log'; stderr=$LogBase+'.stderr.log';
         timeoutSeconds=$TimeoutSeconds; timedOut=$timedOut; failure=$failure }
     Write-JsonFile $result ($LogBase + '.command.json')
     Write-Host ("{0}: exit {1}; logs {2}.*" -f [IO.Path]::GetFileName($FilePath),$code,$LogBase)

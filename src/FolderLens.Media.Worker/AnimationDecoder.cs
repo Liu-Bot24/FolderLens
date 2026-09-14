@@ -51,7 +51,7 @@ internal sealed class AnimationDecoder : IDisposable
         if(checked((long)outputWidth*outputHeight*4)>128*1024*1024)throw new InvalidDataException("Animation frame exceeds memory budget.");
         frameBuffer=new byte[checked(outputWidth*outputHeight*4)];apngReadIndex=0;
         var start=new ProcessStartInfo(AnimationFrameRenderer.FfmpegExecutable()){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=AppContext.BaseDirectory};
-        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-i",path,"-an","-vf",$"scale={outputWidth}:{outputHeight}","-threads","2","-filter_threads","1","-fps_mode","passthrough","-pix_fmt","rgba","-f","rawvideo","pipe:1"})start.ArgumentList.Add(argument);
+        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-threads",Math.Max(1,NetVips.NetVips.Concurrency-2).ToString(System.Globalization.CultureInfo.InvariantCulture),"-i",path,"-an","-vf",$"scale={outputWidth}:{outputHeight}","-threads","1","-filter_threads","1","-fps_mode","passthrough","-pix_fmt","rgba","-f","rawvideo","pipe:1"})start.ArgumentList.Add(argument);
         process=Process.Start(start)??throw new IOException("APNG decoder unavailable.");
         var activeProcess=process;
         logTask=Task.Run(async()=>{var text=new StringBuilder();char[] buffer=new char[2048];int read;while((read=await activeProcess.StandardError.ReadAsync(buffer))>0)if(text.Length<16384)text.Append(buffer,0,Math.Min(read,16384-text.Length));return text.ToString();});

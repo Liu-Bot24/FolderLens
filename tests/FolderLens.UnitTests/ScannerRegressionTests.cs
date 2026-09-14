@@ -201,11 +201,20 @@ public sealed class ScannerRegressionTests
         File.WriteAllText(Path.Combine(source,"old","sub","photo.jpg"),"photo");File.WriteAllText(Path.Combine(source,"first.jpg"),"linked");Assert.True(CreateHardLinkW(Path.Combine(source,"alias.jpg"),Path.Combine(source,"first.jpg"),IntPtr.Zero));
         await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);var scanner=new DirectoryIndexer(catalog,Worker());
         await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);var before=await Entries();
+        string collection=(await catalog.CreateCollection("rename semantics")).Id;
+        await catalog.ChangeCollectionMembers([collection],before.Values.Select(value=>value.Id).ToArray(),true);
+        Assert.Equal(3,(await catalog.ReadCollections()).Single().Count);
         Directory.Move(Path.Combine(source,"old"),Path.Combine(source,"renamed"));File.Move(Path.Combine(source,"first.jpg"),Path.Combine(source,"moved.jpg"));File.WriteAllText(Path.Combine(source,"first.jpg"),"new occupant");
         await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);var after=await Entries();
         Assert.Equal(4,after.Count);Assert.Equal(before[@"old\sub\photo.jpg"].Id,after[@"renamed\sub\photo.jpg"].Id);Assert.True(after[@"renamed\sub\photo.jpg"].PathRevision>1);
         Assert.Equal(before["first.jpg"].Id,after["moved.jpg"].Id);Assert.Equal(before["alias.jpg"].Id,after["alias.jpg"].Id);Assert.NotEqual(after["moved.jpg"].Id,after["alias.jpg"].Id);Assert.NotEqual(after["moved.jpg"].Id,after["first.jpg"].Id);
         Assert.Equal(after["alias.jpg"].Physical,after["moved.jpg"].Physical);
+        var collected=await catalog.CreateSnapshot(new(){RootId="collection:"+collection,CollectionId=collection,Kinds=[]},epoch,1);
+        Assert.Equal("alias.jpg",Assert.Single(await catalog.ReadPage(collected.Id,0)).RelativePath);
+        // An unavailable root is not evidence that its files were deleted.
+        Directory.Move(source,source+"-offline");
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
         Task<Dictionary<string,(string Id,long PathRevision,string? Physical)>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id,path_revision,physical_identity FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,(string,long,string?)>();while(rows.Read())result.Add(rows.GetString(0),(rows.GetString(1),rows.GetInt64(2),rows.IsDBNull(3)?null:rows.GetString(3)));return result;});
     }
     [Fact] public async Task DirtyReconciliationIsScopedAndCannotAcknowledgeNewerEvents()

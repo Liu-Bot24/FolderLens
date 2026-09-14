@@ -25,7 +25,8 @@ public sealed partial class MainWindow
             bool? enabled=(item.Tag as string) switch
             {
                 "CopyPath" or "CopyFileReference" or "Reveal" or "ExternalOpen" or "ShowProperties"=>file,
-                "RefreshRoot" or "AdvancedFilters" or "FillMetadata" or "SaveView" or "ShowCapacity"=>folder,
+                "RefreshRoot" or "AdvancedFilters" or "FillMetadata" or "SaveView"=>folder,
+                "ShowCapacity"=>folder&&activeCollectionId is null,
                 "TogglePreview"=>file||immersive,
                 "ToggleFullScreen"=>file||fullScreen,
                 "ToggleSlideshow"=>CanUseViewerAction(ViewerAction.Slideshow),
@@ -34,6 +35,7 @@ public sealed partial class MainWindow
             };
             if(enabled is {} value)item.IsEnabled=value;
         }
+        CapacityButton.IsEnabled=folder&&activeCollectionId is null;
         PreviewFit.IsEnabled=PreviewActual.IsEnabled=PreviewRotate.IsEnabled=CanUseViewerAction(ViewerAction.Fit);
         foreach(var item in viewerActionButtons)item.Button.IsEnabled=CanUseViewerAction(item.Action);
         foreach(var list in new ListViewBase[]{FilesGrid,FilesList})

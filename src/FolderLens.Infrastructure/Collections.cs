@@ -53,22 +53,6 @@ public sealed partial class CatalogStore
             """;
         command.ExecuteNonQuery();transaction.Commit();
     }
-    private static void RepairCollectionDirectoryTrigger(SqliteConnection connection)
-    {
-        using var command=connection.CreateCommand();
-        command.CommandText="SELECT sql FROM sqlite_master WHERE type='trigger' AND name='Directories_Location_Update'";
-        if(command.ExecuteScalar() is string sql&&sql.Contains("root_id=NEW.root_id AND directory_id=NEW.directory_id",StringComparison.Ordinal))return;
-        // A trigger-only v4 repair: no data rewrite or format change. The DDL is
-        // atomic, remains readable by v4 builds, and reuses the existing index.
-        using var transaction=connection.BeginTransaction();command.Transaction=transaction;
-        command.CommandText="""
-            DROP TRIGGER IF EXISTS Directories_Location_Update;
-            CREATE TRIGGER Directories_Location_Update AFTER UPDATE OF case_mode ON Directories WHEN OLD.case_mode<>NEW.case_mode BEGIN
-                UPDATE Files SET location_key=lens_location((SELECT display_path FROM Roots WHERE root_id=Files.root_id),relative_path,NEW.case_mode) WHERE root_id=NEW.root_id AND directory_id=NEW.directory_id;
-            END;
-            """;
-        command.ExecuteNonQuery();transaction.Commit();
-    }
     private static string CollectionName(string name)
     {
         name=name.Trim();if(name.Length is <1 or >100||name.Any(char.IsControl))throw new ArgumentException("收藏夹名称须为 1–100 个字符。");return name;
@@ -119,6 +103,7 @@ public sealed partial class CatalogStore
         {cancellation.ThrowIfCancellationRequested();command.Parameters["$collection"].Value=collection;command.Parameters["$entry"].Value=entry;changed+=command.ExecuteNonQuery();}
         cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;
     },cancellation);
+    internal const string CollectionSelectionRowsSql="FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i CROSS JOIN Files f WHERE i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count') AND f.entry_id=i.entry_id";
     public Task<int> ChangeCollectionSelection(string[] collectionIds,string sessionId,IReadOnlyList<OrdinalRange> ranges,bool add,CancellationToken cancellation=default)=>writer.Execute(c=>
     {
         if(collectionIds.Length is <1 or >64||ranges.Count>8192)throw new ArgumentException("收藏选择范围无效。");
@@ -128,11 +113,14 @@ public sealed partial class CatalogStore
             using var transaction=c.BeginTransaction();using var command=c.CreateCommand();command.Transaction=transaction;
             command.CommandText="SELECT count(*) FROM collection_selection.ResultSessions WHERE session_id=$session AND state='ready' AND active_leases>0";command.Parameters.AddWithValue("$session",sessionId);
             if((long)command.ExecuteScalar()!!=1)throw new IOException("所选结果已关闭，请重新选择。");
-            string selectedRows="FROM collection_selection.ResultItems i JOIN Files f ON i.entry_id=f.entry_id WHERE i.session_id=$session AND EXISTS(SELECT 1 FROM json_each($ranges) j WHERE i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count'))";
-            string selected="SELECT f.location_key "+selectedRows;
-            command.Parameters.AddWithValue("$ranges",System.Text.Json.JsonSerializer.Serialize(ranges));command.Parameters.AddWithValue("$collection","");command.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
-            command.CommandText=add?$"INSERT INTO CollectionMembers SELECT $collection,f.location_key,min(f.entry_id),$now {selectedRows} GROUP BY f.location_key ON CONFLICT(collection_id,location_key) DO NOTHING":$"DELETE FROM CollectionMembers WHERE collection_id=$collection AND location_key IN({selected})";
+            command.CommandText="SELECT coalesce(max(ordinal)+1,0) FROM collection_selection.ResultItems WHERE session_id=$session";
+            long total=(long)command.ExecuteScalar()!;
+            command.Parameters.AddWithValue("$ranges",System.Text.Json.JsonSerializer.Serialize(OrdinalSelection.Normalize(ranges,total)));command.Parameters.AddWithValue("$collection","");command.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
+            command.CommandText="CREATE TEMP TABLE SelectedCollectionLocations(location_key TEXT PRIMARY KEY,entry_id TEXT NOT NULL); INSERT INTO temp.SelectedCollectionLocations SELECT f.location_key,min(f.entry_id) "+CollectionSelectionRowsSql+" GROUP BY f.location_key";
+            command.ExecuteNonQuery();
+            command.CommandText=add?"INSERT INTO CollectionMembers SELECT $collection,location_key,entry_id,$now FROM temp.SelectedCollectionLocations WHERE true ON CONFLICT(collection_id,location_key) DO NOTHING":"DELETE FROM CollectionMembers WHERE collection_id=$collection AND location_key IN(SELECT location_key FROM temp.SelectedCollectionLocations)";
             int changed=0;foreach(string id in collectionIds.Distinct()){cancellation.ThrowIfCancellationRequested();command.Parameters["$collection"].Value=id;changed+=command.ExecuteNonQuery();}
+            command.CommandText="DROP TABLE temp.SelectedCollectionLocations";command.ExecuteNonQuery();
             cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;
         }
         finally{Execute(c,"DETACH DATABASE collection_selection");}

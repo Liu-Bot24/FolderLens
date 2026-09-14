@@ -49,6 +49,7 @@ public sealed partial class MainWindow
     }
     private async void ManageCollections(object sender,RoutedEventArgs args)
     {
+        using var work=browserWork.Enter();if(work is null||closing)return;
         try
         {
             await RefreshCollectionsTree();
@@ -60,15 +61,15 @@ public sealed partial class MainWindow
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏夹",Content=panel,PrimaryButtonText="打开所选",CloseButtonText="关闭",IsPrimaryButtonEnabled=false};
             list.SelectionChanged+=(_,_)=>{var c=list.SelectedItem as FileCollection;name.Text=c?.Name??"";rename.IsEnabled=remove.IsEnabled=dialog.IsPrimaryButtonEnabled=c is not null;remove.Content="删除收藏夹";};
             async Task Reload(string? select=null){await RefreshCollectionsTree();list.ItemsSource=fileCollections;list.SelectedItem=fileCollections.FirstOrDefault(c=>c.Id==select);}
-            create.Click+=async(_,_)=>{try{var created=await catalog!.CreateCollection(name.Text,lifetime.Token);await Reload(created.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
-            rename.Click+=async(_,_)=>{if(list.SelectedItem is not FileCollection c)return;try{await catalog!.RenameCollection(c.Id,name.Text,lifetime.Token);await Reload(c.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
+            create.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing)return;try{var created=await catalog!.CreateCollection(name.Text,lifetime.Token);await Reload(created.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
+            rename.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;try{await catalog!.RenameCollection(c.Id,name.Text,lifetime.Token);await Reload(c.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
             remove.Click+=async(_,_)=>
             {
-                if(list.SelectedItem is not FileCollection c)return;
+                using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;
                 if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="仅删除收藏夹及其收藏归属，原文件保留。再次点击确认。";return;}
-                try{await catalog!.DeleteCollection(c.Id,lifetime.Token);RefreshCollectionBadges();await Reload();if(activeCollectionId==c.Id)await RefreshQuery();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
+                try{await DeleteCollectionAndRefresh(c.Id);await Reload();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
             };
-            if(await dialog.ShowAsync()==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
+            if(await ShowCollectionDialog(dialog)==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
     }
@@ -90,6 +91,7 @@ public sealed partial class MainWindow
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏所选文件",Content=panel,PrimaryButtonText="加入收藏夹",SecondaryButtonText="从所选收藏夹移除",CloseButtonText="取消"};
             async Task<bool> Change(bool add)
             {
+                using var submission=browserWork.Enter();if(submission is null||closing)return false;
                 dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=false;
                 try
                 {
@@ -111,13 +113,14 @@ public sealed partial class MainWindow
             }
             async Task Click(bool add,ContentDialogButtonClickEventArgs e){e.Cancel=true;var deferral=e.GetDeferral();try{e.Cancel=!await Change(add);}finally{deferral.Complete();}}
             dialog.PrimaryButtonClick+=async(_,e)=>await Click(true,e);dialog.SecondaryButtonClick+=async(_,e)=>await Click(false,e);
-            if(verifyCollectionDialog is not null)await verifyCollectionDialog(dialog,Change);else await dialog.ShowAsync();
+            if(verifyCollectionDialog is not null)await verifyCollectionDialog(dialog,Change);else await ShowCollectionDialog(dialog);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
         finally{if(retained)await store.ReleaseSnapshot(handle!.Id);}
     }
     private async void ConfigureCollectionFilter(object sender,RoutedEventArgs args)
     {
+        using var work=browserWork.Enter();if(work is null||closing)return;
         FilterFlyout.Hide();
         try
         {
@@ -129,11 +132,38 @@ public sealed partial class MainWindow
             var left=new StackPanel{Spacing=8};left.Children.Add(new TextBlock{Text="包含任一所选收藏夹"});left.Children.Add(include);
             var right=new StackPanel{Spacing=8};right.Children.Add(new TextBlock{Text="排除任一所选收藏夹"});right.Children.Add(exclude);Grid.SetColumn(right,1);grid.Children.Add(left);grid.Children.Add(right);
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="按收藏标签筛选",Content=grid,PrimaryButtonText="应用",SecondaryButtonText="清除收藏筛选",CloseButtonText="取消"};
-            var answer=await dialog.ShowAsync();if(answer==ContentDialogResult.None)return;
+            var answer=await ShowCollectionDialog(dialog);if(answer==ContentDialogResult.None)return;
             includedCollectionIds=answer==ContentDialogResult.Primary?include.SelectedItems.Cast<FileCollection>().Select(c=>c.Id).ToArray():[];
             excludedCollectionIds=answer==ContentDialogResult.Primary?exclude.SelectedItems.Cast<FileCollection>().Select(c=>c.Id).ToArray():[];
             UpdateCollectionFilterLabel();await ApplyBrowserFilters();
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
+    }
+    private async Task DeleteCollectionAndRefresh(string id)
+    {
+        using var work=browserWork.Enter();if(work is null||closing||catalog is null)return;
+        await catalog.DeleteCollection(id,lifetime.Token);
+        bool affected=activeCollectionId==id||includedCollectionIds.Contains(id)||excludedCollectionIds.Contains(id);
+        includedCollectionIds=includedCollectionIds.Where(value=>value!=id).ToArray();
+        excludedCollectionIds=excludedCollectionIds.Where(value=>value!=id).ToArray();
+        RefreshCollectionBadges();await RefreshCollectionsTree();
+        if(affected)await RefreshQuery(preserveViewport:true);
+    }
+    private async Task<ContentDialogResult> ShowCollectionDialog(ContentDialog dialog)
+    {
+        lifetime.Token.ThrowIfCancellationRequested();
+        // Async database work must not bring a dialog into another application's
+        // active input session. Present it when our window next gains foreground.
+        if(!WindowFocus.IsForeground(this))
+        {
+            var foreground=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void ActivatedAgain(object sender,WindowActivatedEventArgs args){if(WindowFocus.IsForeground(this))foreground.TrySetResult();}
+            Activated+=ActivatedAgain;
+            try{if(WindowFocus.IsForeground(this))foreground.TrySetResult();await foreground.Task.WaitAsync(lifetime.Token);}
+            finally{Activated-=ActivatedAgain;}
+        }
+        lifetime.Token.ThrowIfCancellationRequested();
+        using var cancel=lifetime.Token.Register(()=>DispatcherQueue.TryEnqueue(()=>dialog.Hide()));
+        return await dialog.ShowAsync();
     }
 }

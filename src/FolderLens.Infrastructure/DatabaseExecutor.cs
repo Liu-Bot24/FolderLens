@@ -40,6 +40,7 @@ public sealed class DatabaseExecutor : IAsyncDisposable
         {
             connection.Open();
             connection.CreateFunction("lens_location",(string? root,string relative,string mode)=>root is null?null:CatalogStore.LocationKey(root,relative,mode),true);
+            connection.CreateFunction("lens_file_location",(string root,string relative,string mode,string? parent,string? file,string entry)=>CatalogStore.FileLocationKey(root,relative,mode,parent,file,entry),true);
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=FILE; PRAGMA cache_size=-32768; PRAGMA journal_size_limit=4194304;";
             command.ExecuteNonQuery();

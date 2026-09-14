@@ -12,8 +12,11 @@ public static class LocalResourceRules
         string decoded=Uri.UnescapeDataString(url);
         if(Uri.TryCreate(decoded,UriKind.Absolute,out _) || decoded.StartsWith('\\') || decoded.Contains(':') || decoded.Split('/','\\').Any(p=>p==".."))throw new UnauthorizedAccessException("不允许此 Markdown 资源路径。");
         string candidate=Path.GetFullPath(Path.Combine(Path.GetDirectoryName(document)!,decoded.Replace('/',Path.DirectorySeparatorChar)));
+        if(FileAllocation.IsDeferred((long)File.GetAttributes(candidate)))throw new UnauthorizedAccessException("内嵌图片仅在线；请先单独打开并确认读取该图片。");
         using var rootHandle=CreateFileW(Path.GetFullPath(root),0,7,IntPtr.Zero,3,0x02000000,IntPtr.Zero);if(rootHandle.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error());
-        using var imageHandle=File.OpenHandle(candidate,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+        // Metadata-only, no-recall handle. Resolving the boundary must not itself
+        // read content or cause an online placeholder to download.
+        using var imageHandle=CreateFileW(candidate,0,7,IntPtr.Zero,3,0x02100000,IntPtr.Zero);if(imageHandle.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error());
         string actualRoot=FinalName(rootHandle).TrimEnd('\\'),actualImage=FinalName(imageHandle);
         if(!actualImage.StartsWith(actualRoot+"\\",StringComparison.Ordinal))throw new UnauthorizedAccessException("Markdown 图片不在当前根目录内。");
         string extension=Path.GetExtension(actualImage).ToLowerInvariant();if(extension is not (".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp"))throw new NotSupportedException("该格式不用于 Markdown 内嵌预览。");

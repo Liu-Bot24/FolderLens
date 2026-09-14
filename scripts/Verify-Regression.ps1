@@ -12,8 +12,8 @@ $exe=Join-Path $AppRoot 'FolderLens.App.exe'
 if(-not(Test-Path -LiteralPath $exe -PathType Leaf)){throw 'Application entry is missing.'}
 $cases=@(
  'scan-audit-r2','scan-audit-r3','scan-audit-r4-empty','scan-audit-r4-results','scan-audit-r4-busy',
- 'thumbnail-priority','menu-availability','browser-status','collections','quick-collections','startup-profile','capacity-ui','format-choices','filter-panel','navigation-roots','tree-current-folder','wheel-distance','prefetch-adoption','prefetch-turnaround','prepared-cache',
- 'fit-lock','press-gesture','filmstrip','viewer-information','selection-appearance','directory-filter',
+ 'thumbnail-priority','menu-availability','browser-status','collections','quick-collections','pro-feedback','startup-profile','capacity-ui','format-choices','filter-panel','navigation-roots','tree-current-folder','wheel-distance','prefetch-adoption','prefetch-turnaround','prepared-cache',
+ 'fit-lock','press-gesture','filmstrip','viewer-information','selection-appearance','directory-filter','collection-markdown','collection-pending-close',
  'audio-recovery','video-card','keyboard-completion','preview-close','preview-pending-close',
  'root-from-viewer','selection-race','slide-tick-race','slide-error'
 )

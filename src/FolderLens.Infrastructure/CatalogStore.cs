@@ -57,16 +57,19 @@ public sealed partial class CatalogStore : IAsyncDisposable
         sessionPath=Path.Combine(dataDirectory,"sessions.sqlite");
         sessionReader=new(sessionPath);
     }
-    public async Task Initialize(CancellationToken cancellation=default)
+    public async Task Initialize(CancellationToken cancellation=default,Action<string>? progress=null)
     {
-        await writer.Execute(c=>InitializeSchema(c,"catalog"),cancellation);
-        await sessionReader.Execute(c=>InitializeSchema(c,"sessions"),cancellation);
+        await writer.Execute(c=>InitializeSchema(c,"catalog",cancellation,progress),cancellation);
+        await sessionReader.Execute(c=>InitializeSchema(c,"sessions",cancellation,progress),cancellation);
         await sessionReader.Execute(c=>Execute(c,"UPDATE ResultSessions SET active_leases=0; UPDATE ResultSessions SET state='failed',error_code='Interrupted',completed_utc_ticks=$now WHERE state='building'",("$now",DateTime.UtcNow.Ticks)),cancellation);
     }
-    private static bool InitializeSchema(SqliteConnection c,string name)
+    private static bool InitializeSchema(SqliteConnection c,string name,CancellationToken cancellation,Action<string>? progress)
     {
+        // Backups and migrations can touch a large local catalog. This synchronous
+        // scope lowers CPU, I/O and memory priority without suspending the work.
+        using var background=new BackgroundThreadScope();
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";long version=(long)cmd.ExecuteScalar()!;
-        long supported=4;
+        long supported=name=="catalog"?5:4;
         if(version>supported)throw new InvalidDataException("数据库由较新版本创建，请使用匹配版本。");
         bool existing=version!=0;
         if(version==0)
@@ -136,8 +139,8 @@ public sealed partial class CatalogStore : IAsyncDisposable
                 PRAGMA user_version=3;
                 """;cmd.ExecuteNonQuery();migration.Commit();version=3;
         }
-        if(version==3)MigrateCollections(c,name,existing);
-        if(name=="catalog")RepairCollectionDirectoryTrigger(c);
+        if(version==3){MigrateCollections(c,name,existing);version=4;}
+        if(name=="catalog"&&version==4)MigrateCollectionLocations(c,existing,cancellation,progress);
         return true;
     }
     public Task<long> OpenRoot(string rootId,string path,CancellationToken cancellation=default)=>writer.Execute(c=>

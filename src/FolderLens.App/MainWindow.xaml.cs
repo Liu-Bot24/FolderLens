@@ -110,7 +110,17 @@ public sealed partial class MainWindow : Window
             await InitializeNavigationTree();
             StartupStage("navigation");
             if(args.Contains("--verify-refresh")&&args.Contains("--verify-navigation-roots"))VerifyInitialNavigation();
-            catalog=await Task.Run(async()=>{var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));await store.Initialize(lifetime.Token);return store;});
+            catalog=await Task.Run(async()=>
+            {
+                var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));
+                try
+                {
+                    await store.Initialize(lifetime.Token,message=>DispatcherQueue.TryEnqueue(()=>{if(!closing)Status.Text=message;}));
+                    return store;
+                }
+                catch{await store.DisposeAsync();throw;}
+            });
+            if(closing)return;
             StartupStage("catalog");
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
             await RefreshCollectionsTree();
@@ -873,7 +883,7 @@ public sealed partial class MainWindow : Window
         if(operation is null||closing||results is not {} source)return;
         if(refresh)propertyRefreshPending.Add(row);
         if(!propertyRequests.Add(row))return;
-        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,scanStop.Token);
+        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var token=request.Token;string id=rootId;bool slot=false;
         try
         {
@@ -959,7 +969,8 @@ public sealed partial class MainWindow : Window
     private async void ToggleMarkdown(object sender,RoutedEventArgs e){if(MarkdownHost.Visibility==Visibility.Visible){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;}else if(selected is not null&&selected.Kind=="markdown")await LoadMarkdown(selection,selectionStop.Token);UpdateReaderControls();}
     private async Task LoadMarkdown(long current,CancellationToken token)
     {
-        if(selected?.Item is null||contentWorker is null)return;string document=SourcePath(selected);
+        if(selected?.Item is null||contentWorker is null)return;
+        var documentRow=selected;string document=SourcePath(documentRow),documentRoot=SourceRootPath(documentRow),documentRootId=SourceRootId(documentRow);long documentEpoch=SourceRootEpoch(documentRow);
         ImageReply? reply=null;bool entered=false,initializing=false;
         try
         {
@@ -971,11 +982,14 @@ public sealed partial class MainWindow : Window
             {
                 token.ThrowIfCancellationRequested();try
                 {
-                    string path=await prefetchSourceProbe.ResolveImage(root,document,resource.GetProperty("relativeUrl").GetString()!,token);
-                    var image=await thumbnailWorker!.Request(path,"thumbnail",new(rootId,epoch,generation,current,1,1),new(1024,1024),token);
+                    string path=await prefetchSourceProbe.ResolveImage(documentRoot,document,resource.GetProperty("relativeUrl").GetString()!,token);
+                    var imageStamp=await prefetchSourceProbe.Read(path,token);
+                    var image=await thumbnailWorker!.Request(path,"thumbnail",new(documentRootId,documentEpoch,generation,current,1,1),new(1024,1024),token,imageStamp);
                     try
                     {
-                        if(current!=selection)return;long bytes=new FileInfo(image.AssetPath!).Length,pixels=1024L*1024;
+                        if(current!=selection)return;
+                        if(await prefetchSourceProbe.Read(path,token)!=imageStamp)throw new IOException("Markdown 图片已发生变化。");
+                        long bytes=new FileInfo(image.AssetPath!).Length,pixels=1024L*1024;
                         if(resourceBytes+bytes>32L*1024*1024||resourcePixels+pixels>32L*1024*1024){Status.Text="Markdown 图片达到预览预算，其余图片未加载。";break;}
                         markdownImages[resource.GetProperty("token").GetString()!]=await File.ReadAllBytesAsync(image.AssetPath!,token);resourceBytes+=bytes;resourcePixels+=pixels;if(++resourceIndex>=200)break;
                     }
