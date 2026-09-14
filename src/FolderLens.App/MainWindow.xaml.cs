@@ -104,9 +104,11 @@ public sealed partial class MainWindow : Window
         try
         {
             string[] args=Environment.GetCommandLineArgs();bool deployedVerification=args.Contains("--verify-refresh")&&args.Contains("--verify-deployed");dataDirectory=InitialDataDirectory??await AppPaths.DataDirectory(args);
+            await InitializeNavigationTree();
+            if(args.Contains("--verify-refresh")&&args.Contains("--verify-navigation-roots"))VerifyInitialNavigation();
             catalog=await Task.Run(async()=>{var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));await store.Initialize(lifetime.Token);return store;});
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
-            await InitializeNavigationTree();
+            await RefreshCollectionsTree();
             await RestoreDesktop();
             string worker=Path.Combine(AppContext.BaseDirectory,"workers","FolderLens.Media.Worker.exe");
             if(!deployedVerification&&!File.Exists(worker))
@@ -217,7 +219,7 @@ public sealed partial class MainWindow : Window
             scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             if(collectionScope){root=path;rootId=path;epoch=requested;}
             else {var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token);if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;}
-            if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path);
+            if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
             if(resultHandle is {} oldHandle)await catalog.ReleaseSnapshot(oldHandle.Id);
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;

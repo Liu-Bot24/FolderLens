@@ -92,6 +92,8 @@ public sealed partial class MainWindow
         UpdateGroupNotice();SyncPressZoomSelector();
         PreviewFilePath.Text=selected?.RelativePath??"";
         PreviewFilePath.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
+        CopyPreviewNameButton.IsEnabled=selected is not null;
+        CopyPreviewPathButton.Visibility=PreviewFilePath.Visibility;
         bool video=selected?.Kind=="video",picture=selected?.Kind=="image";
         UpdateViewerLockToggle();
         PreviewReturn.Visibility=immersive&&!fullScreen?Visibility.Visible:Visibility.Collapsed;

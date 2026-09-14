@@ -30,8 +30,12 @@ public sealed partial class MainWindow
     private readonly List<FolderLens.Infrastructure.WorkerClient> extraThumbnailWorkers=[];
     private int thumbnailWorkCount;
     private readonly TaskCompletionSource thumbnailsIdle=new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private sealed record FolderNode(string Path,string Label,string? CatalogRoot=null,string Relative="",string BasePath="",long? PageOffset=null)
-    { public override string ToString()=>Label; }
+    private sealed record FolderNode(string Path,string Label,string? CatalogRoot=null,string Relative="",string BasePath="",long? PageOffset=null,string? Icon=null):INavigationNodePresentation
+    {
+        public string NavigationLabel=>Label;
+        public string NavigationGlyph=>Icon??(PageOffset is not null?"\uE8AB":"\uE8B7");
+        public override string ToString()=>Label;
+    }
     private sealed record DesktopState(double ThumbnailSize=144,bool ShowPaths=false,double SidebarWidth=300,bool Details=false);
     private bool gridShowPaths;
     private void UpdatePathPresentationControl()

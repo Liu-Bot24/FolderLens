@@ -49,6 +49,12 @@ public sealed partial class CapacityWindow
         if(directory!="A"||!parent.IsEnabled||files.Text!="12")throw new InvalidOperationException("看板下钻结果错误。");
         Navigate("");await work;
         if((ranking.SelectedItem as CapacityDisplayRow)?.Value.RelativePath!="A")throw new InvalidOperationException("返回上层没有恢复目录选择。");
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Roots SET scan_state='cancelled' WHERE root_id=$root; UPDATE SchemaInfo SET catalog_revision=catalog_revision+1";cmd.Parameters.AddWithValue("$root",rootId);return cmd.ExecuteNonQuery();});
+        await CheckForUpdates();await work;
+        if(!state.Text.Contains("扫描已取消"))throw new InvalidOperationException("取消的扫描没有明确显示终止状态。");
+        var unfinished=((IEnumerable<CapacityDisplayRow>)ranking.ItemsSource).Single(row=>row.Value.RelativePath=="B");
+        if(unfinished.Size=="0 B"||unfinished.Percent=="0.0%")throw new InvalidOperationException("不完整统计把未统计目录显示为确定的零容量。");
+        result["cancelledStateAutoUpdated"]=true;result["unfinishedZeroNotPresentedAsEmpty"]=true;
         scope.SelectedIndex=1;await work;
         if(files.Text!="12"||!state.Text.Contains("筛选结果"))throw new InvalidOperationException("固定筛选结果统计没有显示。");
         result["fileCount"]=12;result["themeChangeRetainedRows"]=true;result["drillReturnAndSnapshotScope"]=true;result["status"]="PASS";

@@ -2,6 +2,7 @@
   <Grid x:Name="Shell" Language="zh-CN" KeyboardAcceleratorPlacementMode="Hidden" RequestedTheme="Default" Background="{ThemeResource BrowserChromeBrush}" KeyDown="ViewerKeyDown" AllowDrop="True" DragOver="FilesDragOver" Drop="FilesDrop">
     <Grid.Resources>
       <ResourceDictionary>
+      <local:NavigationNodeConverter x:Key="NavigationNodeConverter" />
       <Style x:Key="ViewerPanelStyle" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource BrowserSurfaceBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource BrowserLineBrush}" />
@@ -181,8 +182,18 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid Padding="12,6,8,4"><TextBlock Text="文件夹" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" /><Button Content="★ 收藏夹" HorizontalAlignment="Right" Click="ManageCollections" /></Grid>
-        <TreeView x:Name="FolderTree" Grid.Row="1" Expanding="ExpandFolder" ItemInvoked="InvokeFolder" SelectionMode="Single" AutomationProperties.AutomationId="FolderTree" />
+        <Grid Padding="12,6,8,4"><TextBlock Text="文件夹" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" /><Button Style="{StaticResource NavigationButtonStyle}" HorizontalAlignment="Right" Click="ManageCollections" ToolTipService.ToolTip="管理收藏夹" AutomationProperties.Name="管理收藏夹"><FontIcon Glyph="&#xE734;" FontSize="16" /></Button></Grid>
+        <TreeView x:Name="FolderTree" Grid.Row="1" Expanding="ExpandFolder" ItemInvoked="InvokeFolder" SelectionMode="Single" CanDragItems="False" CanReorderItems="False" AutomationProperties.AutomationId="FolderTree">
+          <TreeView.Resources><Thickness x:Key="TreeViewItemPresenterPadding">0,2,0,2</Thickness><Thickness x:Key="TreeViewItemPresenterMargin">4,1</Thickness></TreeView.Resources>
+          <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="MinHeight" Value="30" /><Setter Property="Padding" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></TreeView.ItemContainerStyle>
+          <TreeView.ItemTemplate><DataTemplate>
+            <Grid ColumnSpacing="10" MinHeight="20" ToolTipService.ToolTip="{Binding Content, Converter={StaticResource NavigationNodeConverter}}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="20" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <FontIcon Glyph="{Binding Content, Converter={StaticResource NavigationNodeConverter}, ConverterParameter=glyph}" FontFamily="{ThemeResource SymbolThemeFontFamily}" FontSize="16" Width="20" />
+              <TextBlock Grid.Column="1" Text="{Binding Content, Converter={StaticResource NavigationNodeConverter}}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </Grid>
+          </DataTemplate></TreeView.ItemTemplate>
+        </TreeView>
       </Grid>
       <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="2" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
         <Border Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
@@ -314,6 +325,17 @@
             <Grid x:Name="DetailsHeader" Padding="8,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" HorizontalAlignment="Left" />
           </ScrollViewer>
           <ListView x:Name="FilesList" SizeChanged="ClipBrowserViewport" Grid.Row="1" SelectionMode="Extended" ItemTemplate="{StaticResource DetailRow}" SelectionChanged="SelectFile" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollMode="Enabled" AutomationProperties.AutomationId="FileList">
+            <ListView.Resources><ResourceDictionary><ResourceDictionary.ThemeDictionaries>
+              <ResourceDictionary x:Key="Light">
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#CFE4FF" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#BDD9FA" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#A9CCF5" />
+              </ResourceDictionary>
+              <ResourceDictionary x:Key="Dark">
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#174A78" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#205E94" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#2469A3" />
+              </ResourceDictionary>
+              <ResourceDictionary x:Key="HighContrast">
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="{ThemeResource SystemColorHighlightColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="{ThemeResource SystemColorHighlightColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+              </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries></ResourceDictionary></ListView.Resources>
             <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
             <ListView.GroupStyle><GroupStyle HidesIfEmpty="False"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8" Background="Transparent" RightTapped="FolderGroupContext"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Click="ToggleFolderGroup" VerticalAlignment="Top" Padding="6" ToolTipService.ToolTip="{Binding ToggleLabel}" AutomationProperties.Name="{Binding ToggleLabel}"><FontIcon Glyph="{Binding ToggleGlyph}" FontSize="12" /></Button><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListView.GroupStyle>
             <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="0" /><Setter Property="MinHeight" Value="32" /></Style></ListView.ItemContainerStyle>
@@ -347,7 +369,8 @@
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel Spacing="2" x:Name="PreviewHeader">
-          <TextBlock x:Name="FileTitle" Text="预览" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <Button x:Name="CopyPreviewNameButton" Tag="name" Click="CopyPreviewLabel" IsEnabled="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制文件名" AutomationProperties.Name="复制文件名"><TextBlock x:Name="FileTitle" Text="预览" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /></Button>
+          <TextBlock x:Name="PreviewCopyFeedback" Visibility="Collapsed" FontSize="11" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" AutomationProperties.LiveSetting="Polite" />
           <TextBlock x:Name="QualityLabel" Text="单击文件即可查看" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
         </StackPanel>
         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
@@ -377,7 +400,7 @@
           <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
         </local:ViewerSurface>
         <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
-          <TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" Visibility="Collapsed" ToolTipService.ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.Name="文件路径" />
+          <Button x:Name="CopyPreviewPathButton" Tag="path" Click="CopyPreviewLabel" Visibility="Collapsed" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制完整文件路径" AutomationProperties.Name="复制完整文件路径"><TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.Name="文件路径" /></Button>
           <StackPanel x:Name="FrameTools" Visibility="Collapsed" Orientation="Horizontal" Spacing="6">
             <Button x:Name="AnimationButton" Visibility="Collapsed" Content="暂停动图" Click="ToggleAnimation" />
             <Button x:Name="ReplayAnimationButton" Visibility="Collapsed" Content="从头重播" Click="ReplayAnimation" />

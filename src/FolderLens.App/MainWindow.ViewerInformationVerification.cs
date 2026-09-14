@@ -36,6 +36,7 @@ public sealed partial class MainWindow
         SetViewerMenuNotice(false);await Task.Delay(100);
         if(viewerMenuOpen||viewerGroupNotice.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("菜单关闭后路径仍显示。");
         if(FormatViewerExif(new(){State="ready"}).Contains("Fixture"))throw new InvalidOperationException("无 EXIF 图片混入旧信息。");
+        VerifyPreviewCopy(report);
         fullScreen=false;report["jpegExifReadAndDisplayed"]=true;report["relativePath"]=true;report["menuNoticeLifecycleHandlers"]=true;report["foregroundPopupInteraction"]="NOT_RUN";report["status"]="PASS";
     }
 }
