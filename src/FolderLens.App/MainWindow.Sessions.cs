@@ -66,7 +66,16 @@ public sealed partial class MainWindow
             else await OpenRoot(saved.Root,recordHistory:recordHistory,previousView:previous,preserveDirectoryScope:true);
             await TryRestoreBrowserView();
         }
-        finally{if(revision==viewRestoreRevision)restoringView=false;}
+        finally
+        {
+            if(revision==viewRestoreRevision)
+            {
+                restoringView=false;
+                // A fast metadata pass may have finished while restoration held
+                // query publication. Drain once more after releasing that gate.
+                if(activeCollectionId is not null&&requestedRoot==rootChangeVersion&&!closing)_=StartMetadataRefresh();
+            }
+        }
     }
     private async Task TryRestoreBrowserView()
     {
@@ -80,7 +89,7 @@ public sealed partial class MainWindow
             long? anchorOrdinal=saved.ScrollAnchorPath is {Length:>0} anchor?await catalog.FindOrdinal(handle.Id,anchor,lifetime.Token):null;
             if(revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion||query!=generation||sourceResults!=results)return;
             // A partial first scan may not yet contain the saved file. Retry on its next snapshot.
-            if(scanTask is {IsCompleted:false}&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
+            if((scanTask is {IsCompleted:false}||metadataTask is {IsCompleted:false})&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
             pendingViewRestore=null;
             if(selectedOrdinal is not null&&saved.Preview is {} preview&&saved.SelectedPath is {} previewPath)pendingPreviewRestore=new(preview,previewPath,requestedRoot);
             if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);list.SelectedItem=row;}

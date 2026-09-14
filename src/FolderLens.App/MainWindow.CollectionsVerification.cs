@@ -29,7 +29,11 @@ public sealed partial class MainWindow
         foreach(var item in rows)if(await catalog.FindOrdinal(resultHandle.Id,Path.Combine(item.SourceRootPath!,item.RelativePath))!=item.Ordinal)throw new InvalidOperationException("不同目录的同名文件定位混淆。");
         report["phase"]="previewAcrossRoots";
         await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="DELETE FROM FieldStates WHERE entry_id IN(SELECT f.entry_id FROM Files f JOIN CollectionMembers m ON m.location_key=f.location_key WHERE m.collection_id=$collection);UPDATE Files SET display_width=NULL,display_height=NULL,long_edge=NULL,short_edge=NULL,pixel_count=NULL WHERE kind='image'";command.Parameters.AddWithValue("$collection",collection.Id);return command.ExecuteNonQuery();});
-        await StartMetadataRefresh();
+        await RestoreSavedView(new SavedView("collection:"+collection.Id,new(){RootId="collection:"+collection.Id,CollectionId=collection.Id,Ranges=new(){["width"]=new(64,null)}},null,0,false));
+        if(metadataTask is null)throw new InvalidOperationException("恢复收藏筛选未自动启动元数据补充。");
+        await metadataTask;
+        if(results?.Count!=3)throw new InvalidOperationException("收藏尺寸筛选未自动发布补充结果。");
+        await OpenCollection(collection.Id);
         foreach(var item in rows.Where(i=>i.Kind=="image"))if((await catalog.ReadFileProperties(item.SourceRootId!,item.EntryId,item.Version))?.Width!=64)throw new InvalidOperationException("收藏来源元数据未补全。");
         foreach(int index in Enumerable.Range(0,results!.Count))
         {
@@ -47,8 +51,9 @@ public sealed partial class MainWindow
         if(target.Path!=Path.Combine(b,"结案.pptx"))throw new InvalidOperationException("收藏文档的外部打开路径不正确。");
         await OpenCollection(collection.Id);await NavigateHistory(false); // Return to prior collection view with its filters.
         report["phase"]="normalDirectoryExclusion";ApplySavedFilter(new(){RootId=rootId,Kinds=[],ExcludeCollections=[excluded.Id]});await OpenRoot(b);await RefreshQuery();if(results?.Count!=2)throw new InvalidOperationException("普通目录排除收藏标签失败。");
-        report["phase"]="knownMissing";await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET entry_state='missing' WHERE root_id=$root AND kind='text'";command.Parameters.AddWithValue("$root",rootId);return command.ExecuteNonQuery();});
-        await OpenCollection(collection.Id);rows=await catalog.ReadPage(resultHandle!.Id,0);textIndex=Array.FindIndex(rows.ToArray(),i=>i.Kind=="text");
+        report["phase"]="knownMissing";await OpenCollection(collection.Id);
+        File.Delete(Path.Combine(b,"结案.txt"));await RefreshCurrentRoot();
+        rows=await catalog.ReadPage(resultHandle!.Id,0);textIndex=Array.FindIndex(rows.ToArray(),i=>i.Kind=="text");
         if(textIndex!=-1||results!.Count!=4)throw new InvalidOperationException("确认不存在的文件未从收藏中移除。");
         var choices=new ListView{ItemsSource=fileCollections,DisplayMemberPath="Name",SelectionMode=ListViewSelectionMode.Multiple,MaxHeight=240,MinWidth=380};
         var name=new TextBox{Header="或新建收藏夹",MaxLength=100,PlaceholderText="输入收藏夹名称"};
