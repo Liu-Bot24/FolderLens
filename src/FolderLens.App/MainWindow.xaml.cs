@@ -604,36 +604,20 @@ public sealed partial class MainWindow : Window
         verifyPreviewStage?.Invoke(cached is null?"prefetchMiss":"prefetchHit");
         if(current!=selection||cancellation.IsCancellationRequested)return;
         if(cached is not null){await PresentPrefetched(cached,current,cancellation);if(current!=selection||cancellation.IsCancellationRequested)return;message=cached.Message;}
-        if(raw)
+        if(cached is null)
         {
-            if(cached is null)
-            {
-                try{var embedded=await previewWorker!.Request(path,"rawEmbedded",Context(row,current),new(width,height),cancellation,Stamp(row));await PresentFit(embedded,current,cancellation);}
-                catch(Exception ex) when(CanRetainRawPreview(ex)){if(current==selection)QualityLabel.Text="没有可用的相机预览，正在读取 RAW 原图…";}
-            }
-            if(current==selection&&rawPreviewOnly)QualityLabel.Text="相机内嵌预览 · 正在读取 RAW 原图…";
+            var reply=raw
+                ?await RawPreview.Open(operation=>previewWorker!.Request(path,operation,Context(row,current),new(width,height),cancellation,Stamp(row)))
+                :await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
+            message=reply.Message;
+            verifyPreviewStage?.Invoke("workerFit");
+            // Display first. Metadata writes do not gate the loading indicator.
+            await PresentFit(reply,current,cancellation);
+            if(current!=selection||cancellation.IsCancellationRequested)return;
+            verifyPreviewStage?.Invoke("presented");
+            _=RecordPreviewMetadata(row,reply,current,cancellation);
         }
-        if(raw||cached is null)
-        {
-            try
-            {
-                var reply=await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
-                verifyPreviewStage?.Invoke("workerFit");
-                await RecordMetadata(row,reply,cancellation);
-                verifyPreviewStage?.Invoke("metadataSaved");
-                if(row.Kind!="image")
-                {
-                    await previewWorker.ReleaseAsset(reply);
-                    if(current==selection){ClearImage();ImageCanvas.Visibility=Visibility.Collapsed;QualityLabel.Text=$"{row.Detail} · 请用其他应用打开此文件。";}
-                    return;
-                }
-                await PresentFit(reply,current,cancellation);message=reply.Message;
-                verifyPreviewStage?.Invoke("presented");
-            }
-            catch(Exception ex) when(raw&&rawPreviewOnly&&current==selection&&CanRetainRawPreview(ex))
-            {QualityLabel.Text="相机内嵌预览 · RAW 原图无法读取："+UserMessages.Error(ex);SchedulePrefetch(current);return;}
-        }
-        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(message!.Quality=="rawDeveloped"?"RAW 原图 · 适应窗口":"清晰适应屏幕")}";}
+        if(current==selection){await EnsureFitResolution(row,current,cancellation);QualityLabel.Text=$"{sourceWidth:N0} × {sourceHeight:N0} · {(rawPreviewOnly?"相机预览":message!.Quality=="rawDeveloped"?"RAW 原图 · 适应窗口":"清晰适应屏幕")}";}
         if(current==selection)
         {
             var metadata=message!.Metadata!.Value;bool animated=metadata.GetProperty("isAnimated").GetBoolean();imagePageCount=animated?1:metadata.GetProperty("pages").GetInt32();FrameTools.Visibility=animated||imagePageCount>1?Visibility.Visible:Visibility.Collapsed;AnimationButton.Visibility=ReplayAnimationButton.Visibility=animated?Visibility.Visible:Visibility.Collapsed;PreviousPageButton.Visibility=NextPageButton.Visibility=ImagePageLabel.Visibility=animated?Visibility.Collapsed:Visibility.Visible;ImagePageLabel.Text=$"1 / {imagePageCount}";
@@ -642,16 +626,27 @@ public sealed partial class MainWindow : Window
         }
     }
     private static bool CanRetainRawPreview(Exception error)=>MediaPreviewFallback.CanRetainRawPreview(error);
-    private async Task<bool> EnsureDevelopedRaw(FileRow row,long current,CancellationToken token)
+    private async Task RecordPreviewMetadata(FileRow row,ImageReply reply,long current,CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();if(current!=selection)return false;if(!rawPreviewOnly)return true;
+        using var work=browserWork.Enter();if(work is null||closing)return;
         try
         {
-            QualityLabel.Text="正在重新读取 RAW 原图…";
-            var reply=await previewWorker!.Request(SourcePath(row),"fit",Context(row,current),new(Math.Max(256,(int)(ImageCanvas.ActualWidth*Shell.XamlRoot.RasterizationScale)),Math.Max(256,(int)(ImageCanvas.ActualHeight*Shell.XamlRoot.RasterizationScale))),token,Stamp(row));
-            await PresentFit(reply,current,token);return current==selection&&!rawPreviewOnly;
+            await RecordMetadata(row,reply,token);
+            if(current==selection&&row.Kind!="image")
+            {ClearImage();ImageCanvas.Visibility=Visibility.Collapsed;QualityLabel.Text=$"{row.Detail} · 请用其他应用打开此文件。";}
         }
-        catch(Exception ex) when(current==selection&&rawPreviewOnly&&CanRetainRawPreview(ex)){QualityLabel.Text="相机内嵌预览 · 原图仍不可用："+UserMessages.Error(ex);return false;}
+        catch(OperationCanceledException){}
+        catch(Exception error){if(current==selection&&!closing)ShowError(error);}
+    }
+    private async Task EnsureEmbeddedRawResolution(FileRow row,long current,CancellationToken token,bool nativeSize=false)
+    {
+        if(!rawPreviewOnly||fitBitmap is null)return;
+        double scale=nativeSize||zoom>0?1:EffectiveScale()*Shell.XamlRoot.RasterizationScale;
+        int width=Math.Clamp((int)Math.Ceiling(sourceWidth*Math.Min(1,scale)),1,16384);
+        int height=Math.Clamp((int)Math.Ceiling(sourceHeight*Math.Min(1,scale)),1,16384);
+        if(fitBitmap.SizeInPixels.Width+1>=width&&fitBitmap.SizeInPixels.Height+1>=height)return;
+        var reply=await previewWorker!.Request(SourcePath(row),"rawEmbedded",Context(row,current),new(width,height),token,Stamp(row));
+        await PresentFit(reply,current,token);
     }
     private async Task AdvanceAnimation(bool open)
     {
@@ -797,7 +792,7 @@ public sealed partial class MainWindow : Window
         if(!await tileGate.WaitAsync(0)){tileReloadPending=true;return;}tileReloadPending=false;
         try
         {
-            if(rawPreviewOnly&&!await EnsureDevelopedRaw(selected,current,token))return;
+            if(rawPreviewOnly){await EnsureEmbeddedRawResolution(selected,current,token);if(current==selection)QualityLabel.Text=$"相机预览 · {zoom*Shell.XamlRoot.RasterizationScale:P0} · {sourceWidth:N0} × {sourceHeight:N0}";return;}
             if(current!=selection||token.IsCancellationRequested)return;
             tileReloadPending=false; // The range below includes any viewport changes during RAW development.
             var range=ImageViewport.VisibleTiles(sourceWidth,sourceHeight,ImageCanvas.ActualWidth,ImageCanvas.ActualHeight,EffectiveScale(),pan.X,pan.Y,rotation);
@@ -1026,16 +1021,18 @@ public sealed partial class MainWindow : Window
                 {
                     string path=await prefetchSourceProbe.ResolveImage(documentRoot,document,resource.GetProperty("relativeUrl").GetString()!,token);
                     var imageStamp=await prefetchSourceProbe.Read(path,token);
-                    var image=await thumbnailWorker!.Request(path,"thumbnail",new(documentRootId,documentEpoch,generation,current,1,1),new(1024,1024),token,imageStamp);
+                    await thumbnailSlots.WaitAsync(token);
+                    var imageWorker=thumbnailPool.Dequeue();ImageReply? image=null;
                     try
                     {
+                        image=await imageWorker.Request(path,"thumbnail",new(documentRootId,documentEpoch,generation,current,1,1),new(1024,1024),token,imageStamp);
                         if(current!=selection)return;
                         if(await prefetchSourceProbe.Read(path,token)!=imageStamp)throw new IOException("Markdown 图片已发生变化。");
                         long bytes=new FileInfo(image.AssetPath!).Length,pixels=1024L*1024;
                         if(resourceBytes+bytes>32L*1024*1024||resourcePixels+pixels>32L*1024*1024){Status.Text="此文档的图片较多，部分图片未加载。";break;}
                         markdownImages[resource.GetProperty("token").GetString()!]=await File.ReadAllBytesAsync(image.AssetPath!,token);resourceBytes+=bytes;resourcePixels+=pixels;if(++resourceIndex>=200)break;
                     }
-                    finally{await thumbnailWorker.ReleaseAsset(image);}
+                    finally{try{if(image is not null)await imageWorker.ReleaseAsset(image);}finally{thumbnailPool.Enqueue(imageWorker);thumbnailSlots.Release();}}
                 }
                 catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or NotSupportedException or TimeoutException){if(current==selection&&!closing)Status.Text="部分 Markdown 图片无法显示；已保留文档内容。";}
             }
@@ -1074,7 +1071,7 @@ public sealed partial class MainWindow : Window
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
     private void Navigate(int delta){int count=results?.Count??firstPageSequence.Length;if(count==0)return;int index=selected is null?(delta<0?count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,count-1);var row=results is not null?(FileRow)results[index]!:firstPageSequence[index];RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(row);}}
     private void Previous(object sender,RoutedEventArgs e)=>Navigate(-1);private void Next(object sender,RoutedEventArgs e)=>Navigate(1);
-    private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;var data=new DataPackage();data.SetText(SourcePath(selected));Clipboard.SetContent(data);}
+    private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;try{writePreviewClipboard(SourcePath(selected));}catch(Exception error){ShowError(error);}}
     private void Reveal(object sender,RoutedEventArgs e){if(selected is null)return;var start=new ProcessStartInfo("explorer.exe"){UseShellExecute=false};start.ArgumentList.Add("/select,"+SourcePath(selected));try{Process.Start(start);}catch(Exception ex){ShowError(ex);}}
     private async void ExternalOpen(object sender,RoutedEventArgs e)
     {

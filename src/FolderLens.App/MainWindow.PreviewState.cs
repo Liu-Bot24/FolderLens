@@ -43,7 +43,8 @@ public sealed partial class MainWindow
     private async Task EnsureFitResolution(FileRow row,long current,CancellationToken cancellation)
     {
         using var operation=browserWork.Enter();if(operation is null||closing)return;
-        if(fitBitmap is null||rawPreviewOnly||!animationNeedsOpen||sourceWidth<=0||sourceHeight<=0||zoom>0||row.Kind!="image")return;
+        if(rawPreviewOnly){await EnsureEmbeddedRawResolution(row,current,cancellation);return;}
+        if(fitBitmap is null||!animationNeedsOpen||sourceWidth<=0||sourceHeight<=0||zoom>0||row.Kind!="image")return;
         double raster=Shell.XamlRoot.RasterizationScale,scale=EffectiveScale()*raster;var actual=fitBitmap.SizeInPixels;
         // Upscaling cannot reveal more detail than the original pixels.
         if(actual.Width+1>=Math.Min(sourceWidth,sourceWidth*scale)&&actual.Height+1>=Math.Min(sourceHeight,sourceHeight*scale))return;
