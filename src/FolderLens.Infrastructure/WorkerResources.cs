@@ -115,22 +115,25 @@ public sealed class WorkerResources
             {try{using var process=Process.GetProcessById(pid);Measure(process);}catch(ArgumentException){}}
             long soft=Math.Min(6L<<30,memory.Total/8),hard=Math.Min(8L<<30,memory.Total/4),safety=Math.Max(512L<<20,memory.Total/32);
             bool pressure=total>=soft||memory.Available<safety;
-            Lease[] cancel;
-            lock(sync)
-            {
-                snapshot=new(total,memory.Available,soft,hard,active.Count(a=>a.Priority==WorkerPriority.Foreground),active.Count(a=>a.Priority!=WorkerPriority.Foreground),pending.Count,cpuThreads,pressure,complete);
-                cancel=pressure?active.Where(a=>a.Priority>=WorkerPriority.Prefetch).ToArray():[];Dispatch();
-            }
-            // Cancellation callbacks can stop jobs and re-enter the coordinator.
-            foreach(var lease in cancel)lease.RequestPressureCancellation();
+            ObserveMemory(total,memory.Available,soft,hard,pressure,complete);
             WorkerJob.SetAggregateLimit(Math.Max(128L<<20,hard-Math.Max(0,total-WorkerBytes(workers))));
-            if(pressure)MemoryPressure?.Invoke();
         }
         catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or OverflowException)
         {
             lock(sync)snapshot=snapshot with{MeasurementComplete=false,UnderPressure=true};
         }
         finally{Volatile.Write(ref monitoring,0);}
+    }
+    internal void ObserveMemory(long total,long available,long soft,long hard,bool pressure,bool complete)
+    {
+        Lease[] cancel;
+        lock(sync)
+        {
+            snapshot=new(total,available,soft,hard,active.Count(a=>a.Priority==WorkerPriority.Foreground),active.Count(a=>a.Priority!=WorkerPriority.Foreground),pending.Count,cpuThreads,pressure,complete);
+            cancel=pressure?active.Where(a=>a.Priority>=WorkerPriority.Prefetch).ToArray():[];Dispatch();
+        }
+        foreach(var lease in cancel)lease.RequestPressureCancellation();
+        if(pressure)MemoryPressure?.Invoke();
     }
     private static long WorkerBytes(IEnumerable<Process> workers)
     {

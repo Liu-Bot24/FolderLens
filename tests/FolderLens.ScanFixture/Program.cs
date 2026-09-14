@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using FolderLens.Infrastructure;
 
+if(args.Length==5&&args[0]=="serve")return await RetainedMemoryFixture.Run(args);
 if(args.Length!=4||args[0]!="serve")return 2;
 string mode=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"mode.txt"));
 File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"started.txt"),Environment.ProcessId.ToString());
