@@ -66,16 +66,18 @@ public sealed partial class MainWindow
             {
                 if(list.SelectedItem is not FileCollection c)return;
                 if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="仅删除收藏夹及其收藏归属，原文件保留。再次点击确认。";return;}
-                try{await catalog!.DeleteCollection(c.Id,lifetime.Token);await Reload();if(activeCollectionId==c.Id)await RefreshQuery();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
+                try{await catalog!.DeleteCollection(c.Id,lifetime.Token);RefreshCollectionBadges();await Reload();if(activeCollectionId==c.Id)await RefreshQuery();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
             };
             if(await dialog.ShowAsync()==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
     }
-    private async void CollectSelected(object sender,RoutedEventArgs args)
+    private async void CollectSelected(object sender,RoutedEventArgs args)=>await CollectFiles();
+    private async Task CollectFiles(FileRow? quickRow=null)
     {
         using var work=browserWork.Enter();if(work is null||closing||catalog is not {} store)return;
-        var handle=resultHandle;var ranges=SelectedOrdinals(ActiveBrowser);var first=handle is null?ActiveBrowser.SelectedItems.OfType<FileRow>().Where(r=>r.Item is not null).Select(r=>r.Item!.EntryId).ToArray():[];
+        var handle=quickRow is null?resultHandle:null;IReadOnlyList<OrdinalRange> ranges=quickRow is null?SelectedOrdinals(ActiveBrowser):[];
+        var first=quickRow?.Item is {} quickItem?new[]{quickItem.EntryId}:handle is null?ActiveBrowser.SelectedItems.OfType<FileRow>().Where(r=>r.Item is not null).Select(r=>r.Item!.EntryId).ToArray():[];
         if(ranges.Count==0&&first.Length==0){Status.Text="请先选择要收藏的文件。";return;}
         bool retained=false;
         try
@@ -86,9 +88,9 @@ public sealed partial class MainWindow
             var name=new TextBox{Header="或新建收藏夹",MaxLength=100,PlaceholderText="输入收藏夹名称"};var error=new TextBlock{TextWrapping=TextWrapping.Wrap};
             var panel=CollectionSelectionPanel(choices,name,error,ranges.Count>0?ranges.Sum(r=>r.Count):first.Length);
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏所选文件",Content=panel,PrimaryButtonText="加入收藏夹",SecondaryButtonText="从所选收藏夹移除",CloseButtonText="取消"};
-            async Task Change(bool add,ContentDialogButtonClickEventArgs e)
+            async Task<bool> Change(bool add)
             {
-                e.Cancel=true;var deferral=e.GetDeferral();dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=false;
+                dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=false;
                 try
                 {
                     var ids=choices.SelectedItems.Cast<FileCollection>().Select(c=>c.Id).ToList();
@@ -96,14 +98,20 @@ public sealed partial class MainWindow
                     if(ids.Count==0)throw new ArgumentException("请选择收藏夹，或填写新收藏夹名称。");
                     using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);stop.CancelAfter(TimeSpan.FromSeconds(30));
                     int changed=handle is null?await store.ChangeCollectionMembers(ids,first,add,stop.Token):await store.ChangeCollectionSelection(ids.ToArray(),handle.Id,ranges,add,stop.Token);
-                    await RefreshCollectionsTree();Status.Text=add?$"已添加 {changed:N0} 条收藏归属。":$"已移除 {changed:N0} 条收藏归属，原文件保留。";e.Cancel=false;
+                    if(add){lastCollectionTargets=ids.ToArray();if(quickRow is not null)quickCollectionUsed=true;}
+                    RefreshCollectionBadges();
+                    await RefreshCollectionsTree();Status.Text=add?$"已添加 {changed:N0} 条收藏归属。":$"已移除 {changed:N0} 条收藏归属，原文件保留。";
                     if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
+                    return true;
                 }
                 catch(OperationCanceledException){error.Text="收藏操作已取消，未提交的修改已撤销。";}
                 catch(Exception ex){error.Text=ex.Message;}
-                finally{dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=true;deferral.Complete();}
+                finally{dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=true;}
+                return false;
             }
-            dialog.PrimaryButtonClick+=async(_,e)=>await Change(true,e);dialog.SecondaryButtonClick+=async(_,e)=>await Change(false,e);await dialog.ShowAsync();
+            async Task Click(bool add,ContentDialogButtonClickEventArgs e){e.Cancel=true;var deferral=e.GetDeferral();try{e.Cancel=!await Change(add);}finally{deferral.Complete();}}
+            dialog.PrimaryButtonClick+=async(_,e)=>await Click(true,e);dialog.SecondaryButtonClick+=async(_,e)=>await Click(false,e);
+            if(verifyCollectionDialog is not null)await verifyCollectionDialog(dialog,Change);else await dialog.ShowAsync();
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
         finally{if(retained)await store.ReleaseSnapshot(handle!.Id);}

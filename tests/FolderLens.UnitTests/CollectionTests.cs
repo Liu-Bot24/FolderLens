@@ -6,6 +6,31 @@ namespace FolderLens.UnitTests;
 
 public sealed class CollectionTests
 {
+    [Fact] public async Task PropertiesReadPersistedMembershipAndKeepStarUntilLastMembershipRemoved()
+    {
+        string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));
+        string a,b;long version;
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();await catalog.SeedBenchmark(2);
+            var handle=await catalog.CreateSnapshot(new(){RootId="benchmark"},1,1);
+            var rows=await catalog.ReadPage(handle.Id,0);version=rows[0].Version;
+            Assert.False((await catalog.ReadFileProperties("benchmark","000000000001",version))!.IsCollected);
+            a=(await catalog.CreateCollection("家具")).Id;b=(await catalog.CreateCollection("认可")).Id;
+            await catalog.ChangeCollectionMembers([a,b],["000000000001"],true);
+            Assert.True((await catalog.ReadFileProperties("benchmark","000000000001",version))!.IsCollected);
+            Assert.False((await catalog.ReadFileProperties("benchmark","000000000002",rows[1].Version))!.IsCollected);
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();
+            Assert.True((await catalog.ReadFileProperties("benchmark","000000000001",version))!.IsCollected);
+            await catalog.ChangeCollectionMembers([a],["000000000001"],false);
+            Assert.True((await catalog.ReadFileProperties("benchmark","000000000001",version))!.IsCollected);
+            await catalog.DeleteCollection(b);
+            Assert.False((await catalog.ReadFileProperties("benchmark","000000000001",version))!.IsCollected);
+        }
+    }
     [Fact] public async Task OverlappingRootsShareTagsAndBulkFailureRollsBack()
     {
         await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N")));

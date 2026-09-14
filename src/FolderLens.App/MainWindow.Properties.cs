@@ -33,8 +33,9 @@ public sealed partial class MainWindow
     }
     private async Task<FileProperties> ResolveRow(FileRow row,string id,CancellationToken token)
     {
+        long collectionVersion=collectionChangeVersion;
         var file=await catalog!.ReadFileProperties(SourceRootId(row),row.Item!.EntryId,row.Item.Version,token)??throw new IOException("文件已改变，请刷新当前结果。");
-        row.UpdateProperties(file);return file;
+        row.UpdateProperties(file,collectionVersion==collectionChangeVersion);return file;
     }
     private async void ShowProperties(object sender,RoutedEventArgs e)
     {

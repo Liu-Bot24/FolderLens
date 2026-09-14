@@ -64,6 +64,6 @@ public sealed partial class MainWindow
     {
         if(displayedText is not {} page)return;
         int index=0;while(index<page.Text.Length&&page.ByteOffsetAt(index)<match.ByteOffset)index++;
-        TextContent.Select(index,Math.Min(term.Length,page.Text.Length-index));TextContent.Focus(FocusState.Programmatic);
+        TextContent.Select(index,Math.Min(term.Length,page.Text.Length-index));FocusIfForeground(TextContent,FocusState.Programmatic);
     }
 }

@@ -5,6 +5,7 @@ namespace FolderLens.App;
 
 public partial class LensApplication : Application
 {
+    private readonly long launchForeground=WindowFocus.Foreground;
     private Window? window;
     public LensApplication() {
         var command=Environment.GetCommandLineArgs();
@@ -21,15 +22,15 @@ public partial class LensApplication : Application
         try
         {
             string[] command=Environment.GetCommandLineArgs();string directory=await AppPaths.DataDirectory(command);
-            var broker=await SingleInstanceBroker.Acquire(directory,ActivationRequest.Parse(command));if(broker is null){Exit();return;}
+            var broker=await SingleInstanceBroker.Acquire(directory,ActivationRequest.Parse(command) with{RequestedForeground=launchForeground});if(broker is null){Exit();return;}
             var main=new MainWindow{InstanceBroker=broker,InitialDataDirectory=directory};window=main;
-            if(command.Contains("--verify-refresh")){bool wide=command.Contains("--verify-wide");main.AppWindow.MoveAndResize(new(-16000,-16000,wide?3840:1280,wide?2088:900));main.AppWindow.Show(false);}else window.Activate();
+            if(command.Contains("--verify-refresh")){bool wide=command.Contains("--verify-wide");main.AppWindow.MoveAndResize(new(-16000,-16000,wide?3840:1280,wide?2088:900));main.AppWindow.Show(false);}else main.ShowAtStartup(launchForeground);
         }
         catch(Exception error)
         {
             if(Environment.GetCommandLineArgs().Contains("--verify-refresh"))
             {Console.Error.WriteLine(error);Environment.ExitCode=1;Exit();return;}
-            window=new Window{Title="FolderLens",Content=new Microsoft.UI.Xaml.Controls.TextBlock{Text="无法启动 FolderLens："+error.Message,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24)}};window.Closed+=(_,_)=>Exit();window.Activate();
+            window=new Window{Title="FolderLens",Content=new Microsoft.UI.Xaml.Controls.TextBlock{Text="无法启动 FolderLens："+error.Message,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24)}};window.Closed+=(_,_)=>Exit();WindowFocus.Show(window,launchForeground);
         }
     }
 }

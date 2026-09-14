@@ -88,7 +88,7 @@ public sealed partial class MainWindow
         ImageInput.PointerCaptureLost+=(_,_)=>{if(viewerPointerId is not null)ResetViewerGesture();};
         ImageInput.PointerExited+=(_,_)=>{if(viewerPointerId is null)PreviewSurface.SetViewerCursor(ViewerCursorFeedback.Arrow);};
         PreviewSurface.MagnifierDraw+=DrawViewerMagnifier;
-        TextToolsFlyout.Opened+=(_,_)=>{if(viewerFindPending){viewerFindPending=false;TextQuery.Focus(FocusState.Keyboard);TextQuery.SelectAll();}};
+        TextToolsFlyout.Opened+=(_,_)=>{if(viewerFindPending){viewerFindPending=false;FocusIfForeground(TextQuery,FocusState.Keyboard);TextQuery.SelectAll();}};
         PreviewSurface.InputSurface=ImageInput;ImageInput.IsTabStop=true;UpdateViewerCursor();
         BuildViewerContextMenu();
     }
@@ -161,9 +161,9 @@ public sealed partial class MainWindow
                 case ViewerAction.Find:
                     if(immersive&&selected is not null&&selected.Kind is "text" or "markdown")
                     {viewerFindPending=true;TextToolsFlyout.ShowAt(PreviewSurface);}
-                    else{await ReturnToBrowser();Search.Focus(FocusState.Keyboard);Search.SelectAll();}return;
+                    else{await ReturnToBrowser();FocusIfForeground(Search,FocusState.Keyboard);Search.SelectAll();}return;
                 case ViewerAction.OpenFolder: await ReturnToBrowser();PickRoot(this,new());return;
-                case ViewerAction.FocusPath: await ReturnToBrowser();RootPath.Focus(FocusState.Keyboard);RootPath.SelectAll();return;
+                case ViewerAction.FocusPath: await ReturnToBrowser();FocusIfForeground(RootPath,FocusState.Keyboard);RootPath.SelectAll();return;
                 case ViewerAction.BackFolder: await NavigateHistory(false);return;
                 case ViewerAction.ForwardFolder: await NavigateHistory(true);return;
                 case ViewerAction.ParentFolder: await ReturnToBrowser();ParentRoot(this,new());return;
@@ -171,7 +171,7 @@ public sealed partial class MainWindow
                 case ViewerAction.Slideshow: ToggleSlideshow(this,new());return;
                 case ViewerAction.ToggleFullScreen: if(fullScreen)await LeaveFullScreen(toBrowser:false);else await EnterFullScreen();return;
                 case ViewerAction.ToggleBrowser: if(immersive||fullScreen)await ReturnToBrowser();else await EnterFullScreen();return;
-                case ViewerAction.ToggleWindowViewer: if(immersive||fullScreen)await ReturnToBrowser();else{await SetImmersive(true);ImageInput.Focus(FocusState.Programmatic);}return;
+                case ViewerAction.ToggleWindowViewer: if(immersive||fullScreen)await ReturnToBrowser();else{await SetImmersive(true);FocusIfForeground(ImageInput,FocusState.Programmatic);}return;
                 case ViewerAction.ReturnBrowser: await ReturnToBrowser();return;
                 case ViewerAction.Previous: Navigate(-1);return;
                 case ViewerAction.Next: Navigate(1);return;
@@ -275,7 +275,7 @@ public sealed partial class MainWindow
         if(point.Properties.IsMiddleButtonPressed){e.Handled=true;await RunViewerAction(ViewerAction.ToggleBrowser);return;}
         if(!IsInViewerSurface(e.OriginalSource as DependencyObject))return;
         if(!point.Properties.IsLeftButtonPressed||selected?.Kind!="image"||fitBitmap is null||previewLoading)return;
-        e.Handled=true;viewerTapTimer?.Stop();ResetViewerGesture(cancelTap:false,keepDetails:true);ImageInput.Focus(FocusState.Pointer);
+        e.Handled=true;viewerTapTimer?.Stop();ResetViewerGesture(cancelTap:false,keepDetails:true);FocusIfForeground(ImageInput,FocusState.Pointer);
         ImageInput.CapturePointer(e.Pointer);WakeViewerCursor(point.Position);BeginViewerPress(e.Pointer.PointerId,point.Position);
     }
     private void BeginViewerPress(uint pointerId,Point position)

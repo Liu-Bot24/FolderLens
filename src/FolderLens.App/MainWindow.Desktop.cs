@@ -49,7 +49,6 @@ public sealed partial class MainWindow
 
     private void InitializeDesktop()
     {
-        if(!Environment.GetCommandLineArgs().Contains("--verify-refresh")&&AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)presenter.Maximize();
         searchTimer=DispatcherQueue.CreateTimer();searchTimer.Interval=TimeSpan.FromMilliseconds(280);searchTimer.IsRepeating=false;searchTimer.Tick+=async(_,_)=>await RefreshQuery();
         slideTimer=DispatcherQueue.CreateTimer();slideTimer.Interval=TimeSpan.FromSeconds(5);slideTimer.IsRepeating=false;
         slideTimer.Tick+=async(_,_)=>
@@ -91,7 +90,7 @@ public sealed partial class MainWindow
         {
             DispatcherQueue.TryEnqueue(async()=>
             {
-                if(closing)return;Activate();
+                if(closing)return;WindowFocus.Show(this,request.RequestedForeground);
                 try{if(!string.IsNullOrEmpty(request.File))await OpenPath(request.File);else if(!string.IsNullOrEmpty(request.Root)){RootPath.Text=request.Root;await OpenRoot(request.Root);}}
                 catch(Exception ex){ShowError(ex);}
             });return Task.CompletedTask;

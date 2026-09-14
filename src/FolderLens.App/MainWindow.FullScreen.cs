@@ -144,7 +144,7 @@ public sealed partial class MainWindow
         if(selected is null&&results?.Count>0){if(DetailsMode.IsChecked==true)FilesList.SelectedIndex=0;else FilesGrid.SelectedIndex=0;}
         if(selected is null)return;
         wasMaximized=AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p&&p.State==Microsoft.UI.Windowing.OverlappedPresenterState.Maximized;
-        fullScreen=true;var entering=SetImmersive(true);SetFullScreenChrome(true);AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);ImageCanvas.Focus(FocusState.Programmatic);
+        fullScreen=true;var entering=SetImmersive(true);SetFullScreenChrome(true);AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);FocusIfForeground(ImageCanvas,FocusState.Programmatic);
         await entering;if(revision!=viewerModeRevision||!fullScreen)return;ApplyViewerSizing();
         if(selected is not null&&!previewLoading&&zoom==0)try{await EnsureFitResolution(selected,selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
     }
@@ -153,8 +153,12 @@ public sealed partial class MainWindow
     {
         ++viewerModeRevision;ResetViewerGesture();slideShow=false;slideTimer?.Stop();fullScreen=false;SetFullScreenChrome(false);
         AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
-        if(wasMaximized&&AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p)p.Maximize();
-        if(toBrowser)await SetImmersive(false);else{await SetImmersive(true);ImageCanvas.Focus(FocusState.Programmatic);ApplyViewerSizing();}
+        if(wasMaximized)
+        {
+            if(WindowFocus.IsForeground(this)&&AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p)p.Maximize();
+            else maximizeOnActivation=true;
+        }
+        if(toBrowser)await SetImmersive(false);else{await SetImmersive(true);FocusIfForeground(ImageCanvas,FocusState.Programmatic);ApplyViewerSizing();}
     }
     private void CaptureBrowserPosition()
     {
@@ -167,7 +171,7 @@ public sealed partial class MainWindow
         if(selected is not null){RevealBrowserRow(selected);list.SelectedItem=selected;}
         if(selected is not null&&selected.Ordinal==browserEntryOrdinal)FindScrollViewer(list)?.ChangeView(null,browserOffset,null,true);
         else if(selected is not null)list.ScrollIntoView(selected);
-        list.Focus(FocusState.Programmatic);
+        FocusIfForeground(list,FocusState.Programmatic);
     }
     private static ScrollViewer? FindScrollViewer(DependencyObject parent)
     {

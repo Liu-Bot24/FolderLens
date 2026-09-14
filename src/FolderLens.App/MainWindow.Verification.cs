@@ -105,6 +105,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}
             if(arguments.Contains("--verify-browser-status")){await VerifyBrowserStatusBar(source,report);return;}
             if(arguments.Contains("--verify-collections")){await VerifyCollections(source,report);return;}
+            if(arguments.Contains("--verify-quick-collections")){await VerifyQuickCollections(source,report);return;}
             if(arguments.Contains("--verify-tree-selection-visible")){await VerifyTreeSelectionVisible(source,png,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-container-recycle")){await VerifyContainerRecycle(source,first,png,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-preview-close")){await VerifyPreviewClose(source,report);return;}
