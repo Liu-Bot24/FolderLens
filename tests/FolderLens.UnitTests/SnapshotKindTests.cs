@@ -8,7 +8,7 @@ namespace FolderLens.UnitTests;
 public sealed class SnapshotKindTests
 {
     [Fact]
-    public async Task VersionTwoUpgradePreservesUngroupedReadySessionAndBacksUp()
+    public async Task VersionTwoUpgradePreservesUngroupedReadySessionWithoutFullCopy()
     {
         string directory=Temp();ResultHandle handle;
         await using(var catalog=new CatalogStore(directory))
@@ -19,7 +19,7 @@ public sealed class SnapshotKindTests
         {
             await reopened.Initialize();var items=await reopened.ReadPage(handle.Id,0);Assert.Equal(2,items.Count);Assert.All(items,item=>Assert.Null(item.Group));Assert.Empty(await reopened.ReadGroups(handle.Id));
         }
-        string backup=Assert.Single(Directory.GetFiles(directory,"sessions.sqlite.pre-v3-*.bak"));using var original=Open(backup);using var check=original.CreateCommand();check.CommandText="PRAGMA user_version";Assert.Equal(2L,check.ExecuteScalar());
+        Assert.Empty(Directory.GetFiles(directory,"sessions.sqlite.pre-*.bak"));
     }
     private static string Temp()=>Path.Combine(Path.GetTempPath(),"FolderLens-snapshot-kind",Guid.NewGuid().ToString("N"));
 
@@ -43,7 +43,7 @@ public sealed class SnapshotKindTests
     }
 
     [Fact]
-    public async Task UpgradesLegacySessionWithBackupAndRequiresRebuildInsteadOfGuessingKinds()
+    public async Task UpgradesLegacySessionWithoutFullCopyAndRequiresRebuildInsteadOfGuessingKinds()
     {
         string directory=Temp();ResultHandle legacy;
         await using(var catalog=new CatalogStore(directory))
@@ -63,11 +63,7 @@ public sealed class SnapshotKindTests
             var rebuilt=await upgraded.CreateSnapshot(new FilterSpec{RootId="benchmark"},1,2);
             Assert.Equal(2,rebuilt.Count);Assert.All(await upgraded.ReadPage(rebuilt.Id,0),item=>Assert.Equal("image",item.Kind));
         }
-        string backup=Assert.Single(Directory.GetFiles(directory,"sessions.sqlite.pre-v2-*.bak"));
-        using var original=Open(backup);using var check=original.CreateCommand();
-        check.CommandText="PRAGMA user_version";Assert.Equal(1L,check.ExecuteScalar());
-        check.CommandText="SELECT count(*) FROM ResultItems";Assert.Equal(2L,check.ExecuteScalar());
-        check.CommandText="SELECT state FROM ResultSessions";Assert.Equal("ready",check.ExecuteScalar());
+        Assert.Empty(Directory.GetFiles(directory,"sessions.sqlite.pre-*.bak"));
         using var current=Open(Path.Combine(directory,"sessions.sqlite"));using var version=current.CreateCommand();
         version.CommandText="PRAGMA user_version";Assert.Equal(5L,version.ExecuteScalar());
     }

@@ -45,11 +45,6 @@ public sealed partial class CatalogStore
     }
     private static void MigrateCollections(SqliteConnection c,string name,bool existing)
     {
-        if(existing)
-        {
-            using var backup=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=c.DataSource+".pre-v4-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")+".bak",Pooling=false}.ToString());
-            backup.Open();c.BackupDatabase(backup);
-        }
         using var transaction=c.BeginTransaction();using var command=c.CreateCommand();command.Transaction=transaction;
         command.CommandText=name=="catalog"?"""
             ALTER TABLE Files ADD COLUMN location_key TEXT NOT NULL DEFAULT '';

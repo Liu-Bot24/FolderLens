@@ -72,42 +72,18 @@ public sealed partial class CatalogStore
     private const string IdentityHistoryTable="CREATE TABLE IF NOT EXISTS CollectionIdentityHistory(entry_id TEXT PRIMARY KEY REFERENCES Files(entry_id) ON DELETE CASCADE,physical_identity TEXT NOT NULL) STRICT;";
     private static void MigrateCollectionIdentityHistory(SqliteConnection connection,CancellationToken cancellation,Action<string>? progress)
     {
-        var timer=Stopwatch.StartNew();int reported=-1;
-        progress?.Invoke("正在备份本地索引。");
-        using(var backup=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=connection.DataSource+".pre-v6-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")+".bak",Pooling=false}.ToString()))
-        {
-            backup.Open();CatalogBackup.Copy(connection,backup,cancellation,(done,total)=>
-            {
-                int percent=total==0?100:(int)((long)done*100/total);
-                if(percent!=reported){reported=percent;progress?.Invoke($"正在备份本地索引 · {percent}%");}
-            });
-        }
-        OperationMigrationMeasured?.Invoke("identityHistoryBackup",timer.Elapsed.TotalMilliseconds);timer.Restart();
+        var timer=Stopwatch.StartNew();
         progress?.Invoke("正在更新本地收藏索引。");
         using var transaction=connection.BeginTransaction();using var command=connection.CreateCommand();command.Transaction=transaction;
-        command.CommandText=IdentityHistoryTable+"""
-            DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_CollectionsMissing;DROP TRIGGER Files_Location_Update;
-            DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;
-            DROP TRIGGER DirectoryIdentity_Location_Insert;DROP TRIGGER DirectoryIdentity_Location_Update;DROP TRIGGER CollectionMembers_RefreshIdentity;
-            """+LocationTriggers()+"DELETE FROM CollectionMembers WHERE EXISTS(SELECT 1 FROM Files f WHERE f.entry_id=CollectionMembers.entry_id AND f.entry_state='missing');UPDATE SchemaInfo SET schema_version=6;PRAGMA user_version=6;";
-        command.ExecuteNonQuery();cancellation.ThrowIfCancellationRequested();transaction.Commit();
+        command.CommandText=IdentityHistoryTable;command.ExecuteNonQuery();
+        MigrateDirectoryLocations(connection,false,cancellation,progress,transaction);
+        cancellation.ThrowIfCancellationRequested();transaction.Commit();
         OperationMigrationMeasured?.Invoke("identityHistoryMigration",timer.Elapsed.TotalMilliseconds);
     }
     private static void MigrateCollectionLocations(SqliteConnection connection,bool existing,CancellationToken cancellation,Action<string>? progress)
     {
         var timer=Stopwatch.StartNew();
-        if(existing)
-        {
-            using var backup=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=connection.DataSource+".pre-v5-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")+".bak",Pooling=false}.ToString());
-            backup.Open();int reported=-1;
-            CatalogBackup.Copy(connection,backup,cancellation,(done,total)=>
-            {
-                int percent=total==0?100:(int)((long)done*100/total);
-                if(percent!=reported){reported=percent;progress?.Invoke($"正在备份本地索引 · {percent}%");}
-            });
-        }
-        OperationMigrationMeasured?.Invoke("backup",timer.Elapsed.TotalMilliseconds);timer.Restart();
-        progress?.Invoke("正在更新本地索引，首次升级可能需要几分钟。");
+        progress?.Invoke("正在升级本地索引。");
         using var transaction=connection.BeginTransaction();using var command=connection.CreateCommand();command.Transaction=transaction;
         command.CommandText=$$"""
             CREATE TABLE IF NOT EXISTS ScanDirectoryIdentities(directory_id TEXT PRIMARY KEY REFERENCES Directories(directory_id) ON DELETE CASCADE,physical_identity TEXT NOT NULL);
@@ -115,17 +91,25 @@ public sealed partial class CatalogStore
             DROP TRIGGER CollectionMembers_FollowKnownRename;
             DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_Location_Update;DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;
             DROP INDEX IX_Files_Location;
-            UPDATE Files SET location_key={{FileLocationExpression}};
-            CREATE INDEX IX_Files_Location ON Files(location_key,entry_state,entry_id);
-            CREATE TEMP TABLE SavedCollectionLocations AS SELECT m.collection_id,coalesce(f.location_key,m.location_key) location_key,m.entry_id,m.added_utc_ticks FROM CollectionMembers m LEFT JOIN Files f ON f.entry_id=m.entry_id WHERE f.entry_state IS NOT 'missing';
-            DELETE FROM CollectionMembers;
-            INSERT INTO CollectionMembers SELECT collection_id,location_key,min(entry_id),min(added_utc_ticks) FROM temp.SavedCollectionLocations GROUP BY collection_id,location_key;
-            DROP TABLE temp.SavedCollectionLocations;
-            {{LocationTriggers()}}
-            UPDATE SchemaInfo SET schema_version=6;
-            PRAGMA user_version=6;
             """;
-        command.ExecuteNonQuery();cancellation.ThrowIfCancellationRequested();transaction.Commit();
+        command.ExecuteNonQuery();
+        command.CommandText="SELECT count(*) FROM Files";long total=(long)command.ExecuteScalar()!,done=0;
+        long? after=null;
+        while(done<total)
+        {
+            cancellation.ThrowIfCancellationRequested();command.Parameters.Clear();
+            command.CommandText="SELECT max(rowid) FROM(SELECT rowid FROM Files "+(after is null?"":"WHERE rowid>$after ")+"ORDER BY rowid LIMIT 4096)";
+            if(after is not null)command.Parameters.AddWithValue("$after",after.Value);
+            if(command.ExecuteScalar() is not long through)throw new InvalidDataException("升级期间文件数量发生变化。");
+            command.Parameters.AddWithValue("$through",through);
+            command.CommandText=$"UPDATE Files SET location_key={FileLocationExpression} WHERE "+(after is null?"":"rowid>$after AND ")+"rowid<=$through";
+            done+=command.ExecuteNonQuery();after=through;
+            progress?.Invoke($"正在升级本地索引 · {done:N0} / {total:N0}");
+        }
+        command.Parameters.Clear();command.CommandText="CREATE INDEX IX_Files_Location ON Files(location_key,entry_state,entry_id);";
+        command.ExecuteNonQuery();
+        MigrateDirectoryLocations(connection,false,cancellation,progress,transaction);
+        cancellation.ThrowIfCancellationRequested();transaction.Commit();
         OperationMigrationMeasured?.Invoke("locationMigration",timer.Elapsed.TotalMilliseconds);
     }
     public static Action<string,double>? OperationMigrationMeasured {get;set;}

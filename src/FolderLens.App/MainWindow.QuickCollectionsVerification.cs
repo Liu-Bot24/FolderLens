@@ -29,6 +29,28 @@ public sealed partial class MainWindow
         lastCollectionTargets=[tag];quickCollectionUsed=true;await QuickCollect(row);
         if(!row.IsCollected)throw new InvalidOperationException("新观察值快捷收藏失败。");
         if(await catalog.ChangeCollectionSelection([tag],resultHandle.Id,[new(authority.Ordinal,1)],true)!=0)throw new InvalidOperationException("普通与快捷收藏没有使用同一观察结果。");
+        foreach(bool changeObservation in new[]{false,true})
+        {
+        await catalog.ChangeCollectionItems([tag],[row.Item!],true);
+        await RefreshCollectionBadgesCore(++collectionChangeVersion);
+        await catalog.ChangeCollectionItems([tag],[row.Item!],false);
+        var badgeRead=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBadge=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        verifyCollectionBadgeRead=()=>{badgeRead.TrySetResult();return releaseBadge.Task;};
+        var pendingBadges=RefreshCollectionBadgesCore(++collectionChangeVersion);
+        try
+        {
+            await badgeRead.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            if(changeObservation)await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET path_revision=path_revision+1 WHERE entry_id=$id";cmd.Parameters.AddWithValue("$id",row.Item!.EntryId);return cmd.ExecuteNonQuery();});
+            await RefreshQuery(scanPreview:true);
+        }
+        finally {verifyCollectionBadgeRead=null;releaseBadge.TrySetResult();}
+        await pendingBadges;
+        if(row.IsCollected)throw new InvalidOperationException("行复用丢弃最后一次徽标结果，已删除收藏的星标仍为实心。");
+        if(!ReferenceEquals(image,row.Thumbnail)||!ReferenceEquals(container,FilesGrid.ContainerFromItem(row)))throw new InvalidOperationException("徽标补读替换了图片或容器。");
+        }
+        report["badgeConvergedAfterRowReuse"]=true;
+        report["badgeConvergedAfterObservationChange"]=true;
         report["nativeRowThumbnailContainerAndSourceRetained"]=true;report["quickAndBulkAgree"]=true;report["status"]="PASS";
     }
     private async Task VerifyQuickCollections(string source,Dictionary<string,object> report)

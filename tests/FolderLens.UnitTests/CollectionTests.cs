@@ -58,7 +58,7 @@ public sealed class CollectionTests
         await using(var catalog=new CatalogStore(data))
         {
             await catalog.Initialize();
-            Assert.Single(Directory.GetFiles(data,"*.pre-v6-*.bak"));
+            Assert.Empty(Directory.GetFiles(data,"*.pre-v6-*.bak"));
             Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
             Assert.Equal(7,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
             await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=physical_identity";return cmd.ExecuteNonQuery();});

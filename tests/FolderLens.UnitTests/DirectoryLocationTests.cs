@@ -6,6 +6,39 @@ namespace FolderLens.UnitTests;
 public sealed class DirectoryLocationTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemovingOrRetargetingAccessJunctionKeepsRealPosition(bool retarget)
+    {
+        string fixture=Fixture(),real=Path.Combine(fixture,"real"),alternate=Path.Combine(fixture,"alternate"),route=Path.Combine(fixture,"route");
+        Directory.CreateDirectory(Path.Combine(real,"child"));Directory.CreateDirectory(Path.Combine(alternate,"child"));
+        File.WriteAllText(Path.Combine(real,"child","file.txt"),"unchanged");
+        void Junction(string target)
+        {
+            var start=new System.Diagnostics.ProcessStartInfo("pwsh.exe"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            start.ArgumentList.Add("-NoProfile");start.ArgumentList.Add("-Command");
+            start.ArgumentList.Add($"New-Item -ItemType Junction -Path '{route}' -Target '{target}' -ErrorAction Stop | Out-Null");
+            using var process=System.Diagnostics.Process.Start(start)!;Assert.True(process.WaitForExit(10000));Assert.Equal(0,process.ExitCode);
+        }
+        Junction(real);
+        try
+        {
+            await using var c=new CatalogStore(Fixture());await c.Initialize();var scanner=new DirectoryIndexer(c,Worker());
+            string oldPath=Path.Combine(route,"child"),newPath=Path.Combine(real,"child");
+            await c.OpenRoot("route",oldPath);await scanner.Scan("route",oldPath,1,true,[],null,CancellationToken.None);
+            var old=(await c.ReadFirstPage(new(){RootId="route",Kinds=[]})).Items.Single();
+            string tag=(await c.CreateCollection("real position")).Id;await c.ChangeCollectionItems([tag],[old],true);
+            await c.OpenRoot("real",newPath);await scanner.Scan("real",newPath,1,true,[],null,CancellationToken.None);
+            var current=(await c.ReadFirstPage(new(){RootId="real",Kinds=[]})).Items.Single();Assert.Equal(old.DirectoryLocationId,current.DirectoryLocationId);
+            Directory.Delete(route);if(retarget)Junction(alternate);
+            await scanner.Scan("real",newPath,1,true,[],null,CancellationToken.None);
+            Assert.Equal("unchanged",File.ReadAllText(Path.Combine(newPath,"file.txt")));
+            Assert.Equal(1,(await c.ReadCollections()).Single().Count);
+            Assert.True((await c.ReadCollectionFlags((await c.ReadFirstPage(new(){RootId="real",Kinds=[]})).Items)).Single());
+        }
+        finally { if(Directory.Exists(route))Directory.Delete(route); }
+    }
+    [Theory]
     [InlineData("offline",false)]
     [InlineData("inaccessible",false)]
     [InlineData("offline",true)]
@@ -142,7 +175,7 @@ public sealed class DirectoryLocationTests
             Assert.Equal(keys,await c.Read(db=>{using var cmd=db.CreateCommand();cmd.CommandText="SELECT location_key FROM Files ORDER BY entry_id";using var rows=cmd.ExecuteReader();var list=new List<string>();while(rows.Read())list.Add(rows.GetString(0));return list.ToArray();}));
         }
         await using(var c=new CatalogStore(data)){await c.Initialize();Assert.Equal(location,(await c.ReadFirstPage(new(){RootId="benchmark"})).Items.First().DirectoryLocationId);}
-        Assert.NotEmpty(Directory.GetFiles(data,"*.pre-v7-*.bak"));
+        Assert.Empty(Directory.GetFiles(data,"*.pre-v7-*.bak"));
     }
     private static string Worker(){var root=new DirectoryInfo(AppContext.BaseDirectory);while(root is not null&&!File.Exists(Path.Combine(root.FullName,"Directory.Build.props")))root=root.Parent;return Path.Combine(root!.FullName,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe");}
 }

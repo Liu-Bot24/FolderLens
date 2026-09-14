@@ -24,7 +24,16 @@ public partial class LensApplication : Application
             string[] command=Environment.GetCommandLineArgs();string directory=await AppPaths.DataDirectory(command);
             var broker=await SingleInstanceBroker.Acquire(directory,ActivationRequest.Parse(command) with{RequestedForeground=launchForeground});if(broker is null){Exit();return;}
             var main=new MainWindow{InstanceBroker=broker,InitialDataDirectory=directory};window=main;
-            if(command.Contains("--verify-refresh")){bool wide=command.Contains("--verify-wide");main.AppWindow.MoveAndResize(new(-16000,-16000,wide?3840:1280,wide?2088:900));main.AppWindow.Show(false);}else main.ShowAtStartup(launchForeground);
+            if(command.Contains("--verify-refresh"))
+            {
+                bool wide=command.Contains("--verify-wide");
+                // Moving outside the display does not remove a window from the
+                // taskbar. This is not a guarantee of foreground isolation.
+                main.AppWindow.IsShownInSwitchers=false;
+                main.AppWindow.MoveAndResize(new(-16000,-16000,wide?3840:1280,wide?2088:900));
+                main.AppWindow.Show(false);
+            }
+            else main.ShowAtStartup(launchForeground);
         }
         catch(Exception error)
         {

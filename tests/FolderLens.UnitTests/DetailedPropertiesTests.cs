@@ -28,7 +28,7 @@ public sealed class DetailedPropertiesTests
         var props=await catalog.ReadFileProperties("benchmark","000000000001",1);Assert.NotNull(props);Assert.Equal("Camera",props.Details!.CameraModel);Assert.Equal(400,props.Details.Iso);Assert.Equal(640,props.EncodedWidth);Assert.Equal("ready",props.FieldStates["captureTime"].State);Assert.Null(await catalog.ReadFileProperties("benchmark","000000000001",2));
     }
     [Fact]
-    public async Task CatalogV1MigrationBacksUpAndPreservesExistingRows()
+    public async Task CatalogV1MigrationPreservesExistingRowsWithoutFullCopy()
     {
         string path=Path.Combine(Path.GetTempPath(),"FolderLens-details",Guid.NewGuid().ToString("N"));
         await using(var legacy=new CatalogStore(path))
@@ -37,8 +37,8 @@ public sealed class DetailedPropertiesTests
             await legacy.Write(c=>{using var cmd=c.CreateCommand();LegacyCollectionSchema.Catalog(c);cmd.CommandText="DROP TABLE FileDetails; UPDATE SchemaInfo SET schema_version=1; PRAGMA user_version=1;";return cmd.ExecuteNonQuery();});
         }
         await using(var updated=new CatalogStore(path)){await updated.Initialize();Assert.NotNull(await updated.ReadFileProperties("benchmark","000000000001",1));}
-        string backup=Assert.Single(Directory.GetFiles(path,"catalog.sqlite.pre-v2-*.bak"));
-        using var verify=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder{DataSource=backup,Mode=Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly}.ToString());verify.Open();using var cmd=verify.CreateCommand();cmd.CommandText="PRAGMA user_version";Assert.Equal(1L,cmd.ExecuteScalar());cmd.CommandText="SELECT count(*) FROM Files";Assert.Equal(1L,cmd.ExecuteScalar());
+        Assert.Empty(Directory.GetFiles(path,"catalog.sqlite.pre-*.bak"));
+        using var verify=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder{DataSource=Path.Combine(path,"catalog.sqlite"),Mode=Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly}.ToString());verify.Open();using var cmd=verify.CreateCommand();cmd.CommandText="PRAGMA user_version";Assert.Equal(7L,cmd.ExecuteScalar());cmd.CommandText="SELECT count(*) FROM Files";Assert.Equal(1L,cmd.ExecuteScalar());
     }
     [Fact]
     public async Task RealSonyArwExifComesFromReadOnlyWorkerProbe()
