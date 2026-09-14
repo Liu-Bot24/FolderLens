@@ -93,13 +93,20 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,F
             var previous=await Probe(oldPath,cancellation).ConfigureAwait(false);
             bool renamedSpelling=previous.State=="present"&&previous.PhysicalIdentity==identity&&old.Locator is not null&&previous.ResolvedLocation is not null&&previous.ResolvedLocation!=old.Locator;
             if(!renamedSpelling&&previous.State!="missing"&&!(previous.State=="present"&&previous.PhysicalIdentity is {} actual&&actual!=identity))continue;
-            // A vanished drive/share route is not proof that its directory entry
-            // was deleted. Require the old immediate parent namespace to exist.
-            if(previous.State=="missing")
-            {
-                if(!await MissingWithinKnownNamespace(oldPath,identity,cancellation).ConfigureAwait(false))continue;
-            }
-            if((await Probe(path,cancellation).ConfigureAwait(false)).PhysicalIdentity!=identity)throw new IOException("根目录在身份核对期间发生变化。");
+            var current=await Probe(path,cancellation).ConfigureAwait(false);
+            if(current.State!="present"||current.PhysicalIdentity!=identity)throw new IOException("根目录在身份核对期间发生变化。");
+            // Losing a junction/share route is not losing its resolved position.
+            // Prove that the saved position itself vanished or changed; a live
+            // ancestor of the access string alone cannot establish that fact.
+            if(old.Locator is null)continue;
+            if(current.ResolvedLocation==old.Locator)continue;
+            if(previous.State=="missing"&&!await MissingWithinKnownNamespace(oldPath,identity,cancellation).ConfigureAwait(false))continue;
+            var anchor=await Probe(old.Locator,cancellation).ConfigureAwait(false);
+            bool anchorRenamed=anchor.State=="present"&&anchor.PhysicalIdentity==identity&&anchor.ResolvedLocation is not null&&anchor.ResolvedLocation!=old.Locator;
+            bool anchorReplaced=anchor.State=="present"&&anchor.PhysicalIdentity is {} physical&&physical!=identity;
+            if(anchor.State=="missing")
+            {if(!await MissingWithinKnownNamespace(old.Locator,identity,cancellation).ConfigureAwait(false))continue;}
+            else if(!anchorRenamed&&!anchorReplaced)continue;
             await catalog.Write(c=>
             {
                 using var transaction=c.BeginTransaction();using var check=c.CreateCommand();check.Transaction=transaction;
@@ -108,12 +115,15 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,F
                        AND EXISTS(SELECT 1 FROM Directories d JOIN Roots r ON r.root_id=d.root_id
                            LEFT JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id
                            JOIN DirectoryLocationBindings b ON b.directory_id=d.directory_id
+                           JOIN DirectoryLocations l ON l.location_id=b.location_id
                            WHERE d.directory_id=$id AND d.root_id=$oldRoot AND r.root_epoch=$oldEpoch
                            AND r.display_path=$oldPath AND d.relative_path=$relative AND d.entry_state<>'missing'
                            AND d.path_revision=$pathRevision AND b.location_id=$location AND b.binding_revision=$binding
+                           AND l.anchor_locator=$locator AND l.state='active'
                            AND coalesce(i.physical_identity,CASE WHEN d.relative_path='' THEN r.volume_identity END)=$identity)
                     """;
                 foreach(var (name,value) in new (string,object)[]{("$root",rootId),("$epoch",epoch),("$path",path),("$id",old.Id),("$oldRoot",old.Root),("$oldEpoch",old.Epoch),("$oldPath",old.RootPath),("$relative",old.Relative),("$identity",identity),("$pathRevision",old.PathRevision),("$location",old.Location),("$binding",old.Binding)})check.Parameters.AddWithValue(name,value);
+                check.Parameters.AddWithValue("$locator",old.Locator);
                 if((long)check.ExecuteScalar()! !=1)return false;
                 RetireTree(c,transaction,old.Root,old.Id);transaction.Commit();return true;
             },cancellation).ConfigureAwait(false);

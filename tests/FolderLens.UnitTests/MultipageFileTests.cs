@@ -23,7 +23,7 @@ public sealed class MultipageFileTests
     }
 
     [Fact]
-    public async Task ExistingVerifiedPagesAreMigratedWithRecoverableBackup()
+    public async Task ExistingVerifiedPagesAreMigratedWithoutFullCopy()
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-pages",Guid.NewGuid().ToString("N"));
         await using(var catalog=new CatalogStore(directory))
@@ -36,7 +36,7 @@ public sealed class MultipageFileTests
             await catalog.Initialize();
             Assert.Equal("other",(await catalog.ReadFileProperties("benchmark","000000000001",1))!.Kind);
             Assert.Equal("image",(await catalog.ReadFileProperties("benchmark","000000000002",1))!.Kind);
-            Assert.Single(Directory.GetFiles(directory,"catalog.sqlite.pre-v3-*.bak"));
+            Assert.Empty(Directory.GetFiles(directory,"catalog.sqlite.pre-*.bak"));
         }
     }
 }

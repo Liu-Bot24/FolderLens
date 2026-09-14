@@ -6,19 +6,12 @@ public sealed partial class CatalogStore
 {
     internal const string LocationBindingJoin="JOIN DirectoryLocationBindings lb ON lb.directory_id=f.directory_id JOIN DirectoryLocations dl ON dl.location_id=lb.location_id";
     internal static string DirectoryLocation(string alias)=>$"(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id={alias}.directory_id)";
-    private static void MigrateDirectoryLocations(SqliteConnection c,bool existing,CancellationToken cancellation,Action<string>? progress)
+    private static void MigrateDirectoryLocations(SqliteConnection c,bool existing,CancellationToken cancellation,Action<string>? progress,SqliteTransaction? transaction=null)
     {
         var timer=System.Diagnostics.Stopwatch.StartNew();
-        if(existing)
-        {
-            progress?.Invoke("正在备份本地索引。");
-            using var backup=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=c.DataSource+".pre-v7-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")+".bak",Pooling=false}.ToString());
-            backup.Open();int reported=-1;
-            CatalogBackup.Copy(c,backup,cancellation,(done,total)=>{int percent=total==0?100:(int)((long)done*100/total);if(percent!=reported){reported=percent;progress?.Invoke($"正在备份本地索引 · {percent}%");}});
-        }
-        OperationMigrationMeasured?.Invoke("directoryLocationBackup",timer.Elapsed.TotalMilliseconds);timer.Restart();
         progress?.Invoke("正在更新本地收藏索引。");
-        using var t=c.BeginTransaction();using var cmd=c.CreateCommand();cmd.Transaction=t;
+        using var owned=transaction is null?c.BeginTransaction():null;
+        var t=transaction??owned!;using var cmd=c.CreateCommand();cmd.Transaction=t;
         cmd.CommandText="""
             CREATE TABLE DirectoryLocations(location_id TEXT PRIMARY KEY,directory_identity TEXT,anchor_locator TEXT,locator_kind TEXT NOT NULL DEFAULT 'isolated',state TEXT NOT NULL DEFAULT 'active' CHECK(state IN('active','retired'))) STRICT;
             CREATE INDEX IX_DirectoryLocations_Locator ON DirectoryLocations(anchor_locator,directory_identity,state);
@@ -27,16 +20,16 @@ public sealed partial class CatalogStore
             INSERT INTO DirectoryLocations(location_id,directory_identity) SELECT d.directory_id,coalesce(i.physical_identity,CASE WHEN d.relative_path='' THEN r.volume_identity END) FROM Directories d JOIN Roots r ON r.root_id=d.root_id LEFT JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id;
             INSERT INTO DirectoryLocationBindings(directory_id,location_id) SELECT directory_id,directory_id FROM Directories;
             DROP TRIGGER IF EXISTS CollectionAliases_Invalidate;
-            DROP TRIGGER Files_Location_Insert;DROP TRIGGER Files_CollectionsMissing;DROP TRIGGER Files_Location_Update;
-            DROP TRIGGER Roots_Location_Update;DROP TRIGGER Directories_Location_Update;
-            DROP TRIGGER DirectoryIdentity_Location_Insert;DROP TRIGGER DirectoryIdentity_Location_Update;DROP TRIGGER CollectionMembers_RefreshIdentity;
+            DROP TRIGGER IF EXISTS Files_Location_Insert;DROP TRIGGER IF EXISTS Files_CollectionsMissing;DROP TRIGGER IF EXISTS Files_Location_Update;
+            DROP TRIGGER IF EXISTS Roots_Location_Update;DROP TRIGGER IF EXISTS Directories_Location_Update;
+            DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Insert;DROP TRIGGER IF EXISTS DirectoryIdentity_Location_Update;DROP TRIGGER IF EXISTS CollectionMembers_RefreshIdentity;
             CREATE TABLE NewCollectionMembers(collection_id TEXT NOT NULL REFERENCES Collections(collection_id) ON DELETE CASCADE,location_key TEXT NOT NULL,entry_id TEXT NOT NULL,added_utc_ticks INTEGER NOT NULL,directory_location_id TEXT NOT NULL REFERENCES DirectoryLocations(location_id),PRIMARY KEY(collection_id,directory_location_id,location_key)) STRICT;
-            INSERT INTO NewCollectionMembers SELECT m.collection_id,m.location_key,m.entry_id,m.added_utc_ticks,b.location_id FROM CollectionMembers m JOIN Files f ON f.entry_id=m.entry_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_state<>'missing';
+            INSERT INTO NewCollectionMembers SELECT m.collection_id,f.location_key,m.entry_id,m.added_utc_ticks,b.location_id FROM CollectionMembers m JOIN Files f ON f.entry_id=m.entry_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_state<>'missing';
             DROP TABLE CollectionMembers;
             ALTER TABLE NewCollectionMembers RENAME TO CollectionMembers;
             CREATE INDEX IX_CollectionMembers_Location ON CollectionMembers(directory_location_id,location_key,collection_id);
             """+PositionLocationTriggers()+"UPDATE SchemaInfo SET schema_version=7;PRAGMA user_version=7;";
-        cmd.ExecuteNonQuery();OperationMigrationMeasured?.Invoke("directoryLocationPrepared",timer.Elapsed.TotalMilliseconds);cancellation.ThrowIfCancellationRequested();t.Commit();
+        cmd.ExecuteNonQuery();OperationMigrationMeasured?.Invoke("directoryLocationPrepared",timer.Elapsed.TotalMilliseconds);cancellation.ThrowIfCancellationRequested();owned?.Commit();
     }
 
     private static string PositionLocationTriggers()

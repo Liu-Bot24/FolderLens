@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using FolderLens.Infrastructure;
 
 namespace FolderLens.App;
 
@@ -10,27 +11,49 @@ public sealed partial class MainWindow
     private bool quickCollectionUsed,quickCollectionBusy;
     private long collectionChangeVersion;
     private Func<ContentDialog,Func<bool,Task<bool>>,Task>? verifyCollectionDialog;
+    private Func<Task>? verifyCollectionBadgeRead;
+    private Task collectionBadgeTask=Task.CompletedTask;
+    private bool collectionBadgesPending;
     private void RefreshCollectionBadges()
     {
         long version=++collectionChangeVersion;
-        _=RefreshCollectionBadgesCore(version);
+        collectionBadgesPending=true;
+        if(collectionBadgeTask.IsCompleted)collectionBadgeTask=RefreshCollectionBadgesCore(version);
     }
     private async Task RefreshCollectionBadgesCore(long version)
     {
         using var operation=browserWork.Enter();if(operation is null||catalog is null)return;
         try
         {
-            var rows=visible.Where(row=>row.Item is not null).Select(row=>(Row:row,Item:row.Item!)).ToArray();
-            foreach(var batch in rows.Chunk(256))
+            do
             {
-                var flags=await catalog.ReadCollectionFlags(batch.Select(value=>value.Item).ToArray(),lifetime.Token);
-                if(closing||version!=collectionChangeVersion)return;
-                for(int i=0;i<batch.Length;i++)if(ReferenceEquals(batch[i].Row.Item,batch[i].Item))batch[i].Row.SetCollected(flags[i]);
-            }
+                collectionBadgesPending=false;version=collectionChangeVersion;
+                var rows=visible.Where(row=>row.Item is not null).Select(row=>(Row:row,Item:row.Item!)).ToArray();
+                foreach(var batch in rows.Chunk(256))
+                {
+                    var flags=await catalog.ReadCollectionFlags(batch.Select(value=>value.Item).ToArray(),lifetime.Token);
+                    if(verifyCollectionBadgeRead is {} barrier)await barrier();
+                    if(closing)return;
+                    if(version!=collectionChangeVersion){collectionBadgesPending=true;break;}
+                    for(int i=0;i<batch.Length;i++)
+                    {
+                        var captured=batch[i];if(!visible.Contains(captured.Row))continue;
+                        if(captured.Row.Item is {} current&&SameCollectionObservation(current,captured.Item))captured.Row.SetCollected(flags[i]);
+                        else collectionBadgesPending=true;
+                    }
+                }
+                // Coalesce concurrent changes and invalidated observations into
+                // one next pass; never create a query task for each retained row.
+                if(collectionBadgesPending)await Task.Delay(25,lifetime.Token);
+            }while(collectionBadgesPending&&!closing);
         }
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
         catch(Exception error){if(!closing)ShowError(error);}
     }
+    private static bool SameCollectionObservation(SnapshotItem a,SnapshotItem b)=>
+        a.EntryId==b.EntryId&&a.Version==b.Version&&a.PathRevision==b.PathRevision&&a.RelativePath==b.RelativePath&&
+        a.DirectoryId==b.DirectoryId&&a.DirectoryLocationId==b.DirectoryLocationId&&a.BindingRevision==b.BindingRevision&&
+        a.SourceRootId==b.SourceRootId&&a.SourceRootPath==b.SourceRootPath&&a.SourceRootEpoch==b.SourceRootEpoch;
     private void QuickCollectDoubleTapped(object sender,DoubleTappedRoutedEventArgs args)=>args.Handled=true;
     private async void QuickCollectClicked(object sender,RoutedEventArgs args)
     {

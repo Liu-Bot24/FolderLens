@@ -69,13 +69,18 @@ public sealed partial class CatalogStore : IAsyncDisposable
     }
     private static bool InitializeSchema(SqliteConnection c,string name,CancellationToken cancellation,Action<string>? progress)
     {
-        // Backups and migrations can touch a large local catalog. This synchronous
+        // Migrations can touch a large local catalog. This synchronous
         // scope lowers CPU, I/O and memory priority without suspending the work.
         using var background=new BackgroundThreadScope();
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";long version=(long)cmd.ExecuteScalar()!;
         long supported=name=="catalog"?7:5;
         if(version>supported)throw new InvalidDataException("数据库由较新版本创建，请使用匹配版本。");
         bool existing=version!=0;
+        bool migrating=existing&&version<supported;
+        cmd.CommandText="PRAGMA synchronous";long priorSync=(long)cmd.ExecuteScalar()!;
+        if(migrating){cmd.CommandText="PRAGMA synchronous=FULL";cmd.ExecuteNonQuery();}
+        try
+        {
         if(version==0)
         {
             var assembly=typeof(CatalogStore).Assembly;
@@ -85,11 +90,6 @@ public sealed partial class CatalogStore : IAsyncDisposable
         }
         if(name=="catalog"&&version==1)
         {
-            if(existing)
-            {
-                string backup=c.DataSource+".pre-v2-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff",System.Globalization.CultureInfo.InvariantCulture)+".bak";
-                using var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=backup,Pooling=false}.ToString());destination.Open();c.BackupDatabase(destination);
-            }
             using var migration=c.BeginTransaction();cmd.Transaction=migration;cmd.CommandText="""
                 CREATE TABLE FileDetails(entry_id TEXT PRIMARY KEY REFERENCES Files(entry_id) ON DELETE CASCADE,source_version INTEGER NOT NULL CHECK(source_version>=1),provider_version TEXT NOT NULL,detail_json TEXT NOT NULL CHECK(length(CAST(detail_json AS BLOB))<=65536),updated_utc_ticks INTEGER NOT NULL) STRICT;
                 UPDATE SchemaInfo SET schema_version=2;
@@ -99,11 +99,6 @@ public sealed partial class CatalogStore : IAsyncDisposable
         }
         if(name=="catalog"&&version==2)
         {
-            if(existing)
-            {
-                string backup=c.DataSource+".pre-v3-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff",System.Globalization.CultureInfo.InvariantCulture)+".bak";
-                using var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=backup,Pooling=false}.ToString());destination.Open();c.BackupDatabase(destination);
-            }
             using var migration=c.BeginTransaction();cmd.Transaction=migration;cmd.CommandText="""
                 UPDATE Files SET kind='other' WHERE kind='image' AND page_count>1 AND is_raw IS NOT 1 AND is_animated IS NOT 1;
                 UPDATE SchemaInfo SET schema_version=3,catalog_revision=catalog_revision+1;
@@ -112,11 +107,6 @@ public sealed partial class CatalogStore : IAsyncDisposable
         }
         if(name=="sessions"&&version==1)
         {
-            if(existing)
-            {
-                string backup=c.DataSource+".pre-v2-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff",System.Globalization.CultureInfo.InvariantCulture)+".bak";
-                using var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=backup,Pooling=false}.ToString());destination.Open();c.BackupDatabase(destination);
-            }
             using var migration=c.BeginTransaction();cmd.Transaction=migration;cmd.CommandText="""
                 ALTER TABLE ResultItems ADD COLUMN snapshot_kind TEXT NOT NULL DEFAULT 'other' CHECK(snapshot_kind IN('image','video','audio','text','markdown','other'));
                 UPDATE ResultSessions SET state='failed',error_code='SnapshotSchemaChanged',active_leases=0 WHERE state IN('building','ready');
@@ -126,11 +116,6 @@ public sealed partial class CatalogStore : IAsyncDisposable
         }
         if(name=="sessions"&&version==2)
         {
-            if(existing)
-            {
-                string backup=c.DataSource+".pre-v3-"+DateTime.UtcNow.ToString("yyyyMMddHHmmssfff",System.Globalization.CultureInfo.InvariantCulture)+".bak";
-                using var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=backup,Pooling=false}.ToString());destination.Open();c.BackupDatabase(destination);
-            }
             using var migration=c.BeginTransaction();cmd.Transaction=migration;cmd.CommandText="""
                 ALTER TABLE ResultItems ADD COLUMN group_id TEXT;
                 CREATE TABLE ResultGroups(
@@ -144,8 +129,8 @@ public sealed partial class CatalogStore : IAsyncDisposable
                 """;cmd.ExecuteNonQuery();migration.Commit();version=3;
         }
         if(version==3){MigrateCollections(c,name,existing);version=4;}
-        if(name=="catalog"&&version==4){MigrateCollectionLocations(c,existing,cancellation,progress);version=6;}
-        if(name=="catalog"&&version==5){MigrateCollectionIdentityHistory(c,cancellation,progress);version=6;}
+        if(name=="catalog"&&version==4){MigrateCollectionLocations(c,existing,cancellation,progress);version=7;}
+        if(name=="catalog"&&version==5){MigrateCollectionIdentityHistory(c,cancellation,progress);version=7;}
         if(name=="catalog"&&version==6)MigrateDirectoryLocations(c,existing,cancellation,progress);
         if(name=="sessions"&&version==4)
         {
@@ -154,6 +139,11 @@ public sealed partial class CatalogStore : IAsyncDisposable
             cmd.ExecuteNonQuery();cancellation.ThrowIfCancellationRequested();t.Commit();
         }
         return true;
+        }
+        finally
+        {
+            if(migrating){cmd.Transaction=null;cmd.CommandText="PRAGMA synchronous="+priorSync;cmd.ExecuteNonQuery();}
+        }
     }
     public Task<long> OpenRoot(string rootId,string path,CancellationToken cancellation=default)=>writer.Execute(c=>
     {
