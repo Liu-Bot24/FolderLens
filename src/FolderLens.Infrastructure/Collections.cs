@@ -116,9 +116,10 @@ public sealed partial class CatalogStore
     },cancellation);
     public Task<int> ChangeCollectionMembers(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,bool add,CancellationToken cancellation=default)=>ChangeCollectionMembersCore(collectionIds,entryIds,null,add,cancellation);
     public Task<int> ChangeCollectionItems(IReadOnlyList<string> collectionIds,IReadOnlyList<SnapshotItem> items,bool add,CancellationToken cancellation=default)=>ChangeCollectionMembersCore(collectionIds,items.Select(i=>i.EntryId).ToArray(),items,add,cancellation);
-    private Task<int> ChangeCollectionMembersCore(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,IReadOnlyList<SnapshotItem>? observed,bool add,CancellationToken cancellation)=>writer.Execute(c=>
+    public Task<int> RemoveItemFromCollections(SnapshotItem item,CancellationToken cancellation=default)=>ChangeCollectionMembersCore([],[item.EntryId],[item],false,cancellation,allCollections:true);
+    private Task<int> ChangeCollectionMembersCore(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,IReadOnlyList<SnapshotItem>? observed,bool add,CancellationToken cancellation,bool allCollections=false)=>writer.Execute(c=>
     {
-        if(collectionIds.Count is <1 or >64||entryIds.Count>256)throw new ArgumentException("收藏批次大小无效。");
+        if((!allCollections&&(collectionIds.Count is <1 or >64))||entryIds.Count>256||(allCollections&&add))throw new ArgumentException("收藏批次大小无效。");
         using var transaction=c.BeginTransaction();int changed=0;
         using(var check=c.CreateCommand())
         {
@@ -138,9 +139,9 @@ public sealed partial class CatalogStore
             INSERT INTO CollectionMembers(collection_id,location_key,entry_id,added_utc_ticks,directory_location_id)
             SELECT $collection,f.location_key,f.entry_id,$now,b.location_id FROM Files f JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_id=$entry
             ON CONFLICT(collection_id,directory_location_id,location_key) DO NOTHING
-            """:"DELETE FROM CollectionMembers WHERE collection_id=$collection AND (directory_location_id,location_key)=(SELECT b.location_id,f.location_key FROM Files f JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_id=$entry)";
+            """:"DELETE FROM CollectionMembers WHERE "+(allCollections?"":"collection_id=$collection AND ")+"(directory_location_id,location_key)=(SELECT b.location_id,f.location_key FROM Files f JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id WHERE f.entry_id=$entry)";
         command.Parameters.AddWithValue("$collection","");command.Parameters.AddWithValue("$entry","");if(add)command.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
-        foreach(string collection in collectionIds.Distinct())foreach(string entry in entryIds.Distinct())
+        foreach(string collection in allCollections?new[]{""}:collectionIds.Distinct())foreach(string entry in entryIds.Distinct())
         {cancellation.ThrowIfCancellationRequested();command.Parameters["$collection"].Value=collection;command.Parameters["$entry"].Value=entry;changed+=command.ExecuteNonQuery();}
         cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;
     },cancellation);
