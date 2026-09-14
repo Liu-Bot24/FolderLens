@@ -16,6 +16,7 @@ public sealed partial class MainWindow
     }
     private async Task OpenCapacityWindow()
     {
+        long requestedForeground=WindowFocus.Foreground;
         var store=catalog!;string capturedRoot=rootId,capturedPath=root;
         ResultHandle? handle=resultHandle is {IsPendingView:false}?resultHandle:null;bool retained=false;
         try
@@ -28,7 +29,7 @@ public sealed partial class MainWindow
                 try{await window.ShutdownAsync();}catch(Exception error){ShowError(error);}
                 finally{if(ReferenceEquals(capacityWindow,window))capacityWindow=null;}
             };
-            window.Activate();
+            WindowFocus.Show(window,requestedForeground);
         }
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
         catch(Exception error){ShowError(error);}

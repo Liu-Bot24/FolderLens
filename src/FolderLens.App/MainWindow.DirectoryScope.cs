@@ -15,6 +15,7 @@ public sealed partial class MainWindow
     }
     private async Task BrowseCapacityDirectory(string expectedRoot,string path,bool directFiles)
     {
+        long requestedForeground=WindowFocus.Foreground;
         if(closing||replacingRoot||rootId!=expectedRoot)throw new InvalidOperationException("主窗口根目录已变化，请关闭旧看板后从当前目录重新打开。");
         await ReturnToBrowser();
         if(closing||replacingRoot||rootId!=expectedRoot)throw new OperationCanceledException("浏览目录已变化。");
@@ -24,7 +25,7 @@ public sealed partial class MainWindow
         await RestoreSavedView(next);
         if(closing||rootId!=expectedRoot||rootVersion!=rootChangeVersion)throw new OperationCanceledException("浏览目录已变化。");
         if(resultHandle?.Generation!=generation)throw new InvalidOperationException("目录范围结果未建立，请在主窗口查看错误后重试。");
-        Activate();
+        WindowFocus.Show(this,requestedForeground);
     }
     private async void ClearDirectoryScope(object sender,RoutedEventArgs args)
     {

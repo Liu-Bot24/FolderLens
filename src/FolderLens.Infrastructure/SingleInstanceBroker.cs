@@ -8,6 +8,7 @@ namespace FolderLens.Infrastructure;
 
 public sealed record ActivationRequest(string? Root,string? File)
 {
+    public long RequestedForeground {get;init;}
     public static ActivationRequest Parse(string[] arguments)
     {
         string? Value(string option){int index=Array.IndexOf(arguments,option);return index>=0&&index+1<arguments.Length?arguments[index+1]:null;}

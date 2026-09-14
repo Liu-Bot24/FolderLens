@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         FilesGrid.UpdateLayout();await Task.Delay(150);
         var item=(GridViewItem)FilesGrid.ContainerFromIndex(2);
         if(!item.IsSelected)throw new InvalidOperationException("选中项未同步到缩略图容器。");
-        Search.Focus(FocusState.Programmatic);
+        FocusIfForeground(Search,FocusState.Programmatic);
         await Task.Delay(150);
         async Task<int> Capture(string name)
         {
@@ -33,12 +33,12 @@ public sealed partial class MainWindow
             return borderPixels;
         }
         int unfocused=await Capture("selection-unfocused");
-        await SetImmersive(true);await ReturnToBrowser();Search.Focus(FocusState.Programmatic);await Task.Delay(150);
+        await SetImmersive(true);await ReturnToBrowser();FocusIfForeground(Search,FocusState.Programmatic);await Task.Delay(150);
         item=(GridViewItem)FilesGrid.ContainerFromIndex(2);int returned=await Capture("selection-returned");
         report["blueBorderPixels"]=new{unfocused,returned};
         if(!item.IsSelected||Math.Min(unfocused,returned)<200)throw new InvalidOperationException("失去焦点或返回列表后，选中项缺少清晰蓝色边框。");
         DetailsMode.IsChecked=true;ToggleView(DetailsMode,new RoutedEventArgs());FilesList.UpdateLayout();await Task.Delay(100);
-        FilesList.SelectedIndex=2;Search.Focus(FocusState.Programmatic);await Task.Delay(100);
+        FilesList.SelectedIndex=2;FocusIfForeground(Search,FocusState.Programmatic);await Task.Delay(100);
         var detail=(ListViewItem)FilesList.ContainerFromIndex(2);
         var bitmap=new RenderTargetBitmap();await bitmap.RenderAsync(detail);
         byte[] detailPixels=(await bitmap.GetPixelsAsync()).ToArray();int blue=0;

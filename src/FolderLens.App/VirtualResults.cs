@@ -13,6 +13,13 @@ public sealed class FileRow : ObservableObject
     public long Ordinal {get;private set;}
     private string name="加载中…",path="",detail="";
     private ImageSource? thumbnail;
+    private bool isCollected,quickCollectBusy;
+    public bool IsCollected=>isCollected;
+    public string CollectionGlyph=>isCollected?"\uE735":"\uE734";
+    public string CollectionHint=>isCollected?"已收藏 · 点击快速加入收藏夹":"快速收藏";
+    public bool QuickCollectEnabled=>Item is not null&&!quickCollectBusy;
+    public void SetCollected(bool value){if(SetProperty(ref isCollected,value)){OnPropertyChanged(nameof(IsCollected));OnPropertyChanged(nameof(CollectionGlyph));OnPropertyChanged(nameof(CollectionHint));}}
+    public void SetQuickCollectBusy(bool value){quickCollectBusy=value;OnPropertyChanged(nameof(QuickCollectEnabled));}
     private string thumbnailError="";
     public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
     public string ThumbnailErrorLabel=>Kind=="video"?"视频封面不可用":"缩略图不可用";
@@ -67,12 +74,13 @@ public sealed class FileRow : ObservableObject
     public SnapshotItem? Item {get;private set;}
     public FileRow(long ordinal)=>Ordinal=ordinal;
     public void Relocate(long ordinal,SnapshotGroup? group){Ordinal=ordinal;if(Item is not null)Item=Item with{Ordinal=ordinal,Group=group};}
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced)DurationText="";Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));Detail=$"{System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant()} · {FormatBytes(item.Bytes)}";FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";Detail=error.Message;}
     public void DescribeImage(int width,int height,string format)=>Detail=$"{width} × {height}  {format.ToUpperInvariant()}";
-    public void UpdateProperties(FileProperties file)
+    public void UpdateProperties(FileProperties file,bool updateCollection=true)
     {
         if(Item is null||Item.EntryId!=file.EntryId||Item.Version!=file.Version)return;
+        if(updateCollection)SetCollected(file.IsCollected);OnPropertyChanged(nameof(QuickCollectEnabled));
         Name=file.Name;RelativePath=file.RelativePath;Kind=file.Kind;ModifiedUtcTicks=file.ModifiedUtcTicks;HydrationState=file.HydrationState;
         entryState=file.EntryState;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));
         Resolution=file.Width is {} w&&file.Height is {} h?$"{w:N0} × {h:N0}":"未知";AllocatedText=file.AllocatedBytes is {} bytes?FormatBytes(bytes):"未知";
