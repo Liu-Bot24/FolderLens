@@ -61,7 +61,7 @@ internal sealed class AdvancedFilterEditor
             if (audio || filter.AudioCodecs.Length > 0) playback.Children.Add(audioCodec);
         }
         var datePanel = Section("日期", false);
-        datePanel.Children.Add(new TextBlock{Text="修改日期与创建日期来自文件属性；拍摄日期来自图片元数据。导出文件名中的日期不会自动当作上述日期。",TextWrapping=TextWrapping.Wrap,FontSize=12});
+        datePanel.Children.Add(new TextBlock{Text="修改日期与创建日期来自文件属性；拍摄日期来自照片内记录的拍摄时间。导出文件名中的日期不会自动当作上述日期。",TextWrapping=TextWrapping.Wrap,FontSize=12});
         foreach (var field in new[] { ("modified", "修改日期"), ("created", "创建日期"), ("captured", "拍摄日期") })
         {
             var saved = filter.Dates.SingleOrDefault(d => d.Field == field.Item1);

@@ -7,7 +7,7 @@ using Microsoft.Data.Sqlite;
 namespace FolderLens.Infrastructure;
 
 public sealed record ScanProgress(long Files,long Directories,long Errors,string State);
-public sealed class RootIdentityChangedException():IOException("根目录的卷或创建身份已改变；保留旧索引，请以新的根上下文打开。");
+public sealed class RootIdentityChangedException():IOException("文件夹或所在磁盘已更换，请重新打开文件夹。");
 
 /// <summary>Disk-backed fair traversal; only a completed directory can reconcile unseen entries.</summary>
 public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExecutable=null)

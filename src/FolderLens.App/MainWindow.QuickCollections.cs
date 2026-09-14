@@ -80,7 +80,7 @@ public sealed partial class MainWindow
                 using var removeStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);removeStop.CancelAfter(TimeSpan.FromSeconds(30));
                 await catalog.RemoveItemFromCollections(item,removeStop.Token);
                 if(row.Item is {} current&&SameCollectionObservation(current,item))row.SetCollected(false);
-                RefreshCollectionBadges();await RefreshCollectionsTree();Status.Text="已取消收藏，原文件保留。";
+                RefreshCollectionBadges();await RefreshCollectionsTree();Status.Text="已取消收藏。";
                 if(activeCollectionId is not null||includedCollectionIds.Length+excludedCollectionIds.Length>0)await RefreshQuery(preserveViewport:true);
                 return;
             }

@@ -67,22 +67,17 @@ public sealed partial class MainWindow
         try
         {
             if(verifyVideoMetadataBarrier is not null)await verifyVideoMetadataBarrier(token);
-            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,new Progress<long>(count=>{if(Current())ReportMetadataProgress(count);}),token,activeCollectionId,observedOnly:true);
+            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,null,token,activeCollectionId,observedOnly:true);
             if(Current())
             {
                 // Cover readiness does not imply that catalog metadata was ready when
                 // that cover loaded. Refresh properties without replacing its bitmap.
                 await Task.WhenAll(visible.Where(row=>row.Kind=="video").ToArray().Select(row=>LoadRowProperties(row,refresh:true)));
                 if(!Current())return;
-                if(browserScanError is null)Status.Text="文件信息已补充，当前浏览顺序保持不变。";
                 if(!BrowserSequenceLocked&&!restoringView)await RefreshQuery(preserveViewport:true,scanPreview:true);
             }
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
-    }
-    private void ReportMetadataProgress(long count)
-    {
-        if(count%32==0)Status.Text=$"已补充 {count:N0} 个文件的信息。";
     }
     private async void AdvancedFilters(object sender,RoutedEventArgs e)
     {
@@ -121,7 +116,7 @@ public sealed partial class MainWindow
             }
             var skipSection=editor.Section("不扫描的文件夹（高级）",rules.Count>0);
             if(sourceCollection is not null)editor.View.Children.Last().Visibility=Visibility.Collapsed;
-            skipSection.Children.Add(new TextBlock{Text="这些文件夹不进入索引，例外保留不能恢复其内容。修改后需要重新扫描。通常请使用上面的文件夹筛选。",TextWrapping=TextWrapping.Wrap});
+            skipSection.Children.Add(new TextBlock{Text="不会读取这些文件夹及其子文件夹，即使设置了保留规则也不会显示。修改后请刷新目录。若只是暂时隐藏文件，请使用上方的文件夹筛选。",TextWrapping=TextWrapping.Wrap});
             var list=new ListView{MaxHeight=144};
             void UpdateRules()=>list.ItemsSource=rules.Select(r=>r.RelativePath).ToArray();
             UpdateRules();skipSection.Children.Add(list);

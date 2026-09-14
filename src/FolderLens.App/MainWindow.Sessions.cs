@@ -96,7 +96,7 @@ public sealed partial class MainWindow
             list.UpdateLayout();
             if((anchorOrdinal??selectedOrdinal) is {} visible)list.ScrollIntoView(sourceResults[(int)visible],ScrollIntoViewAlignment.Leading);
             else FindScrollViewer(list)?.ChangeView(null,double.IsFinite(saved.ScrollOffset)?Math.Max(0,saved.ScrollOffset):0,null,true);
-            Status.Text="已恢复筛选、浏览方式和位置。";
+            Status.Text="";
     }
     private async Task SaveLastSession(SavedView? captured=null)
     {

@@ -30,5 +30,5 @@ internal static class AppPaths
         if(Path.IsPathRooted(relative)||relative.Split('\\','/').Any(s=>s is ".." or "."||s.Contains(':')))throw new InvalidDataException("便携数据目录配置无效。");
         return Local(Path.Combine(AppContext.BaseDirectory,relative));
     }
-    private static string Local(string path){path=Path.GetFullPath(path);if(new Uri(path).IsUnc||new DriveInfo(Path.GetPathRoot(path)!).DriveType==DriveType.Network)throw new InvalidOperationException("索引和缓存必须保存在本地磁盘。");return path;}
+    private static string Local(string path){path=Path.GetFullPath(path);if(new Uri(path).IsUnc||new DriveInfo(Path.GetPathRoot(path)!).DriveType==DriveType.Network)throw new InvalidOperationException("应用数据目录不能放在网络磁盘上，请选择本机磁盘。");return path;}
 }

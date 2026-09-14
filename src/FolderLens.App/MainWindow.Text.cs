@@ -44,7 +44,7 @@ public sealed partial class MainWindow
     private Task ResetTextSession()
     {
         textSessionStop.Cancel();textSessionStop.Dispose();textSessionStop=CancellationTokenSource.CreateLinkedTokenSource(selectionStop.Token,lifetime.Token);textSessionGeneration++;
-        textWindowStop.Cancel();textSearchStop.Cancel();textSearchGeneration++;textSearchRunning=false;previousSearch=null;displayedText=null;remoteText=null;TextLineStatus.Text="行索引准备中…";
+        textWindowStop.Cancel();textSearchStop.Cancel();textSearchGeneration++;textSearchRunning=false;previousSearch=null;displayedText=null;remoteText=null;TextLineStatus.Text="正在读取文本…";
         textCopyStop?.Cancel();textCopyGeneration++;wholeTextSelected=false;TextSelectionStatus.Text="";ClearTextSearchResults();
         return Task.CompletedTask;
     }
@@ -70,12 +70,12 @@ public sealed partial class MainWindow
                 var progress=await client.IndexStep(4,token);
                 if(current!=selection||version!=textSessionGeneration||closing)return;
                 if(progress.Complete||clock.ElapsedMilliseconds>=200)
-                {TextLineStatus.Text=progress.Complete?$"共 {progress.TotalLines:N0} 行":$"已索引 {FileRow.FormatBytes(progress.IndexedBytes)} / {FileRow.FormatBytes(progress.Length)}";clock.Restart();}
+                {TextLineStatus.Text=progress.Complete?$"共 {progress.TotalLines:N0} 行":$"已读取 {FileRow.FormatBytes(progress.IndexedBytes)} / {FileRow.FormatBytes(progress.Length)}";clock.Restart();}
                 if(progress.Complete)return;
                 await Task.Delay(10,token);
             }
         }
-        catch(OperationCanceledException){}catch(Exception ex){if(current==selection&&version==textSessionGeneration&&!closing)TextLineStatus.Text="行索引暂不可用："+ex.Message;}
+        catch(OperationCanceledException){}catch(Exception ex){if(current==selection&&version==textSessionGeneration&&!closing)TextLineStatus.Text="无法读取文本行号："+ex.Message;}
     }
     private async Task DisposeTextSession()
     {

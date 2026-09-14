@@ -192,7 +192,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
     }
-    private void CancelScan(object sender,RoutedEventArgs e){activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在取消扫描；已发现的索引将保留。";}
+    private void CancelScan(object sender,RoutedEventArgs e){activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";}
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
@@ -248,7 +248,7 @@ public sealed partial class MainWindow : Window
             {
                 await RefreshQuery();
                 if(requested!=rootChangeVersion||closing||scanStop.IsCancellationRequested)return;
-                Status.Text="正在浏览收藏夹；原文件保留在各自目录。";
+                Status.Text="";
                 _=StartMetadataRefresh();
                 return;
             }
@@ -264,7 +264,7 @@ public sealed partial class MainWindow : Window
                     _=RefreshQuery(preserveViewport:true,scanPreview:true);
                 }
             });
-            Status.Text="正在扫描；文件总量尚未确定。";
+            Status.Text="正在查找文件…";
             bool recursive=true;scannedPolicy=CurrentFilter();
             ExclusionSpec[] exclusions=ScanExclusions();
             string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
@@ -293,7 +293,7 @@ public sealed partial class MainWindow : Window
                 return;
             }
             if(completedScan.State=="partial"&&completedScan.Files==0){ShowScanError(new IOException("无法读取此文件夹，请检查磁盘连接和访问权限后刷新。"));return;}
-            if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
+            if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 发现更多文件，点击“应用筛选”查看。";}
             if(settings is not null)await settings.Save("last-root.json",activeRoot);
             if(activeId==rootId&&!scanStop.IsCancellationRequested)_=StartMetadataRefresh();
             if(reconcilePending)_=Reconcile();
@@ -310,7 +310,7 @@ public sealed partial class MainWindow : Window
         var rootToken=scanStop.Token;long rootVersion=rootChangeVersion;
         try
         {
-            if(force)Status.Text="正在核对目录，保留已有结果…";
+            if(force)Status.Text="正在刷新文件列表…";
             string? executable=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var task=Task.Run(()=>BackgroundScan.WithSlot(backgroundScanSlots,rootToken,async token=>
             {
@@ -329,7 +329,7 @@ public sealed partial class MainWindow : Window
                 if(report.State=="missing"){ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
             }
             _=StartMetadataRefresh();
-            Status.Text=report.State=="ready"?"目录变化已核对，文件列表已更新。":"部分目录尚未就绪，将自动重试；已保留本次发现的结果。";
+            Status.Text=report.State=="ready"?"":"部分文件夹暂时无法读取，稍后会自动重试。";
         }
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
         catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}
@@ -376,7 +376,7 @@ public sealed partial class MainWindow : Window
             if(!IsCurrent() || closing){await catalog.ReleaseSnapshot(handle.Id);return;}
             // The most recently built candidate is not necessarily the one displayed.
             // Hold a real lease until replacement/close, including across discarded builds.
-            if(!await catalog.RetainSnapshot(handle.Id))throw new InvalidOperationException("结果快照已失效，请重新应用筛选。");
+            if(!await catalog.RetainSnapshot(handle.Id))throw new InvalidOperationException("文件列表已变化，请刷新后重试。");
             candidateLease=handle.Id;
             if(verifyCandidateBarrier is not null)await verifyCandidateBarrier(queryToken);
             if(!IsCurrent()||closing||PreviewInterrupted())return;
@@ -895,7 +895,7 @@ public sealed partial class MainWindow : Window
             else return;
             var cacheWrite=await thumbnailCache.StoreOptional(cacheKey,asset,token);cacheLease=cacheWrite.Lease;Mark("cacheStore");
             if(!OwnsRow())return;
-            if(cacheWrite.Warning is not null)Status.Text=cacheWrite.Warning;
+            if(cacheWrite.Warning is not null)RecordWebView("ThumbnailCache: "+cacheWrite.Warning);
             var bitmap=new BitmapImage();using(var imageStream=cacheLease?.OpenRead()??File.OpenRead(asset)){await bitmap.SetSourceAsync(imageStream.AsRandomAccessStream());}if(OwnsRow())row.Thumbnail=bitmap;
             Mark("bitmap");
             if(metadataReply is not null)
@@ -1024,7 +1024,7 @@ public sealed partial class MainWindow : Window
                         if(current!=selection)return;
                         if(await prefetchSourceProbe.Read(path,token)!=imageStamp)throw new IOException("Markdown 图片已发生变化。");
                         long bytes=new FileInfo(image.AssetPath!).Length,pixels=1024L*1024;
-                        if(resourceBytes+bytes>32L*1024*1024||resourcePixels+pixels>32L*1024*1024){Status.Text="Markdown 图片达到预览预算，其余图片未加载。";break;}
+                        if(resourceBytes+bytes>32L*1024*1024||resourcePixels+pixels>32L*1024*1024){Status.Text="此文档的图片较多，部分图片未加载。";break;}
                         markdownImages[resource.GetProperty("token").GetString()!]=await File.ReadAllBytesAsync(image.AssetPath!,token);resourceBytes+=bytes;resourcePixels+=pixels;if(++resourceIndex>=200)break;
                     }
                     finally{await thumbnailWorker.ReleaseAsset(image);}
