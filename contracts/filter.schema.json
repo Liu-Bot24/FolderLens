@@ -64,6 +64,10 @@
     "recursive": {
       "type": "boolean"
     },
+    "maxFolderLevels": {
+      "type": ["integer", "null"], "minimum": 1, "maximum": 32767, "default": null,
+      "description": "View-only limit relative to directoryScope: current directory is level 1; null includes all levels. Does not change scanning; ignored for virtual collections."
+    },
     "directoryScope": {
       "type": "string", "maxLength": 32767, "default": "",
       "description": "Relative directory within rootId; empty means the scan root. Runtime validation rejects absolute paths, traversal, empty segments and invalid filename characters."
@@ -290,6 +294,7 @@
       }
     },
     "searchScope": {
+      "description": "Legacy compatibility field. Search always matches filenames; nameAndPath no longer enables folder or path matching.",
       "enum": [
         "name",
         "nameAndPath"

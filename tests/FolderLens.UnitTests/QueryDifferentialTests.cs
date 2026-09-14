@@ -131,7 +131,7 @@ public sealed class QueryDifferentialTests
             long hi=date.Clock=="utc"?DateTimeOffset.Parse(date.EndExclusive,CultureInfo.InvariantCulture).UtcTicks:DateTime.Parse(date.EndExclusive,CultureInfo.InvariantCulture).Ticks;
             Test(date.Clock=="captureWall"?"captureWall":date.Field,v=>(long)v>=lo&&(long)v<hi,date.Field=="captured"?"captureTime":"");
         }
-        foreach(var term in Words(f.NamePathQuery))Known(((string)r.Fields[f.SearchScope=="name"?"name":"path"]!).ToUpperInvariant().Contains(term.ToUpperInvariant(),StringComparison.Ordinal));
+        foreach(var term in Words(f.NamePathQuery))Known(((string)r.Fields["name"]!).ToUpperInvariant().Contains(term.ToUpperInvariant(),StringComparison.Ordinal));
         foreach(var exclusion in f.Exclusions){string p=exclusion.RelativePath.Replace('/','\\');Known(r.Path!=p&&!r.Path.StartsWith(p+"\\",StringComparison.Ordinal));}
         return states.Contains("NoMatch")?"NoMatch":states.Contains("Unresolvable")?"Unresolvable":states.Contains("Pending")?"Pending":"Match";
     }

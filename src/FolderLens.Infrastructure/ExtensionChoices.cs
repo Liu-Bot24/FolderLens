@@ -11,7 +11,7 @@ public sealed partial class CatalogStore
         // A directory/category facet must remain available even when another filter
         // has no matches or metadata has not been decoded yet.
         var filter=new FilterSpec{RootId=scope.RootId,CollectionId=scope.CollectionId,IncludeCollections=scope.IncludeCollections,ExcludeCollections=scope.ExcludeCollections,DirectoryScope=scope.DirectoryScope,ScopeDirectFiles=scope.ScopeDirectFiles,
-            Recursive=scope.Recursive,Kinds=scope.Kinds,Extensions=scope.Extensions,ShowHidden=scope.ShowHidden,
+            Recursive=scope.Recursive,MaxFolderLevels=scope.MaxFolderLevels,Kinds=scope.Kinds,Extensions=scope.Extensions,ShowHidden=scope.ShowHidden,
             Exclusions=scope.Exclusions,DirectoryRules=scope.DirectoryRules};
         var query=FilterSql.Build(filter);
         using var command=c.CreateCommand();command.CommandTimeout=5;
