@@ -36,6 +36,7 @@ public sealed partial class MainWindow
         ResetViewerGesture();slideShow=false;slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;animationRevision++;
         StopAudio();_=ResetTextSession();ClearImage();FinishPreview();
         TextContent.Text="";FileTitle.Text="未选择文件";QualityLabel.Text="请选择当前结果中的文件。";
+        PreviewCopyFeedback.Visibility=Visibility.Collapsed;
         foreach(var element in new FrameworkElement[]{TextScroll,TextTools,MarkdownHost,AudioTools,FrameTools})element.Visibility=Visibility.Collapsed;
         cloudPreviewButton!.Visibility=Visibility.Collapsed;markdownImages.Clear();UpdateViewerInformation();
     }

@@ -7,20 +7,26 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
-    private sealed record CollectionNode(string Id,string Name,long Count)
+    private sealed record CollectionNode(string Id,string Name,long Count):INavigationNodePresentation
     {
-        public override string ToString()=>$"★ {Name} ({Count:N0})";
+        public string NavigationLabel=>$"{Name} ({Count:N0})";
+        public string NavigationGlyph=>"\uE734";
+        public override string ToString()=>NavigationLabel;
     }
     private TreeViewNode? collectionsTreeRoot;
     private IReadOnlyList<FileCollection> fileCollections=[];
     private string? activeCollectionId;
     private string[] includedCollectionIds=[],excludedCollectionIds=[];
+    private void EnsureCollectionsTreeRoot()
+    {
+        if(collectionsTreeRoot is null){collectionsTreeRoot=new(){Content=new NavigationGroup("收藏夹"),IsExpanded=true};FolderTree.RootNodes.Insert(0,collectionsTreeRoot);}
+    }
     private async Task RefreshCollectionsTree()
     {
         if(catalog is null)return;
         fileCollections=await catalog.ReadCollections(lifetime.Token);if(closing)return;
-        if(collectionsTreeRoot is null){collectionsTreeRoot=new(){Content=new NavigationGroup("收藏夹"),IsExpanded=true};FolderTree.RootNodes.Insert(0,collectionsTreeRoot);}
-        collectionsTreeRoot.Children.Clear();
+        EnsureCollectionsTreeRoot();
+        collectionsTreeRoot!.Children.Clear();
         foreach(var collection in fileCollections)
         {
             var node=new TreeViewNode{Content=new CollectionNode(collection.Id,collection.Name,collection.Count)};collectionsTreeRoot.Children.Add(node);

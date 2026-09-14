@@ -7,6 +7,18 @@ namespace FolderLens.UnitTests;
 public sealed class CapacityServiceTests
 {
     [Fact]
+    public async Task ScanTerminationChangesLiveStampWithoutChangingFrozenResult()
+    {
+        await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")));
+        await catalog.Initialize();await catalog.SeedBenchmark(4);
+        var service=new CapacityService(catalog);var before=await service.ChangeStamp("benchmark",CancellationToken.None);
+        var handle=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark"},1,1);
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Roots SET scan_state='cancelled'; UPDATE SchemaInfo SET catalog_revision=catalog_revision+1";return cmd.ExecuteNonQuery();});
+        var stamp=await service.ChangeStamp("benchmark",CancellationToken.None);Assert.Equal("cancelled",stamp.State);Assert.True(stamp.Revision>before.Revision);
+        var partial=await service.EntireRoot("benchmark",CancellationToken.None);Assert.False(partial.IsComplete);Assert.Equal(stamp.Revision,partial.Revision);
+        var frozen=await service.Result(handle,CancellationToken.None);Assert.True(frozen.IsComplete);Assert.Equal(4,frozen.Rows.Single(r=>r.RelativePath=="").SubtreeFiles);
+    }
+    [Fact]
     public async Task AggregateFailureStopsBoundedProducerAndReportsOverflow()
     {
         await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-capacity",Guid.NewGuid().ToString("N")));

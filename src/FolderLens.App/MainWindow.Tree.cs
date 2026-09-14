@@ -8,17 +8,23 @@ public sealed partial class MainWindow
 {
     private TreeViewNode? activeTreeRoot;
     private TreeViewNode? computerTreeRoot;
-    private sealed record NavigationGroup(string Label){public override string ToString()=>Label;}
+    private sealed record NavigationGroup(string Label):INavigationNodePresentation
+    {
+        public string NavigationLabel=>Label;
+        public string NavigationGlyph=>Label=="收藏夹"?"\uE734":"\uE770";
+        public override string ToString()=>Label;
+    }
     private async Task InitializeNavigationTree()
     {
-        await RefreshCollectionsTree();
+        // Basic navigation is available even while the catalog is opening or migrating.
+        EnsureCollectionsTreeRoot();
         var locations=await Task.Run(NavigationLocations.Read,lifetime.Token);
         if(closing)return;
         foreach(var place in locations.Places)
-            FolderTree.RootNodes.Add(new TreeViewNode{Content=new FolderNode(place.Path,place.Label),HasUnrealizedChildren=true});
+            FolderTree.RootNodes.Add(new TreeViewNode{Content=new FolderNode(place.Path,place.Label,Icon:place.Label switch{"桌面"=>"\uE977","下载"=>"\uE896","文档"=>"\uE8A5","图片"=>"\uE8B9","音乐"=>"\uE8D6","视频"=>"\uE8B2","用户文件夹"=>"\uE77B",_=>"\uE8B7"}),HasUnrealizedChildren=true});
         computerTreeRoot=new TreeViewNode{Content=new NavigationGroup("此电脑"),IsExpanded=true};
         foreach(string drive in locations.Drives)
-            computerTreeRoot.Children.Add(new TreeViewNode{Content=new FolderNode(drive,drive.TrimEnd('\\')),HasUnrealizedChildren=true});
+            computerTreeRoot.Children.Add(new TreeViewNode{Content=new FolderNode(drive,drive.TrimEnd('\\'),Icon:"\uEDA2"),HasUnrealizedChildren=true});
         FolderTree.RootNodes.Add(computerTreeRoot);
     }
     private Task? treeRefreshTask;
@@ -117,7 +123,7 @@ public sealed partial class MainWindow
         }
         node.HasUnrealizedChildren=false;
     }
-    private static string FolderLabel(string path)=>"📁 "+(Path.GetFileName(path.TrimEnd('\\')) is {Length:>0} name?name:path);
+    private static string FolderLabel(string path)=>Path.GetFileName(path.TrimEnd('\\')) is {Length:>0} name?name:path;
     private static TreeViewNode CreateFolderNode(string root,string id,string relative)=>new(){Content=new FolderNode(Path.Combine(root,relative),FolderLabel(relative),id,relative,root),HasUnrealizedChildren=true};
 
     private void QueueTreeRefresh()
