@@ -65,4 +65,19 @@ public sealed class BrowseDepthTests
         Assert.Equal(3,JsonSerializer.Deserialize<FilterSpec>(JsonSerializer.Serialize(limited,options),options)!.MaxFolderLevels);
         foreach(int value in new[]{0,-1,32768})Assert.Throws<ArgumentException>(()=>(original with{MaxFolderLevels=value}).Validate());
     }
+
+    [Fact]
+    public void LegacyBrowserViewNormalizesBeforeComparingScanPolicyWithoutChangingExclusions()
+    {
+        var current=new FilterSpec{RootId="root",Exclusions=[new("skip","skipScan")]};
+        var legacy=current with{Recursive=false,SearchScope="nameAndPath",DirectoryScope="银河系",MaxFolderLevels=4};
+        Assert.False(current.HasSameScanPolicy(legacy)); // The low-level scan contract stays intact.
+        var restored=legacy.ForBrowserView();
+        Assert.True(current.HasSameScanPolicy(restored));Assert.True(restored.Recursive);
+        Assert.Equal(1,restored.MaxFolderLevels);Assert.Equal("银河系",restored.DirectoryScope);Assert.Equal("name",restored.SearchScope);
+        Assert.Equal(legacy.Exclusions,restored.Exclusions);
+        Assert.False(current.HasSameScanPolicy((legacy with{Exclusions=[new("different","skipScan")]}).ForBrowserView()));
+        Assert.Equal(4,(current with{MaxFolderLevels=4}).ForBrowserView().MaxFolderLevels);
+        Assert.Null(current.ForBrowserView().MaxFolderLevels);
+    }
 }

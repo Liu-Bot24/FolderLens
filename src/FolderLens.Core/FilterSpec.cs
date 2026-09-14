@@ -57,6 +57,11 @@ public sealed record FilterSpec
     public SortSpec Sort { get; init; } = new();
     public FolderGroupingSpec Grouping { get; init; } = new();
 
+    public FilterSpec ForBrowserView()=>this with
+    {
+        Recursive=true,MaxFolderLevels=Recursive?MaxFolderLevels:1,SearchScope="name"
+    };
+
     public bool HasSameScanPolicy(FilterSpec other)=>Recursive==other.Recursive&&
         Exclusions.Where(r=>r.Mode=="skipScan").Select(r=>r.RelativePath.Replace('/','\\')).ToHashSet(StringComparer.Ordinal)
             .SetEquals(other.Exclusions.Where(r=>r.Mode=="skipScan").Select(r=>r.RelativePath.Replace('/','\\')));
