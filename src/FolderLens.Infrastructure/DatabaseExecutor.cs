@@ -6,6 +6,7 @@ namespace FolderLens.Infrastructure;
 /// <summary>A bounded, dedicated database thread; no synchronous SQLite execution escapes to the UI.</summary>
 public sealed class DatabaseExecutor : IAsyncDisposable
 {
+    public static Action<string,double>? OperationMeasured {get;set;}
     private readonly Channel<Action<SqliteConnection>> queue = Channel.CreateBounded<Action<SqliteConnection>>(new BoundedChannelOptions(32) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -54,9 +55,11 @@ public sealed class DatabaseExecutor : IAsyncDisposable
         {
             if (cancellation.IsCancellationRequested) { completion.TrySetCanceled(cancellation); return; }
             using var registration = cancellation.Register(() => SQLitePCL.raw.sqlite3_interrupt(connection.Handle));
+            var measured=OperationMeasured;long started=measured is null?0:System.Diagnostics.Stopwatch.GetTimestamp();
             try { var result = action(connection); if(cancellation.IsCancellationRequested){if(result is IDisposable disposable)disposable.Dispose();cancellation.ThrowIfCancellationRequested();} completion.TrySetResult(result); }
             catch (Exception) when (cancellation.IsCancellationRequested) { completion.TrySetCanceled(cancellation); }
             catch (Exception ex) { completion.TrySetException(ex); }
+            finally { measured?.Invoke(action.Method.DeclaringType?.FullName+"."+action.Method.Name,System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds); }
         }, cancellation).ConfigureAwait(false);
         return await completion.Task.ConfigureAwait(false);
     }

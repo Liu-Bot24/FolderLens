@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
+        StartStartupMeasurements();
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory,"Assets","FolderLens.ico"));
         InitializeDesktop();
@@ -97,19 +98,24 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed+=(_,_)=>{if(!AppWindow.IsVisible||AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter {State:Microsoft.UI.Windowing.OverlappedPresenterState.Minimized})PauseAnimationForDetail();};
         InitializeAudio();
         WorkerResources.Shared.MemoryPressure+=OnPrefetchMemoryPressure;
+        StartupStage("constructWindow");
     }
     private async Task Initialize()
     {
+        if(startupClock is not null)startupShellLoadedAt=startupClock.Elapsed.TotalMilliseconds;
         using var initialization=browserWork.Enter();if(initialization is null||closing)return;
         try
         {
             string[] args=Environment.GetCommandLineArgs();bool deployedVerification=args.Contains("--verify-refresh")&&args.Contains("--verify-deployed");dataDirectory=InitialDataDirectory??await AppPaths.DataDirectory(args);
             await InitializeNavigationTree();
+            StartupStage("navigation");
             if(args.Contains("--verify-refresh")&&args.Contains("--verify-navigation-roots"))VerifyInitialNavigation();
             catalog=await Task.Run(async()=>{var store=new CatalogStore(Path.Combine(dataDirectory,"catalog"));await store.Initialize(lifetime.Token);return store;});
+            StartupStage("catalog");
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));
             await RefreshCollectionsTree();
             await RestoreDesktop();
+            StartupStage("desktopAndCollections");
             string worker=Path.Combine(AppContext.BaseDirectory,"workers","FolderLens.Media.Worker.exe");
             if(!deployedVerification&&!File.Exists(worker))
             {
@@ -127,7 +133,9 @@ public sealed partial class MainWindow : Window
                 extraThumbnailWorkers.Add(extra);thumbnailPool.Enqueue(extra);
             }
             thumbnailCache=new(Path.Combine(dataDirectory,"cache","thumbnails"));await thumbnailCache.Initialize(lifetime.Token);
+            StartupStage("workersAndCache");
             providerIdentity=await thumbnailWorker.GetProviderIdentity(lifetime.Token);
+            StartupStage("providerIdentity");
             capabilityTask=ReadRuntimeCapabilities();
             string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(dataDirectory,"temp","markdown"));
             verificationComponents["content"]=Path.GetRelativePath(AppContext.BaseDirectory,contentExecutable);
@@ -135,6 +143,7 @@ public sealed partial class MainWindow : Window
             string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!deployedVerification&&!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
             verificationComponents["ffprobe"]=Path.GetRelativePath(AppContext.BaseDirectory,Path.Combine(native,"ffprobe.exe"));
             if(InstanceBroker is not null)_=ReceiveActivations();
+            StartupStage("runtimeSetup");
             if(args.Contains("--verify-refresh")){initialization.Dispose();await VerifyRefresh();return;}
             int openIndex=Array.IndexOf(args,"--open"),rootIndex=Array.IndexOf(args,"--root");if(openIndex>=0&&openIndex+1<args.Length)await OpenPath(args[openIndex+1]);else if(rootIndex>=0 && rootIndex+1<args.Length){RootPath.Text=args[rootIndex+1];await OpenRoot(RootPath.Text);}else if(await settings.Load<SavedView>("last-session.json") is {} session)await RestoreSavedView(session);else if(await settings.Load<string>("last-root.json") is {} last){RootPath.Text=last;await OpenRoot(last);}
         }

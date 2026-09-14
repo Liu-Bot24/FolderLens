@@ -244,7 +244,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     private static string AddDirectory(SqliteConnection c,SqliteTransaction t,string root,string path,string? parent,string scan,string caseMode="unknown",bool enqueue=true,string? physicalIdentity=null)
     {
         string id=ScanRenames.IdForPath(c,t,root,path,true);
-        Execute(c,t,"INSERT INTO Directories(directory_id,root_id,parent_id,name,relative_path,canonical_key,case_mode,last_seen_scan_id) VALUES($id,$root,$parent,$name,$path,$path,$case,$scan) ON CONFLICT(directory_id) DO UPDATE SET last_seen_scan_id=excluded.last_seen_scan_id,entry_state='present',case_mode=excluded.case_mode",("$id",id),("$root",root),("$parent",parent),("$name",Path.GetFileName(path)),("$path",path),("$case",caseMode),("$scan",scan));
+        Execute(c,t,"INSERT INTO Directories(directory_id,root_id,parent_id,name,relative_path,canonical_key,case_mode,last_seen_scan_id) VALUES($id,$root,$parent,$name,$path,$path,$case,$scan) ON CONFLICT(directory_id) DO UPDATE SET last_seen_scan_id=excluded.last_seen_scan_id,entry_state='present',case_mode=CASE WHEN excluded.case_mode='unknown' THEN Directories.case_mode ELSE excluded.case_mode END",("$id",id),("$root",root),("$parent",parent),("$name",Path.GetFileName(path)),("$path",path),("$case",caseMode),("$scan",scan));
         if(physicalIdentity is not null)Execute(c,t,"INSERT INTO ScanDirectoryIdentities VALUES($id,$physical) ON CONFLICT(directory_id) DO UPDATE SET physical_identity=excluded.physical_identity",("$id",id),("$physical",physicalIdentity));
         if(enqueue)Queue(c,t,scan,id,path,true);return id;
     }

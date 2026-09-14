@@ -8,6 +8,16 @@ namespace FolderLens.UnitTests;
 
 public sealed class ScannerRegressionTests
 {
+    [Fact] public async Task ReopeningKnownDirectoryDoesNotResetObservedCaseMode()
+    {
+        string source=Fixture();File.WriteAllText(Path.Combine(source,"image.jpg"),"scan fixture");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();long epoch=await catalog.OpenRoot("case-mode",source);
+        var scanner=new DirectoryIndexer(catalog,Worker());await scanner.Scan("case-mode",source,epoch,true,[],null,CancellationToken.None);
+        await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="CREATE TEMP TABLE CaseTransitions(mode TEXT);CREATE TEMP TRIGGER ObserveCase AFTER UPDATE OF case_mode ON Directories WHEN OLD.case_mode<>NEW.case_mode BEGIN INSERT INTO CaseTransitions VALUES(NEW.case_mode);END;";return command.ExecuteNonQuery();});
+        await scanner.Scan("case-mode",source,epoch,true,[],null,CancellationToken.None);
+        var changed=await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="SELECT count(*) FROM CaseTransitions WHERE mode='unknown'";return (long)command.ExecuteScalar()!;});
+        Assert.Equal(0,changed);
+    }
     private sealed class RecordingContext : SynchronizationContext
     {
         public int Posts;

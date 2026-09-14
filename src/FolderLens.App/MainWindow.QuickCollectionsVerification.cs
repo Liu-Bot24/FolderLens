@@ -48,7 +48,7 @@ public sealed partial class MainWindow
         {
             var button=Star(row);var icon=(FontIcon)button.Content;
             var parent=(FrameworkElement)VisualTreeHelper.GetParent(button);var point=button.TransformToVisual(parent).TransformPoint(new(0,0));
-            if(icon.Glyph!="\uE735"||Math.Abs(parent.ActualWidth-point.X-button.ActualWidth-4)>2||Math.Abs(point.Y-4)>2)throw new InvalidOperationException("星标未在缩略图右上角或收藏状态没有更新。");
+            if(icon.Glyph!="\uE735"||Math.Abs(parent.ActualWidth-point.X-button.ActualWidth-8)>2||Math.Abs(point.Y-8)>2)throw new InvalidOperationException("星标未在缩略图右上角或收藏状态没有更新。");
         }
         var bitmap=new RenderTargetBitmap();await bitmap.RenderAsync((UIElement)FilesGrid.ContainerFromItem(first));
         using(var file=File.Create(Path.Combine(dataDirectory,"quick-collection-card.png")))using(var stream=file.AsRandomAccessStream())

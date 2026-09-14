@@ -6,6 +6,48 @@ namespace FolderLens.UnitTests;
 
 public sealed class CollectionTests
 {
+    [Fact] public async Task ExistingV4TriggerIsRepairedAndCaseChangesRetainMembership()
+    {
+        string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));string id;
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();await catalog.SeedBenchmark(2);id=(await catalog.CreateCollection("收藏")).Id;
+            await catalog.ChangeCollectionMembers([id],["000000000001"],true);
+            await catalog.Write(c=>
+            {
+                using var cmd=c.CreateCommand();cmd.CommandText="SELECT sql FROM sqlite_master WHERE name='Directories_Location_Update'";
+                string old=((string)cmd.ExecuteScalar()!).Replace("root_id=NEW.root_id AND ","");
+                cmd.CommandText="DROP TRIGGER Directories_Location_Update;"+old;return cmd.ExecuteNonQuery();
+            });
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();
+            string repaired=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT sql FROM sqlite_master WHERE name='Directories_Location_Update'";return (string)cmd.ExecuteScalar()!;});
+            Assert.Contains("root_id=NEW.root_id AND directory_id=NEW.directory_id",repaired);
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Directories SET case_mode='insensitive' WHERE directory_id='benchmark-dir'";return cmd.ExecuteNonQuery();});
+            Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+            var snapshot=await catalog.CreateSnapshot(new(){RootId="benchmark",IncludeCollections=[id]},1,1);
+            Assert.Equal("000000000001",(await catalog.ReadPage(snapshot.Id,0)).Single().EntryId);
+            Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="benchmark",ExcludeCollections=[id]},1,2)).Count);
+        }
+    }
+    [Fact] public async Task DirectoryCaseChangeUsesScopedIndex()
+    {
+        await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N")));
+        await catalog.Initialize();await catalog.SeedBenchmark(2);
+        var plan=await catalog.Read(c=>
+        {
+            using var command=c.CreateCommand();command.CommandText="SELECT sql FROM sqlite_master WHERE name='Directories_Location_Update'";
+            string trigger=(string)command.ExecuteScalar()!;
+            string update=trigger[(trigger.IndexOf("BEGIN",StringComparison.Ordinal)+5)..trigger.LastIndexOf("END",StringComparison.Ordinal)];
+            command.CommandText="EXPLAIN QUERY PLAN "+update.Replace("NEW.case_mode","'insensitive'").Replace("NEW.directory_id","$dir").Replace("NEW.root_id","$root");
+            command.Parameters.AddWithValue("$dir","benchmark-dir");command.Parameters.AddWithValue("$root","benchmark");
+            using var rows=command.ExecuteReader();var steps=new List<string>();while(rows.Read())steps.Add(rows.GetString(3));return steps;
+        });
+        Assert.DoesNotContain(plan,step=>step.Contains("SCAN Files"));
+        Assert.Contains(plan,step=>step.Contains("IX_Files_Directory")&&step.Contains("root_id=? AND directory_id=?"));
+    }
     [Fact] public async Task PropertiesReadPersistedMembershipAndKeepStarUntilLastMembershipRemoved()
     {
         string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));
