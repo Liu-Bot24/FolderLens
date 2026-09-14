@@ -218,5 +218,37 @@ function Test-PrivateReleasePath([string]$Path) {
     $normalized=$Path.Replace('\','/')
     $name=($normalized -split '/')[-1]
     return ($normalized -match '(^|/)(data|fixtures|\.git|\.nuget|obj|bin)/' -or
-        $name -match '\.(pdb|user)$|\.(sqlite|sqlite3|db)(-(wal|shm|journal))?$')
+        $name -match '\.(pdb|user)$|\.(sqlite|sqlite3|db)(-(wal|shm|journal))?$|\.bak($|[-.])')
+}
+function Get-PackageFiles([string]$AppRoot, $Manifest) {
+    $AppRoot=[IO.Path]::GetFullPath($AppRoot).TrimEnd('\')
+    $seen=@{}
+    if(@($Manifest.files).Count -eq 0){throw 'Package manifest is empty.'}
+    foreach($file in $Manifest.files){
+        $relative=([string]$file.path).Replace('\','/')
+        if([string]::IsNullOrWhiteSpace($relative) -or $relative -match '[\x00-\x1f:*?"{};]|^/|(^|/)(\.|\.\.)(/|$)|//|/$' -or (Test-PrivateReleasePath $relative)){
+            throw 'Private or unsafe package manifest path.'
+        }
+        if($seen.ContainsKey($relative)){throw 'Duplicate package manifest path.'}
+        $seen[$relative]=$true
+        $full=Join-Path $AppRoot $relative
+        # Check every path component: a linked parent also escapes the package root.
+        $cursor=$AppRoot
+        foreach($part in @('')+@($relative -split '/')){
+            if($part){$cursor=Join-Path $cursor $part}
+            $item=Get-Item -LiteralPath $cursor -Force
+            if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Linked package input is not allowed.'}
+        }
+        if($item.PSIsContainer -or $item.Length -ne $file.bytes -or (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash -ne $file.sha256){throw 'Package input differs from its manifest.'}
+        [pscustomobject]@{path=$relative;fullPath=$full;bytes=$file.bytes;sha256=$file.sha256}
+    }
+}
+function Get-InnoPackageFileLines($Files) {
+    foreach($file in $Files){
+        if($file.path -eq 'portable.json'){continue}
+        $relative=$file.path.Replace('/','\')
+        $parent=Split-Path $relative -Parent
+        $destination='{app}\versions\{#BuildId}'+$(if($parent){'\'+$parent}else{''})
+        'Source: "{#AppSource}\'+$relative+'"; DestDir: "'+$destination+'"; Flags: ignoreversion'
+    }
 }

@@ -10,6 +10,7 @@ $publishRoot=$ArtifactRoot
 if(Test-Path -LiteralPath $packageFile){$package=Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json;$publishRoot=$package.artifactRoot}
 $manifest=Get-Content (Join-Path $publishRoot 'release-manifest.json') -Raw | ConvertFrom-Json
 $appRoot=Join-Path $publishRoot 'app'
+$null=@(Get-PackageFiles $appRoot $manifest)
 $expected=@{}
 foreach($file in $manifest.files){
  if($file.path -match '(^/|^[A-Za-z]:|(^|/)\.\.(/|$))'){throw "Unsafe manifest path: $($file.path)"}

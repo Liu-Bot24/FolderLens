@@ -7,6 +7,9 @@
 #ifndef BuildId
   #error BuildId is required
 #endif
+#ifndef SourceFileList
+  #error SourceFileList is required; use Package.ps1 to generate the verified file list
+#endif
 [Setup]
 AppId={{9945B15D-3D41-4535-A101-C2C017DC36F2}
 AppName=FolderLens
@@ -34,7 +37,7 @@ UsePreviousAppDir=yes
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 [Files]
-Source: "{#AppSource}\*"; DestDir: "{app}\versions\{#BuildId}"; Excludes: "portable.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+#include SourceFileList
 [Icons]
 Name: "{autoprograms}\FolderLens"; Filename: "{app}\versions\{#BuildId}\FolderLens.App.exe"; WorkingDir: "{app}\versions\{#BuildId}"
 Name: "{autodesktop}\FolderLens"; Filename: "{app}\versions\{#BuildId}\FolderLens.App.exe"; WorkingDir: "{app}\versions\{#BuildId}"; Tasks: desktopicon

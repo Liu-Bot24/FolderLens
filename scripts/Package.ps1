@@ -6,6 +6,7 @@ if(-not $ArtifactRoot){$ArtifactRoot=(Get-Content (Join-Path $script:ProjectRoot
 $ArtifactRoot=Resolve-ProjectPath $ArtifactRoot
 $manifest=Get-Content (Join-Path $ArtifactRoot 'release-manifest.json') -Raw | ConvertFrom-Json
 $appRoot=Join-Path $ArtifactRoot 'app'
+$packageFiles=@(Get-PackageFiles $appRoot $manifest)
 $shell=Get-ScriptShell
 $null=Invoke-LoggedProcess $shell @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$PSScriptRoot\Verify-Release.ps1",'-ArtifactRoot',$ArtifactRoot,'-ManifestOnly') (Join-Path $ArtifactRoot 'logs\before-package')
 $null=Invoke-LoggedProcess $shell @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$PSScriptRoot\Package-Source.ps1",'-ArtifactRoot',$ArtifactRoot) (Join-Path $ArtifactRoot 'logs\source-package')
@@ -15,14 +16,16 @@ $zip=Join-Path $packageRoot ('FolderLens-'+$manifest.buildId+'-win-x64-portable-
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive=[IO.Compression.ZipFile]::Open($zip,[IO.Compression.ZipArchiveMode]::Create)
 try{
- foreach($file in $manifest.files){$null=[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,(Join-Path $appRoot $file.path),('app/'+$file.path),[IO.Compression.CompressionLevel]::Optimal)}
+ foreach($file in $packageFiles){$null=[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.fullPath,('app/'+$file.path),[IO.Compression.CompressionLevel]::Optimal)}
  $null=[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,(Join-Path $ArtifactRoot 'release-manifest.json'),'release-manifest.json',[IO.Compression.CompressionLevel]::Optimal)
 }finally{$archive.Dispose()}
 $iscc=Join-Path $script:ProjectRoot '.tools\inno\ISCC.exe'
 $native=Get-Content (Join-Path $script:ProjectRoot 'native\dependency-lock.json') -Raw | ConvertFrom-Json
 $inno=@($native.components | Where-Object {$_.id -eq 'InnoSetup'})[0]
 if((Get-FileHash -LiteralPath $iscc).Hash -ne $inno.sha256){throw 'Inno compiler differs from native/dependency-lock.json.'}
-$null=Invoke-LoggedProcess $iscc @(('/DAppSource='+$appRoot),('/DOutputRoot='+$packageRoot),('/DBuildId='+$manifest.buildId),(Join-Path $script:ProjectRoot 'installer\FolderLens.iss')) (Join-Path $ArtifactRoot 'logs\inno-package')
+$sourceFileList=Join-Path $packageRoot 'installer-files.iss'
+[IO.File]::WriteAllLines($sourceFileList,[string[]]@(Get-InnoPackageFileLines $packageFiles),(New-Object Text.UTF8Encoding($true)))
+$null=Invoke-LoggedProcess $iscc @(('/DAppSource='+$appRoot),('/DSourceFileList='+$sourceFileList),('/DOutputRoot='+$packageRoot),('/DBuildId='+$manifest.buildId),(Join-Path $script:ProjectRoot 'installer\FolderLens.iss')) (Join-Path $ArtifactRoot 'logs\inno-package')
 $exe=Join-Path $packageRoot ('FolderLens-'+$manifest.buildId+'-win-x64-setup-unsigned.exe')
 if(-not(Test-Path -LiteralPath $exe)){throw 'Inno returned success without expected setup EXE.'}
 $signature=Get-AuthenticodeSignature -LiteralPath $exe
