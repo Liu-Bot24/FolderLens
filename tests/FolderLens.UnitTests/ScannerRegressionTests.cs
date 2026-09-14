@@ -300,7 +300,7 @@ public sealed class ScannerRegressionTests
         Assert.NotEqual("root",replacement.RootId);Assert.True(replacement.IdentityChanged);
         await indexer.Scan(replacement.RootId,source,replacement.Epoch,true,[],null,CancellationToken.None);
         Directory.Move(source,source+"-new");var offline=await resolver.Open(source);
-        Assert.Equal(replacement.RootId,offline.RootId);Assert.Equal("offline",offline.Availability);
+        Assert.Equal(replacement.RootId,offline.RootId);Assert.Equal("unknown",offline.Availability);
         Directory.Move(source+"-old",source);var restored=await resolver.Open(source);
         Assert.Equal("root",restored.RootId);Assert.True(restored.IdentityChanged);
     }
@@ -366,10 +366,10 @@ public sealed class ScannerRegressionTests
         Assert.Equal(after["alias.jpg"].Physical,after["moved.jpg"].Physical);
         var collected=await catalog.CreateSnapshot(new(){RootId="collection:"+collection,CollectionId=collection,Kinds=[]},epoch,1);
         Assert.Equal("alias.jpg",Assert.Single(await catalog.ReadPage(collected.Id,0)).RelativePath);
-        // An unavailable root is not evidence that its files were deleted.
+        // The root was moved away while its parent remains accessible: these paths are gone.
         Directory.Move(source,source+"-offline");
         await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
-        Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+        Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
         Task<Dictionary<string,(string Id,long PathRevision,string? Physical)>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id,path_revision,physical_identity FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,(string,long,string?)>();while(rows.Read())result.Add(rows.GetString(0),(rows.GetString(1),rows.GetInt64(2),rows.IsDBNull(3)?null:rows.GetString(3)));return result;});
     }
     [Fact] public async Task DirtyReconciliationIsScopedAndCannotAcknowledgeNewerEvents()

@@ -53,6 +53,17 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,F
         return result;
     }
     private Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation)=>probeOverride is not null?probeOverride(path,cancellation):probe is not null?probe.Probe(path,cancellation):Task.Run(()=>ScanPathProbe.Read(path),cancellation);
+    public async Task<bool> ConfirmMissingDirectory(string directoryId,CancellationToken cancellation)
+    {
+        var location=await catalog.Read(c=>
+        {
+            using var cmd=c.CreateCommand();cmd.CommandText="SELECT l.anchor_locator,l.directory_identity FROM DirectoryLocationBindings b JOIN DirectoryLocations l ON l.location_id=b.location_id WHERE b.directory_id=$id";cmd.Parameters.AddWithValue("$id",directoryId);
+            using var row=cmd.ExecuteReader();return row.Read()?(Path:row.IsDBNull(0)?null:row.GetString(0),Identity:row.IsDBNull(1)?null:row.GetString(1)):(Path:(string?)null,Identity:(string?)null);
+        },cancellation).ConfigureAwait(false);
+        if(location.Path is null||location.Identity is null)return false;
+        var anchor=await Probe(location.Path,cancellation).ConfigureAwait(false);
+        return anchor.State=="missing"&&await MissingWithinKnownNamespace(location.Path,location.Identity,cancellation).ConfigureAwait(false);
+    }
     private async Task<bool> MissingWithinKnownNamespace(string path,string identity,CancellationToken cancellation)
     {
         string? parent=Path.GetDirectoryName(path.TrimEnd('\\'));

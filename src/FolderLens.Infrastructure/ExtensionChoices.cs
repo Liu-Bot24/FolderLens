@@ -10,7 +10,7 @@ public sealed partial class CatalogStore
     {
         // A directory/category facet must remain available even when another filter
         // has no matches or metadata has not been decoded yet.
-        var filter=new FilterSpec{RootId=scope.RootId,CollectionId=scope.CollectionId,IncludeCollections=scope.IncludeCollections,ExcludeCollections=scope.ExcludeCollections,DirectoryScope=scope.DirectoryScope,ScopeDirectFiles=scope.ScopeDirectFiles,
+        var filter=new FilterSpec{RootId=scope.RootId,ObservedRootEpoch=scope.ObservedRootEpoch,CollectionId=scope.CollectionId,IncludeCollections=scope.IncludeCollections,ExcludeCollections=scope.ExcludeCollections,DirectoryScope=scope.DirectoryScope,ScopeDirectFiles=scope.ScopeDirectFiles,
             Recursive=scope.Recursive,MaxFolderLevels=scope.MaxFolderLevels,Kinds=scope.Kinds,Extensions=scope.Extensions,ShowHidden=scope.ShowHidden,
             Exclusions=scope.Exclusions,DirectoryRules=scope.DirectoryRules};
         var query=FilterSql.Build(filter);

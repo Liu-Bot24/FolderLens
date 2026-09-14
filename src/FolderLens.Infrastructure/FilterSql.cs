@@ -45,6 +45,8 @@ public static class FilterSql
             Known("f.entry_id=(SELECT pick.entry_id FROM Files pick WHERE pick.location_key=f.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=pick.directory_id)=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id) ORDER BY (pick.entry_state='present') DESC,pick.entry_id LIMIT 1)");
         }
         else Known($"f.root_id={Param(filter.RootId)} AND f.entry_state='present'");
+        if(filter.CollectionId is null&&filter.ObservedRootEpoch is {} observedEpoch)
+            Known($"f.last_seen_scan_id IN (SELECT scan_id FROM ScanRuns WHERE root_id={Param(filter.RootId)} AND root_epoch={Param(observedEpoch)})");
         if(filter.IncludeCollections.Length>0)Known(Membership(filter.IncludeCollections));
         if(filter.ExcludeCollections.Length>0)Known("NOT ("+Membership(filter.ExcludeCollections)+")");
         string directory=filter.DirectoryScope.Replace('/','\\');

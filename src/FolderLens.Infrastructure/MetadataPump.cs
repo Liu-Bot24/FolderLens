@@ -10,8 +10,8 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
 {
     private readonly SemaphoreSlim runGate=new(1,1);
     public Task FillGeometry(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation)=>Fill(rootId,root,epoch,progress,false,cancellation);
-    public Task FillAll(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation,string? collectionId=null)=>Fill(rootId,root,epoch,progress,true,cancellation,collectionId);
-    private async Task Fill(string rootId,string root,long epoch,IProgress<long>? progress,bool includeMedia,CancellationToken cancellation,string? collectionId=null)
+    public Task FillAll(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false)=>Fill(rootId,root,epoch,progress,true,cancellation,collectionId,observedOnly);
+    private async Task Fill(string rootId,string root,long epoch,IProgress<long>? progress,bool includeMedia,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false)
     {
         if(includeMedia && media is null)throw new InvalidOperationException("视频与音频信息组件尚未配置。");
         await runGate.WaitAsync(cancellation).ConfigureAwait(false);
@@ -31,6 +31,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                             (SELECT display_path FROM Roots r WHERE r.root_id=f.root_id),(SELECT root_epoch FROM Roots r WHERE r.root_id=f.root_id)
                         FROM Files f WHERE root_id=$root
                         AND entry_id>$after AND entry_state='present' AND hydration_state='local'
+                        AND ($observed=0 OR last_seen_scan_id IN(SELECT scan_id FROM ScanRuns WHERE root_id=$root AND root_epoch=$epoch))
                         AND EXISTS(SELECT 1 FROM Roots r WHERE r.root_id=f.root_id AND r.root_epoch=$epoch)
                         AND (kind='image' OR ($media=1 AND kind IN ('video','audio')))
                         AND (
@@ -43,7 +44,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                                 OR NOT EXISTS(SELECT 1 FROM FieldStates fs WHERE fs.entry_id=f.entry_id AND fs.field_group='captureTime' AND fs.source_version=f.file_version AND (fs.state IN ('ready','unsupported') OR (fs.state='failed' AND fs.retry_after_utc_ticks>$now)))))
                         ) ORDER BY entry_id LIMIT 256
                         """;
-                    cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$epoch",epoch);cmd.Parameters.AddWithValue("$after",after);cmd.Parameters.AddWithValue("$media",includeMedia?1:0);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
+                    cmd.Parameters.AddWithValue("$observed",observedOnly&&collectionId is null?1:0);cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$epoch",epoch);cmd.Parameters.AddWithValue("$after",after);cmd.Parameters.AddWithValue("$media",includeMedia?1:0);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
                     cmd.Parameters.AddWithValue("$collection",collectionId??(object)DBNull.Value);
                     if(collectionId is not null)cmd.CommandText=cmd.CommandText.Replace("WHERE root_id=$root","WHERE ((SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id),location_key) IN(SELECT directory_location_id,location_key FROM CollectionMembers WHERE collection_id=$collection)").Replace("AND r.root_epoch=$epoch","");
                     using var rows=cmd.ExecuteReader();var entries=new List<(string Id,string Path,long Version,string Kind,long Length,long Modified,string RootId,string Root,long Epoch)>();

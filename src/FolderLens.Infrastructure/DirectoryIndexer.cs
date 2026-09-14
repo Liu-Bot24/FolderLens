@@ -32,7 +32,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         var renames=new ScanRenames(catalog,probe,PathProbeOverride);
         var dirtyStore=new ScanDirtyDirectories(catalog);
         IReadOnlyList<DirtyScanScope> captured=scopeRelative is null?await dirtyStore.Read(rootId,epoch,cancellation,includeDeferred:true).ConfigureAwait(false):[];
-        string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false;string availability="online",outcome="failed";
+        string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false,rootMissing=false;string availability="online",outcome="failed";
         try
         {
         await catalog.Write(c=>
@@ -53,7 +53,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             }
             Execute(c,t,"UPDATE Roots SET scan_state='scanning' WHERE root_id=$root",("$root",rootId));t.Commit();initialized=true;return true;
         },cancellation).ConfigureAwait(false);
-            if(scopeRelative is not null)
+            if(!string.IsNullOrEmpty(scopeRelative))
             {
                 var rootState=probe is null?await Task.Run(()=>ScanPathProbe.Read(root),cancellation).ConfigureAwait(false):await probe.Probe(root,cancellation).ConfigureAwait(false);
                 if(rootState.State!="present"){availability=rootState.State=="inaccessible"?"inaccessible":"offline";throw new IOException("根目录当前不可用，保留待核对范围。");}
@@ -133,7 +133,19 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                             incomplete|=packet.Entries.Any(e=>e.Directory&&e.SkipReason=="DeferredOffline");
                             progress?.Report(new(files,dirs,errors,"scanning"));
                         }
-                        if(packet.State=="completed")
+                        if(packet.State=="completed"&&packet.ErrorCode=="DirectoryMissing")
+                        {
+                            await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT volume_identity FROM Roots WHERE root_id=$id";cmd.Parameters.AddWithValue("$id",rootId);if(cmd.ExecuteScalar() is string expected&&(packet.VolumeIdentity is null||!expected.StartsWith(packet.VolumeIdentity+":",StringComparison.Ordinal)))throw new RootIdentityChangedException();return true;},cancellation).ConfigureAwait(false);
+                            if(!await renames.ConfirmMissingDirectory(id,cancellation).ConfigureAwait(false))
+                            {
+                                errors++;if(relative.Length==0)availability="offline";
+                                await SetDirectoryState(rootId,epoch,scanId,id,"offline","LocationUnconfirmed",0,cancellation).ConfigureAwait(false);terminal=true;continue;
+                            }
+                            await Reconcile(rootId,epoch,scanId,id,0,cancellation).ConfigureAwait(false);
+                            await catalog.Write(c=>{using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);Execute(c,t,"UPDATE Directories SET entry_state='missing' WHERE directory_id=$id",("$id",id));t.Commit();return true;},cancellation).ConfigureAwait(false);
+                            if(relative.Length==0){rootMissing=true;availability="unknown";}terminal=true;
+                        }
+                        else if(packet.State=="completed")
                         {await Reconcile(rootId,epoch,scanId,id,directoryEntries,cancellation).ConfigureAwait(false);dirs++;terminal=true;}
                         else if(packet.State=="excluded")
                         {incomplete|=packet.ErrorCode=="DeferredOffline";if(relative.Length==0)availability="unknown";await ExcludeDirectory(rootId,epoch,scanId,id,relative,packet.ErrorCode??"Excluded",cancellation).ConfigureAwait(false);terminal=true;}
@@ -174,7 +186,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");t.Commit();return true;
             }).ConfigureAwait(false);
         }
-        var result=new ScanProgress(files,dirs,errors,outcome);progress?.Report(result);return result;
+        var result=new ScanProgress(files,dirs,errors,rootMissing?"missing":outcome);progress?.Report(result);return result;
     }
 
     public async Task<ScanProgress> ReconcileDirty(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,IProgress<ScanProgress>? progress,CancellationToken cancellation)
@@ -193,6 +205,12 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     var result=await Scan(rootId,root,epoch,recursive,exclusions,progress,cancellation,scopeRelative:currentPath,descendants:scope.Subtree).ConfigureAwait(false);
                     files+=result.Files;directories+=result.Directories;errors+=result.Errors;
                     if(result.State=="cancelled")return new(files,directories,errors,"cancelled");
+                    if(result.State=="missing")
+                    {
+                        await dirty.Acknowledge(rootId,epoch,scope,cancellation).ConfigureAwait(false);
+                        if(currentPath.Length==0)return new(files,directories,errors,"missing");
+                        continue;
+                    }
                     if(result.State=="ready")await dirty.Acknowledge(rootId,epoch,scope,cancellation).ConfigureAwait(false);
                     else await dirty.RetryLater(rootId,epoch,scope,cancellation).ConfigureAwait(false);
                 }
