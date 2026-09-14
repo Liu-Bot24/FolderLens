@@ -35,7 +35,7 @@ public sealed partial class MainWindow
     private SavedView? CaptureClosingView()=>lastAppliedFilter is {} filter&&filter.RootId==rootId?CaptureView(filter):null;
     private void ApplySavedFilter(FilterSpec filter)
     {
-        filter.Validate();suppressFilters=true;searchTimer?.Stop();
+        filter.Validate();filter=filter.ForBrowserView();suppressFilters=true;searchTimer?.Stop();
         try
         {
             activeCollectionId=filter.CollectionId;includedCollectionIds=filter.IncludeCollections.ToArray();excludedCollectionIds=filter.ExcludeCollections.ToArray();UpdateCollectionFilterLabel();
@@ -50,6 +50,7 @@ public sealed partial class MainWindow
     }
     private async Task RestoreSavedView(SavedView saved,bool recordHistory=true)
     {
+        saved.Filter.Validate();saved=saved with{Filter=saved.Filter.ForBrowserView()};
         var previous=rootId.Length>0?CaptureView():null;
         bool sameRoot=previous is not null&&!replacingRoot&&string.Equals(root,saved.Root,StringComparison.Ordinal)&&previous.Filter.HasSameScanPolicy(saved.Filter);
         restoringView=true;long revision=++viewRestoreRevision,requestedRoot=rootChangeVersion+(sameRoot?0:1);
