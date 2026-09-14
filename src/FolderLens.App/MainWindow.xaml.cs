@@ -281,7 +281,12 @@ public sealed partial class MainWindow : Window
             var completedScan=await openedScanTask;
             if(verifyScanBarrier is not null)await verifyScanBarrier(rootToken);
             if(requested!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
-            if(completedScan.State=="missing"){await RefreshQuery();ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
+            if(completedScan.State=="missing")
+            {
+                await RefreshQuery();
+                if(requested==rootChangeVersion&&!closing&&!rootToken.IsCancellationRequested)ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));
+                return;
+            }
             if(completedScan.State=="partial"&&completedScan.Files==0){ShowScanError(new IOException("无法读取此文件夹，请检查磁盘连接和访问权限后刷新。"));return;}
             if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 结果有更新，点击应用筛选刷新序列。";}
             if(settings is not null)await settings.Save("last-root.json",activeRoot);
