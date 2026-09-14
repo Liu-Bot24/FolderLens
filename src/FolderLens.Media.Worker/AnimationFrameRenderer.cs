@@ -36,7 +36,7 @@ internal static class AnimationFrameRenderer
         }
         if(parameters.FrameIndex>=ReadApngFrameCount(path))throw new ArgumentOutOfRangeException(nameof(parameters.FrameIndex));
         var start=new ProcessStartInfo(FfmpegExecutable()){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,WorkingDirectory=AppContext.BaseDirectory};
-        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-i",path,"-an","-vf",$"select=eq(n\\,{parameters.FrameIndex}),crop={tileWidth}:{tileHeight}:{x}:{y}","-frames:v","1","-threads","2","-filter_threads","1","-pix_fmt","rgba","-f","image2","-y",destination})start.ArgumentList.Add(argument);
+        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-threads",Math.Max(1,NetVips.NetVips.Concurrency-2).ToString(System.Globalization.CultureInfo.InvariantCulture),"-i",path,"-an","-vf",$"select=eq(n\\,{parameters.FrameIndex}),crop={tileWidth}:{tileHeight}:{x}:{y}","-frames:v","1","-threads","1","-filter_threads","1","-pix_fmt","rgba","-f","image2","-y",destination})start.ArgumentList.Add(argument);
         using var process=Process.Start(start)??throw new IOException("APNG decoder unavailable.");
         var errors=Task.Run(async()=>{var result=new StringBuilder();char[] buffer=new char[2048];int count;while((count=await process.StandardError.ReadAsync(buffer))>0)if(result.Length<16384)result.Append(buffer,0,Math.Min(count,16384-result.Length));return result.ToString();});
         try

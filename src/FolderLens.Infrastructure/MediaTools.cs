@@ -18,13 +18,14 @@ public sealed record MediaMetadata(long? DurationMs,int? Width,int? Height,strin
 
 public static class BoundedProcess
 {
-    public static Task<string> Run(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation)
-        =>Task.Run(()=>RunCore(executable,arguments,timeout,maxOutputBytes,cancellation),cancellation);
-    private static async Task<string> RunCore(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation)
+    public static Task<string> Run(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation,WorkerPriority priority=WorkerPriority.Metadata)
+        =>Task.Run(()=>RunCore(executable,arguments,timeout,maxOutputBytes,cancellation,priority),cancellation);
+    private static async Task<string> RunCore(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation,WorkerPriority priority)
     {
         cancellation.ThrowIfCancellationRequested();
         var start=new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=Path.GetDirectoryName(executable)!};foreach(var arg in arguments)start.ArgumentList.Add(arg);
         using var process=Process.Start(start)??throw new IOException("Unable to start media tool.");using var job=new WorkerJob(1024L*1024*1024);job.Assign(process);
+        if(priority!=WorkerPriority.Foreground)BackgroundProcessPriority.Apply(process);
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeout);
         async Task<string> ReadBounded(StreamReader reader)
         {
@@ -51,7 +52,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         PathRules.ValidateSource(path);
         using var lease=await WorkerResources.Shared.Acquire(priority,cancellation).ConfigureAwait(false);
         using var stop=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lease.PressureCancellation);
-        string json=await BoundedProcess.Run(ffprobe,["-v","error","-threads","1","-protocol_whitelist","file,pipe","-format_whitelist",AllowedFormats,"-show_streams","-show_format","-of","json",path],TimeSpan.FromSeconds(10),4*1024*1024,stop.Token).ConfigureAwait(false);
+        string json=await BoundedProcess.Run(ffprobe,["-v","error","-threads","1","-protocol_whitelist","file,pipe","-format_whitelist",AllowedFormats,"-show_streams","-show_format","-of","json",path],TimeSpan.FromSeconds(10),4*1024*1024,stop.Token,priority).ConfigureAwait(false);
         using var document=JsonDocument.Parse(json);var streams=document.RootElement.GetProperty("streams").EnumerateArray().ToArray();
         bool Cover(JsonElement stream)=>stream.TryGetProperty("disposition",out var d)&&d.TryGetProperty("attached_pic",out var attached)&&attached.GetInt32()==1;
         string? Text(JsonElement element,string name)=>element.TryGetProperty(name,out var value)?value.ToString():null;
@@ -102,7 +103,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
             var arguments=new List<string>{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-format_whitelist",AllowedFormats,"-threads","1","-filter_threads","1"};
             if(time>0)arguments.AddRange(["-ss",time.ToString(CultureInfo.InvariantCulture)]);
             arguments.AddRange(["-i",path,"-map",$"0:{stream}","-frames:v","1","-vf",$"scale={edge}:{edge}:force_original_aspect_ratio=decrease","-c:v","png","-threads","1","-f","image2","-y",temporary]);
-            await BoundedProcess.Run(ffmpeg,arguments,TimeSpan.FromSeconds(15),1024*1024,stop.Token).ConfigureAwait(false);
+            await BoundedProcess.Run(ffmpeg,arguments,TimeSpan.FromSeconds(15),1024*1024,stop.Token,priority).ConfigureAwait(false);
             if(!File.Exists(temporary))throw new InvalidDataException("没有提取到可解码的视频帧。");
             using var image=ThumbnailCache.OpenOwnedRead(temporary);Span<byte> header=stackalloc byte[24];
             if(image.Length is <24 or >16777216||image.Read(header)!=24||!header[..8].SequenceEqual(new byte[]{137,80,78,71,13,10,26,10})||!header.Slice(12,4).SequenceEqual("IHDR"u8))throw new InvalidDataException("封面输出无效。");

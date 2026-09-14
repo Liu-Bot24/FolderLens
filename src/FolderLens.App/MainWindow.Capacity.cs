@@ -10,7 +10,7 @@ public sealed partial class MainWindow
     private Task capacityOpening=Task.CompletedTask;
     private void ShowCapacity(object sender,RoutedEventArgs args)
     {
-        if(closing||openingCapacity||catalog is null||rootId.Length==0)return;
+        if(closing||openingCapacity||catalog is null||rootId.Length==0||activeCollectionId is not null)return;
         if(capacityWindow is not null){if(capacityWindow.IsClosing)Status.Text="正在关闭容量看板，请稍后打开。";else capacityWindow.Activate();return;}
         openingCapacity=true;capacityOpening=OpenCapacityWindow();
     }

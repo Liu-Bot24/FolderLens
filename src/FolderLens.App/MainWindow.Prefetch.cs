@@ -25,6 +25,8 @@ public sealed partial class MainWindow
     private readonly LinkedList<PrefetchedImage> prefetched=[];
     private long prefetchBytes;
     private long preparedPrefetchBytes;
+    private readonly SemaphoreSlim preparedPrefetchGate=new(1,1);
+    private long preparingPrefetchBytes;
     private const long PreparedPrefetchLimit=64L*1024*1024;
     private readonly LinkedList<PrefetchedDetail> prefetchedDetails=[];
     private long prefetchedDetailBytes;
@@ -65,11 +67,18 @@ public sealed partial class MainWindow
     }
     private async Task PreparePrefetchedImage(PrefetchedImage image,CancellationToken token)
     {
+        await preparedPrefetchGate.WaitAsync(token);
+        try
+        {
+        token.ThrowIfCancellationRequested();
+        if(closing||!prefetched.Contains(image))return;
         if(verifyEncodedPrefetch||image.Bitmap is not null||WorkerResources.Shared.Snapshot.UnderPressure)return;
         long reserve=checked((long)image.TargetWidth*image.TargetHeight*4);
         if(reserve>PreparedPrefetchLimit)return;
         foreach(var old in prefetched.Reverse())
         {if(preparedPrefetchBytes+reserve<=PreparedPrefetchLimit)break;if(!ReferenceEquals(old,image))ReleasePreparedImage(old);}
+        if(preparedPrefetchBytes+reserve>PreparedPrefetchLimit)return;
+        preparingPrefetchBytes=reserve;
         long deviceRevision=imageResourceRevision;
         using var bytes=new MemoryStream(image.Png,false);using var random=bytes.AsRandomAccessStream();
         var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,random);
@@ -78,6 +87,8 @@ public sealed partial class MainWindow
         long cost=checked((long)bitmap.SizeInPixels.Width*bitmap.SizeInPixels.Height*4);
         if(preparedPrefetchBytes+cost>PreparedPrefetchLimit){bitmap.Dispose();return;}
         image.Bitmap=bitmap;image.BitmapBytes=cost;image.DeviceRevision=deviceRevision;preparedPrefetchBytes+=cost;
+        }
+        finally{preparingPrefetchBytes=0;preparedPrefetchGate.Release();}
     }
     private async Task<PrefetchedImage?> FindPrefetched(FileRow row,int width,int height,CancellationToken token)
     {
@@ -129,6 +140,7 @@ public sealed partial class MainWindow
     }
     private async Task PrefetchNeighbours(long current,CancellationToken token)
     {
+        using var work=browserWork.Enter();if(work is null||closing)return;
         if(selected is null||results is null||prefetchWorker is null||WorkerResources.Shared.Snapshot.UnderPressure)return;
         var sourceResults=results;long ordinal=selected.Ordinal;string sourceRoot=root,sourceRootId=rootId;long sourceEpoch=epoch,sourceGeneration=generation;
         // A sidebar-sized preload is insufficient when the next action opens full screen.

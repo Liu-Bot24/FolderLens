@@ -168,7 +168,7 @@
       <Button Style="{StaticResource NavigationButtonStyle}" Grid.Column="4" Click="CancelScan" ToolTipService.ToolTip="停止扫描，保留已发现的文件" AutomationProperties.Name="停止扫描" AutomationProperties.AutomationId="CancelScan"><FontIcon Glyph="&#xE71A;" FontSize="16" /></Button>
       <Button Grid.Column="5" Content="打开文件夹" Click="PickRoot" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" AutomationProperties.AutomationId="OpenFolder" />
       <TextBox x:Name="RootPath" Grid.Column="6" PlaceholderText="选择一个文件夹，透视所有子目录" KeyDown="RootPathKeyDown" ToolTipService.ToolTip="当前文件夹；输入路径后按 Enter 打开（Ctrl+L）" AutomationProperties.AutomationId="RootPath" />
-      <Button Grid.Column="7" Content="目录容量" Click="ShowCapacity" ToolTipService.ToolTip="查看子文件夹大小、占比和排名" AutomationProperties.AutomationId="ShowCapacity" />
+      <Button x:Name="CapacityButton" Grid.Column="7" Content="目录容量" Click="ShowCapacity" ToolTipService.ToolTip="查看子文件夹大小、占比和排名" AutomationProperties.AutomationId="ShowCapacity" />
     </Grid>
     <Grid x:Name="BodyGrid" Grid.Row="2">
       <Grid.RowDefinitions>

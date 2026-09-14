@@ -49,8 +49,7 @@ public sealed partial class MainWindow
         report["phase"]="normalDirectoryExclusion";ApplySavedFilter(new(){RootId=rootId,Kinds=[],ExcludeCollections=[excluded.Id]});await OpenRoot(b);await RefreshQuery();if(results?.Count!=2)throw new InvalidOperationException("普通目录排除收藏标签失败。");
         report["phase"]="knownMissing";await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET entry_state='missing' WHERE root_id=$root AND kind='text'";command.Parameters.AddWithValue("$root",rootId);return command.ExecuteNonQuery();});
         await OpenCollection(collection.Id);rows=await catalog.ReadPage(resultHandle!.Id,0);textIndex=Array.FindIndex(rows.ToArray(),i=>i.Kind=="text");
-        var missing=(FileRow)results![textIndex]!;await results.EnsureLoaded(missing,lifetime.Token);await ResolveRow(missing,rootId,lifetime.Token);
-        if(!missing.DisplayName.Contains("未找到")||results.Count!=5||!Path.IsPathFullyQualified(missing.DisplayPath))throw new InvalidOperationException("失效收藏未保留标识或未显示完整源路径。");
+        if(textIndex!=-1||results!.Count!=4)throw new InvalidOperationException("确认不存在的文件未从收藏中移除。");
         var choices=new ListView{ItemsSource=fileCollections,DisplayMemberPath="Name",SelectionMode=ListViewSelectionMode.Multiple,MaxHeight=240,MinWidth=380};
         var name=new TextBox{Header="或新建收藏夹",MaxLength=100,PlaceholderText="输入收藏夹名称"};
         var panel=CollectionSelectionPanel(choices,name,new TextBlock{TextWrapping=TextWrapping.Wrap},3);panel.Width=460;panel.Padding=new(12);panel.Background=(Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];

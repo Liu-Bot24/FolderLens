@@ -27,7 +27,7 @@ public sealed partial class MainWindow
     {
         formatChoicesStop?.Cancel();
         using var work=browserWork.Enter();if(work is null||closing)return;
-        using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,scanStop.Token);
+        using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         formatChoicesStop=stop;stop.CancelAfter(TimeSpan.FromSeconds(6));
         long revision=rootChangeVersion,currentGeneration=generation;var store=catalog;
         FormatOptions.IsEnabled=false;FormatChoicesStatus.Text="正在读取格式…";

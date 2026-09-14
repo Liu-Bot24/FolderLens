@@ -15,9 +15,7 @@ public sealed class CollectionTests
             await catalog.ChangeCollectionMembers([id],["000000000001"],true);
             await catalog.Write(c=>
             {
-                using var cmd=c.CreateCommand();cmd.CommandText="SELECT sql FROM sqlite_master WHERE name='Directories_Location_Update'";
-                string old=((string)cmd.ExecuteScalar()!).Replace("root_id=NEW.root_id AND ","");
-                cmd.CommandText="DROP TRIGGER Directories_Location_Update;"+old;return cmd.ExecuteNonQuery();
+                LegacyCollectionSchema.V4(c);return true;
             });
         }
         await using(var catalog=new CatalogStore(data))
@@ -81,8 +79,9 @@ public sealed class CollectionTests
             UPDATE Roots SET display_path='D:\furniture' WHERE root_id='benchmark';
             UPDATE Directories SET case_mode='insensitive' WHERE root_id='benchmark';
             INSERT INTO Directories(directory_id,root_id,name,relative_path,canonical_key,case_mode) VALUES('child-dir','child','','','','insensitive');
-            UPDATE Files SET relative_path='sub\file1.jpg' WHERE entry_id='000000000001';
-            UPDATE Files SET root_id='child',directory_id='child-dir',relative_path='FILE1.JPG' WHERE entry_id='000000000002';
+            INSERT INTO ScanDirectoryIdentities VALUES('benchmark-dir','volume:shared-parent'),('child-dir','volume:shared-parent');
+            UPDATE Files SET physical_identity='volume:shared-file',relative_path='sub\file1.jpg' WHERE entry_id='000000000001';
+            UPDATE Files SET physical_identity='volume:shared-file',root_id='child',directory_id='child-dir',relative_path='FILE1.JPG' WHERE entry_id='000000000002';
             """;return command.ExecuteNonQuery();});
         var collection=await catalog.CreateCollection("Approved");var ids=new[]{collection.Id};
         await catalog.ChangeCollectionMembers(ids,["000000000001"],true);
@@ -101,15 +100,16 @@ public sealed class CollectionTests
         }
         finally{await catalog.ReleaseSnapshot(handle.Id);}
         await catalog.Write(c=>{using var command=c.CreateCommand();command.CommandText="UPDATE Files SET relative_path='renamed.jpg' WHERE entry_id='000000000002'";return command.ExecuteNonQuery();});
-        Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids},1,5)).Count);
-        Assert.Equal(0,(await catalog.CreateSnapshot(new(){RootId="child",ExcludeCollections=ids},1,6)).Count);
+        Assert.Equal(0,(await catalog.CreateSnapshot(new(){RootId="child",IncludeCollections=ids},1,5)).Count);
+        Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="child",ExcludeCollections=ids},1,6)).Count);
+        await catalog.ChangeCollectionMembers(ids,["000000000002"],true);
         var rule=new DirectoryRule("exclude","name","equals","does-not-exist");
         var scope=new FilterSpec{RootId="collection:"+collection.Id,CollectionId=collection.Id,DirectoryRules=[rule]};
         Assert.Equal(2,(await catalog.CreateSnapshot(scope,1,7)).Count);
         var preview=await catalog.PreviewDirectoryRules(scope.RootId,[rule],collectionId:collection.Id);
         Assert.Equal(2,preview.VisibleFiles);Assert.Equal(0,preview.HiddenFiles);
     }
-    [Fact] public async Task CollectionsPersistFilterAcrossRootsAndRetainMissingReferences()
+    [Fact] public async Task CollectionsPersistAcrossRootsAndRemoveConfirmedMissingReferences()
     {
         string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));string id;
         await using(var catalog=new CatalogStore(data))
@@ -129,8 +129,8 @@ public sealed class CollectionTests
             // Explicitly re-add the moved reference, whose location has changed.
             await catalog.ChangeCollectionMembers([id],["000000000002"],true);
             var result=await catalog.CreateSnapshot(scope,1,5);var page=await catalog.ReadPage(result.Id,0);
-            Assert.Equal(2,page.Count);Assert.Contains(page,item=>item.SourceRootId=="second"&&item.SourceRootPath==@"D:\collection-fixture");
-            Assert.Contains(page,item=>item.SourceRootId=="benchmark");
+            Assert.Single(page);Assert.Contains(page,item=>item.SourceRootId=="second"&&item.SourceRootPath==@"D:\collection-fixture");
+            Assert.DoesNotContain(page,item=>item.SourceRootId=="benchmark");
             Assert.Equal(0,(await catalog.CreateSnapshot(new(){RootId="benchmark",IncludeCollections=[id]},1,6)).Count);
             Assert.True(await catalog.RenameCollection(id,"家具素材"));
             await Assert.ThrowsAsync<ArgumentException>(()=>catalog.CreateCollection("家具素材"));

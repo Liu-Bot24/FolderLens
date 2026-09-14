@@ -10,6 +10,7 @@ string directory=Path.GetFullPath(args[1]);Directory.CreateDirectory(directory);
 var options=new JsonSerializerOptions { WriteIndented=true };
 try
 {
+ if(args[0]=="check-migration"&&args.Length==3)return FolderLens.Diagnostics.MigrationCheck.Run(directory,Path.GetFullPath(args[2]));
  if(args[0]=="grouping-scale"&&args.Length is >=2 and <=4)return await FolderLens.Diagnostics.GroupingScaleScenario.Run(directory,args.Length>2?int.Parse(args[2]):50_000,args.Length>3?int.Parse(args[3]):4);
  if(args[0]=="grouping"&&args.Length==4)return await FolderLens.Diagnostics.GroupingScenario.Run(directory,Path.GetFullPath(args[2]),args[3]);
  if(args[0]=="library"&&args.Length==6)return await FolderLens.Diagnostics.LibraryScenario.Run(directory,Path.GetFullPath(args[2]),Path.GetFullPath(args[3]),Path.GetFullPath(args[4]),Path.GetFullPath(args[5]));

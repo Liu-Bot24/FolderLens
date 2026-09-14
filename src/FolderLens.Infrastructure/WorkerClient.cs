@@ -23,30 +23,33 @@ public sealed class WorkerClient(string executable,string tempRoot,WorkerPriorit
     private long currentVersion;
     private readonly Dictionary<string,(string Path,string Instance)> producedAssets=new(StringComparer.Ordinal);
     private string? currentInputFile;
-    private readonly object identityGate=new();
-    private Task<string>? providerIdentity;
+    private readonly SemaphoreSlim identityGate=new(1,1);
+    private string? providerIdentity;
     private WorkerTemporaryFiles.Session? temporarySession;
     public WorkerTemporaryCleanup? LastTemporaryCleanup {get;private set;}
 
     private readonly HashSet<string> requestedOutputs=new(StringComparer.OrdinalIgnoreCase);
-    public Task<string> GetProviderIdentity(CancellationToken cancellation)
+    public async Task<string> GetProviderIdentity(CancellationToken cancellation)
     {
-        Task<string> identity;
-        lock(identityGate)identity=providerIdentity??=Task.Run(()=>ComputeProviderIdentity(executable));
-        return identity.WaitAsync(cancellation);
+        await identityGate.WaitAsync(cancellation).ConfigureAwait(false);
+        try{return providerIdentity??=await Task.Run(()=>ComputeProviderIdentity(executable,cancellation),cancellation).ConfigureAwait(false);}
+        finally{identityGate.Release();}
     }
-    private static string ComputeProviderIdentity(string executable)
+    internal static string ComputeProviderIdentity(string executable,CancellationToken cancellation,Action<int>? readObserved=null)
     {
+        cancellation.ThrowIfCancellationRequested();using var background=new BackgroundThreadScope();
         string directory=Path.GetDirectoryName(Path.GetFullPath(executable))!;
         var enumeration=new EnumerationOptions{RecurseSubdirectories=true,AttributesToSkip=FileAttributes.ReparsePoint,IgnoreInaccessible=false,MaxRecursionDepth=8};
-        string[] files=Directory.EnumerateFiles(directory,"*",enumeration).Where(p=>Path.GetExtension(p).Equals(".dll",StringComparison.OrdinalIgnoreCase)||Path.GetFileName(p).Equals("policy.xml",StringComparison.OrdinalIgnoreCase)||Path.GetExtension(p).Equals(".icc",StringComparison.OrdinalIgnoreCase)).Append(Path.GetFullPath(executable)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4097).Order(StringComparer.Ordinal).ToArray();
+        string[] files=Directory.EnumerateFiles(directory,"*",enumeration).Select(p=>{cancellation.ThrowIfCancellationRequested();return p;}).Where(p=>Path.GetExtension(p).Equals(".dll",StringComparison.OrdinalIgnoreCase)||Path.GetFileName(p).Equals("policy.xml",StringComparison.OrdinalIgnoreCase)||Path.GetExtension(p).Equals(".icc",StringComparison.OrdinalIgnoreCase)).Append(Path.GetFullPath(executable)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4097).Order(StringComparer.Ordinal).ToArray();
         if(files.Length>4096)throw new IOException("工作进程组件超过版本校验文件预算。");
         using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);byte[] buffer=new byte[128*1024];
         hash.AppendData(Encoding.UTF8.GetBytes(WorkerProtocol.BuildId));
         foreach(string path in files)
         {
+            cancellation.ThrowIfCancellationRequested();
             hash.AppendData(Encoding.UTF8.GetBytes(Path.GetRelativePath(directory,path)));hash.AppendData(new byte[]{0});
-            using var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,buffer.Length,FileOptions.SequentialScan);hash.AppendData(BitConverter.GetBytes(file.Length));int read;while((read=file.Read(buffer))>0)hash.AppendData(buffer.AsSpan(0,read));
+            using var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,buffer.Length,FileOptions.SequentialScan);hash.AppendData(BitConverter.GetBytes(file.Length));
+            while(true){cancellation.ThrowIfCancellationRequested();int read=file.Read(buffer);if(read==0)break;readObserved?.Invoke(read);hash.AppendData(buffer.AsSpan(0,read));}
         }
         return "sha256:"+Convert.ToHexString(hash.GetHashAndReset());
     }
