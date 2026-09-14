@@ -19,7 +19,29 @@ public sealed partial class MainWindow
         FileRow? row=null,later=null;
         try
         {
-            if(scenario=="completion")
+            if(scenario=="selected")
+            {
+                await OpenRoot(source);if(metadataTask is not null)await metadataTask;
+                foreach(bool details in new[]{false,true})
+                {
+                    DetailsMode.IsChecked=details;await RefreshQuery();
+                    await SelectBrowserOrdinal(results!,1,lifetime.Token);
+                    var retained=selected??throw new InvalidOperationException("未选中文件。");
+                    long before=resultHandle!.Count;string? viewport=VisibleBrowserPath();
+                    byte[] image=await File.ReadAllBytesAsync(Path.Combine(source,"A","image-00.png"));
+                    await File.WriteAllBytesAsync(Path.Combine(source,$"new-audit-{details}.png"),image);
+                    await new FolderLens.Infrastructure.DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);
+                    await RefreshQuery(preserveViewport:true,scanPreview:true);
+                    if(resultHandle.Count!=before+1||!ReferenceEquals(selected,retained))throw new InvalidOperationException("选中文件后新增扫描结果未发布，或选中对象丢失。");
+                    if(viewport is not null&&VisibleBrowserPath()!=viewport)throw new InvalidOperationException("自动更新使视口跳动。");
+                    var displayed=resultHandle;slideShow=true;
+                    try{await RefreshQuery(scanPreview:true);if(!ReferenceEquals(resultHandle,displayed))throw new InvalidOperationException("幻灯片序列被后台刷新替换。");}
+                    finally{slideShow=false;}
+                }
+                report["selectedGridAndDetailsKeepReceivingScanResults"]=true;
+                report["selectionAndViewportRetained"]=true;report["slideshowSequenceStable"]=true;
+            }
+            else if(scenario=="completion")
             {
                 verifyVideoMetadataBarrier=token=>release.Task.WaitAsync(token);
                 verifyScanBarrier=async token=>

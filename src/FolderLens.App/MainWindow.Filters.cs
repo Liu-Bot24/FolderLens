@@ -62,7 +62,7 @@ public sealed partial class MainWindow
     private async Task FillCurrentMetadata()
     {
         using var operation=browserWork.Enter();if(operation is null||closing)return;
-        if(catalog is null||metadataWorker is null||media is null||rootId.Length==0)return;string activeId=rootId;long revision=rootChangeVersion;var token=scanStop.Token;
+        if(catalog is null||catalog.BrowsingBudgetReached||metadataWorker is null||media is null||rootId.Length==0)return;string activeId=rootId;long revision=rootChangeVersion;var token=scanStop.Token;
         bool Current()=>activeId==rootId&&revision==rootChangeVersion&&!closing&&!token.IsCancellationRequested;
         try
         {

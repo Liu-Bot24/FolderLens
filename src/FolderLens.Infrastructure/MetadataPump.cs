@@ -58,6 +58,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                 foreach(var entry in batch)
                 {
                     cancellation.ThrowIfCancellationRequested();after=entry.Id;
+                    await catalog.EnsureBrowsingBudget(cancellation).ConfigureAwait(false);
                     while(catalog.SnapshotUnderPressure)await Task.Delay(100,cancellation).ConfigureAwait(false);
                     try
                     {
@@ -85,6 +86,8 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                             if(metadata.Details is {} details)await catalog.ApplyFileDetails(entry.Id,entry.Version,entry.RootId,entry.Epoch,details,"ffprobe-v1",cancellation).ConfigureAwait(false);
                         }
                     }
+                    catch(Microsoft.Data.Sqlite.SqliteException ex) when(ex.SqliteErrorCode==13)
+                    {catalog.MarkBrowsingBudgetReached();throw;}
                     catch(Win32Exception ex) when(ex.NativeErrorCode is 2 or 3 or 126 or 127 or 193)
                     {
                         // Engine startup failure is global; do not mark every file bad.

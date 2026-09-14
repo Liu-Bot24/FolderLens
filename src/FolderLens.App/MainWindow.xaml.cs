@@ -292,6 +292,12 @@ public sealed partial class MainWindow : Window
                 if(requested==rootChangeVersion&&!closing&&!rootToken.IsCancellationRequested)ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));
                 return;
             }
+            if(completedScan.BudgetLimited)
+            {
+                await RefreshQuery(preserveViewport:true,scanPreview:true);
+                if(requested==rootChangeVersion&&!closing)ShowScanError(new BrowsingBudgetException());
+                return;
+            }
             if(completedScan.State=="partial"&&completedScan.Files==0){ShowScanError(new IOException("无法读取此文件夹，请检查磁盘连接和访问权限后刷新。"));return;}
             if(activeId==rootId){QueueTreeRefresh();if(!BrowserSequenceLocked)await RefreshQuery(preserveViewport:true,scanPreview:true);else Status.Text+=" · 发现更多文件，点击“应用筛选”查看。";}
             if(settings is not null)await settings.Save("last-root.json",activeRoot);
@@ -319,6 +325,7 @@ public sealed partial class MainWindow : Window
             });
             scanTask=task;var report=await task;
             if(rootVersion!=rootChangeVersion||activeId!=rootId||activeEpoch!=epoch||closing||rootToken.IsCancellationRequested)return;
+            if(report.BudgetLimited){await RefreshQuery(preserveViewport:true,scanPreview:true);if(rootVersion==rootChangeVersion&&!closing)ShowScanError(new BrowsingBudgetException());return;}
             // A successful query or a dirty-subdirectory scan does not prove that a
             // previous root scan failure recovered. F5 performs the complete scope.
             if(force&&report.State=="ready")ClearScanError();
@@ -342,10 +349,10 @@ public sealed partial class MainWindow : Window
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
         if(browserScanError is not null&&!string.Equals(root,RootPath.Text,StringComparison.Ordinal))return;
-        long previewSelection=selection;string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
+        string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
-        bool PreviewInterrupted()=>scanPreview&&(BrowserSequenceLocked||resultHandle is not null&&selection!=previewSelection);
+        bool PreviewInterrupted()=>scanPreview&&BrowserSequenceLocked;
         if(PreviewInterrupted())return;
         var completion=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);queryCompletion=completion.Task;
         queryStop.Cancel();queryStop.Dispose();queryStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var queryToken=queryStop.Token;long gen=scanPreview?generation:++generation,request=++queryRequest;queryBusy=true;
@@ -393,9 +400,10 @@ public sealed partial class MainWindow : Window
             {
                 edits=await catalog.CompareSnapshots(previousHandle!,handle,previousGroups,groups,queryToken);
                 refined=await catalog.RefineSnapshotChanges(previousHandle!,handle,previousGroups,groups,edits,queryToken);
-                var ids=visible.Concat(previousResults!.CachedRows()).Where(row=>row.Item is not null).Select(row=>row.Item!.EntryId).Distinct().Take(8192).ToArray();
+                var ids=(selected is {} selectedRow?new[]{selectedRow}:Array.Empty<FileRow>()).Concat(visible).Concat(previousResults!.CachedRows()).Where(row=>row.Item is not null).Select(row=>row.Item!.EntryId).Distinct().Take(8192).ToArray();
                 matching=await catalog.ReadSnapshotEntries(handle.Id,ids,queryToken);
                 if(!IsCurrent()||closing||PreviewInterrupted())return;
+                previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             }
             else if(promoting)
             {
@@ -417,7 +425,7 @@ public sealed partial class MainWindow : Window
             {
                 if(incremental)
                 {
-                    var rows=visible.Concat(previousResults!.CachedRows().Take(4096)).Where(row=>previousResults.IndexOf(row)>=0).DistinctBy(row=>previousResults.IndexOf(row)).ToArray();
+                    var rows=(selected is {} selectedRow?new[]{selectedRow}:Array.Empty<FileRow>()).Concat(visible).Concat(previousResults!.CachedRows().Take(4096)).Where(row=>previousResults.IndexOf(row)>=0).DistinctBy(row=>previousResults.IndexOf(row)).ToArray();
                     var stableChanges=PreserveVisibleRanges(rows,previousGroups,groups,edits!,matching)
                         .ToDictionary(pair=>pair.Key,pair=>refined![pair.Key]??pair.Value);
                     Stage("ranges");
@@ -500,7 +508,7 @@ public sealed partial class MainWindow : Window
                 var ordinal=await catalog.FindOrdinal(handle.Id,previousPath,queryToken);
                 if(IsCurrent()&&!closing&&restoreSelectionRequest==browserSelectionRequest)
                 {
-                    if(ordinal is {} position){var restored=(FileRow)results[(int)position]!;RevealBrowserRow(restored);ActiveBrowser.SelectedItem=restored;}
+                    if(ordinal is {} position){var restored=(FileRow)results[(int)position]!;if(!incremental&&!promoting)RevealBrowserRow(restored);ActiveBrowser.SelectedItem=restored;}
                     else{ActiveBrowser.SelectedItem=null;ClearResultSelection();}
                 }
             }

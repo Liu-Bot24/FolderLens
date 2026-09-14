@@ -11,6 +11,7 @@ internal sealed class WorkerJob : IDisposable
     private int? processId;
     private static readonly object aggregateSync=new();
     private static SafeFileHandle? aggregate;
+    private static long aggregateLimit;
     public WorkerJob(long memoryLimit)
     {
         handle=CreateJobObjectW(IntPtr.Zero,null);if(handle.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -19,7 +20,7 @@ internal sealed class WorkerJob : IDisposable
     }
     public void Assign(Process process)
     {
-        SetAggregateLimit(Math.Max(128L<<20,WorkerResources.Shared.Snapshot.HardLimitBytes));
+        EnsureAggregateLimit();
         try
         {
             lock(aggregateSync)if(!AssignProcessToJobObject(aggregate!,process.Handle))throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -28,13 +29,21 @@ internal sealed class WorkerJob : IDisposable
         }
         catch{if(!process.HasExited)process.Kill(entireProcessTree:true);throw;}
     }
-    internal static void SetAggregateLimit(long memoryLimit)
+    internal static void EnsureAggregateLimit()
+    {
+        lock(aggregateSync)
+            if(aggregate is null)SetAggregateLimit(Math.Max(128L<<20,WorkerResources.Shared.Snapshot.HardLimitBytes/2));
+    }
+    internal static long AggregateLimit {get{lock(aggregateSync)return aggregateLimit;}}
+    internal static void SetAggregateLimit(long memoryLimit,bool allowIncrease=true)
     {
         lock(aggregateSync)
         {
+            if(aggregate is not null&&!allowIncrease)memoryLimit=Math.Min(memoryLimit,aggregateLimit);
             aggregate??=CreateJobObjectW(IntPtr.Zero,null);if(aggregate.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error());
             var limits=new ExtendedLimits{Basic=new BasicLimits{Flags=0x2000|0x200|0x8,ActiveLimit=32},JobMemoryLimit=(UIntPtr)memoryLimit};
             if(!SetInformationJobObject(aggregate,9,ref limits,Marshal.SizeOf<ExtendedLimits>()))throw new Win32Exception(Marshal.GetLastWin32Error());
+            aggregateLimit=memoryLimit;
         }
     }
     public void Dispose(){handle.Dispose();if(processId is {} pid){processId=null;WorkerResources.Shared.Unregister(pid);}}
