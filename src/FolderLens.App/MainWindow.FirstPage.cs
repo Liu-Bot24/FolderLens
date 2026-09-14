@@ -10,7 +10,7 @@ public sealed partial class MainWindow
     private FileRow[] firstPageSequence=[];
     private bool automaticQueryPending;
     private Task queryCompletion=Task.CompletedTask;
-    private bool BrowserSequenceLocked=>resultHandle is not null&&(selected is not null||immersive||fullScreen);
+    private bool BrowserSequenceLocked=>ScanPreviewRefresh.SequenceLocked(resultHandle is not null,selected is not null,immersive,fullScreen,slideShow);
     private bool FirstPageMatches(FilterSpec filter)=>firstPageSequence.Length>0&&firstPageFilter==JsonSerializer.Serialize(filter);
     private void PublishFirstPage(FilterSpec filter,IReadOnlyList<SnapshotItem> items)
     {

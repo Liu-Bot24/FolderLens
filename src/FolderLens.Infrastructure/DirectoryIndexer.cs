@@ -6,7 +6,8 @@ using Microsoft.Data.Sqlite;
 
 namespace FolderLens.Infrastructure;
 
-public sealed record ScanProgress(long Files,long Directories,long Errors,string State);
+public sealed record ScanProgress(long Files,long Directories,long Errors,string State)
+{public bool BudgetLimited {get;init;}}
 public sealed class RootIdentityChangedException():IOException("文件夹或所在磁盘已更换，请重新打开文件夹。");
 
 /// <summary>Disk-backed fair traversal; only a completed directory can reconcile unseen entries.</summary>
@@ -76,6 +77,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             while(true)
             {
                 cancellation.ThrowIfCancellationRequested();
+                if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
                 var queued=await Scheduled(rootId,cancellation,()=>catalog.Write(c=>
                 {
                     using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
@@ -173,6 +175,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 }
                 catch(RootIdentityChangedException){availability="unknown";throw;}
                 catch(ScanWorkerUnavailableException){throw;}
+                catch(BrowsingBudgetException){throw;}
                 catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or TimeoutException)
                 {
                     errors++;string state=ex is UnauthorizedAccessException?"inaccessible":ex is TimeoutException?"failed":"offline";
@@ -185,6 +188,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             if(outcome=="ready")foreach(var scope in captured)await dirtyStore.Acknowledge(rootId,epoch,scope,cancellation).ConfigureAwait(false);
         }
         catch(OperationCanceledException){outcome="cancelled";}
+        catch(BrowsingBudgetException){catalog.MarkBrowsingBudgetReached();outcome="partial";errors++;}
+        catch(SqliteException ex) when(ex.SqliteErrorCode==13)
+        {catalog.MarkBrowsingBudgetReached();outcome="partial";errors++;}
         finally
         {
             if(initialized)await catalog.Write(c=>
@@ -199,7 +205,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");t.Commit();return true;
             }).ConfigureAwait(false);
         }
-        var result=new ScanProgress(files,dirs,errors,rootMissing?"missing":outcome);progress?.Report(result);return result;
+        var result=new ScanProgress(files,dirs,errors,rootMissing?"missing":outcome){BudgetLimited=catalog.BrowsingBudgetReached};progress?.Report(result);return result;
     }
 
     public async Task<ScanProgress> ReconcileDirty(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,IProgress<ScanProgress>? progress,CancellationToken cancellation)
@@ -217,6 +223,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 {
                     var result=await Scan(rootId,root,epoch,recursive,exclusions,progress,cancellation,scopeRelative:currentPath,descendants:scope.Subtree).ConfigureAwait(false);
                     files+=result.Files;directories+=result.Directories;errors+=result.Errors;
+                    if(result.BudgetLimited)return new(files,directories,errors,"partial"){BudgetLimited=true};
                     if(result.State=="cancelled")return new(files,directories,errors,"cancelled");
                     if(result.State=="missing")
                     {
@@ -239,6 +246,8 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
 
     private Task<bool> CommitBatch(string root,long epoch,string directoryId,string relative,string scan,ScanEntry[] entries,bool recursive,ExclusionSpec[] exclusions,bool forceRefresh,bool descendants,Dictionary<string,ScanRename> moves,CancellationToken cancellation)=>catalog.Write(c=>
     {
+        if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
+        CompactBrowsingCatalog.EnsureWriteHeadroom(c,(64L<<10)+entries.Sum(item=>1024L+32L*(relative.Length+item.Name.Length)));
         using var t=c.BeginTransaction();EnsureEpoch(c,t,root,epoch);using var commands=new BatchCommands(c,t);
         // Move identities before upserting a new file that may already occupy one of the old source paths.
         foreach(var change in moves)ScanRenames.Apply(c,t,root,directoryId,change.Key,change.Value);

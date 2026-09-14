@@ -2,6 +2,8 @@ namespace FolderLens.Core;
 
 public sealed class ScanPreviewRefresh
 {
+    public static bool SequenceLocked(bool hasResults,bool hasSelection,bool immersive,bool fullScreen,bool slideshow)
+        =>hasResults&&(immersive||fullScreen||slideshow);
     private TimeSpan next;
     public void Reset()=>next=TimeSpan.Zero;
     public void Complete(TimeSpan now)=>next=now+TimeSpan.FromSeconds(2);

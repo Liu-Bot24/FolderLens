@@ -47,6 +47,15 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private readonly SemaphoreSlim snapshotGate = new(1,1);
     private string? activeSessionId;
     private int snapshotUnderPressure;
+    private int browsingBudgetReached;
+    public bool BrowsingBudgetReached=>Volatile.Read(ref browsingBudgetReached)!=0;
+    internal void MarkBrowsingBudgetReached()=>Volatile.Write(ref browsingBudgetReached,1);
+    internal async Task EnsureBrowsingBudget(CancellationToken cancellation)
+    {
+        if(BrowsingBudgetReached)throw new BrowsingBudgetException();
+        try{await Write(c=>{CompactBrowsingCatalog.EnsureWriteHeadroom(c,64L<<10);return true;},cancellation).ConfigureAwait(false);}
+        catch(BrowsingBudgetException){MarkBrowsingBudgetReached();throw;}
+    }
     public bool SnapshotUnderPressure => Volatile.Read(ref snapshotUnderPressure) != 0;
     public CatalogStore(string dataDirectory) : this(dataDirectory, new SnapshotLimits()) { }
     public CatalogStore(string dataDirectory, SnapshotLimits limits,string? playlistPath=null)

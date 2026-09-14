@@ -30,7 +30,7 @@ public sealed class WorkerResources
     public event Action? MemoryPressure;
     private WorkerResources():this(InitialSnapshot())
     {
-        monitor=new(_=>Refresh(),null,TimeSpan.Zero,TimeSpan.FromMilliseconds(250));
+        monitor=new(_=>Refresh(),null,TimeSpan.Zero,TimeSpan.FromSeconds(1));
     }
     // Deterministic admission verification without sharing leases or native-memory
     // sampling with unrelated tests. Production always uses the monitored Shared.
@@ -47,8 +47,10 @@ public sealed class WorkerResources
         var memory=PhysicalMemory();return new(0,memory.Available,Math.Min(6L<<30,memory.Total/8),Math.Min(8L<<30,memory.Total/4),0,0,0,Math.Min(16,Math.Max(2,Environment.ProcessorCount/2)),false,true);
     }
     public WorkerResourceSnapshot Snapshot {get{lock(sync)return snapshot;}}
-    internal void Register(Process process){lock(sync)registered[process.Id]=process;Refresh();}
-    internal void Unregister(int pid){lock(sync)registered.Remove(pid);Refresh();}
+    // The timer owns sampling. Worker start/stop must never enumerate processes on
+    // a decoder's critical path; the kernel job cap stays in force between samples.
+    internal void Register(Process process){lock(sync)registered[process.Id]=process;}
+    internal void Unregister(int pid){lock(sync)registered.Remove(pid);}
     public async Task<Lease> Acquire(WorkerPriority priority,CancellationToken cancellation=default,WorkerLane lane=WorkerLane.General)
     {
         if(!Enum.IsDefined(priority)||!Enum.IsDefined(lane))throw new ArgumentOutOfRangeException(nameof(priority));
@@ -105,10 +107,11 @@ public sealed class WorkerResources
         try
         {
             Process[] workers;lock(sync)workers=registered.Values.ToArray();
-            var memory=PhysicalMemory();long total=0;bool complete=true;var measured=new HashSet<int>();
+            var memory=PhysicalMemory();long total=0,workerBytes=0;bool complete=true;var measured=new HashSet<int>();
+            var workerIds=workers.Select(p=>p.Id).ToHashSet();
             void Measure(Process process)
             {
-                try{if(!measured.Add(process.Id)||process.HasExited)return;process.Refresh();total=checked(total+process.PrivateMemorySize64);}catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){complete=false;}
+                try{if(!measured.Add(process.Id)||process.HasExited)return;long bytes=ReadPrivateBytes(process);total=checked(total+bytes);if(workerIds.Contains(process.Id))workerBytes=checked(workerBytes+bytes);}catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){complete=false;}
             }
             using(var app=Process.GetCurrentProcess())Measure(app);foreach(var process in workers)Measure(process);
             foreach(int pid in OwnedDescendants(workers.Select(p=>{try{return p.Id;}catch(InvalidOperationException){return -1;}}).ToHashSet()))
@@ -116,7 +119,8 @@ public sealed class WorkerResources
             long soft=Math.Min(6L<<30,memory.Total/8),hard=Math.Min(8L<<30,memory.Total/4),safety=Math.Max(512L<<20,memory.Total/32);
             bool pressure=total>=soft||memory.Available<safety;
             ObserveMemory(total,memory.Available,soft,hard,pressure,complete);
-            WorkerJob.SetAggregateLimit(Math.Max(128L<<20,hard-Math.Max(0,total-WorkerBytes(workers))));
+            // An incomplete sample may tighten the budget but must not expand it.
+            WorkerJob.SetAggregateLimit(Math.Max(128L<<20,hard-Math.Max(0,total-workerBytes)),allowIncrease:complete);
         }
         catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or OverflowException)
         {
@@ -135,9 +139,11 @@ public sealed class WorkerResources
         foreach(var lease in cancel)lease.RequestPressureCancellation();
         if(pressure)MemoryPressure?.Invoke();
     }
-    private static long WorkerBytes(IEnumerable<Process> workers)
+    internal static long ReadPrivateBytes(Process process)
     {
-        long total=0;foreach(var process in workers)try{if(!process.HasExited)total+=process.PrivateMemorySize64;}catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){}return total;
+        var counters=new ProcessMemoryCounters{Size=(uint)Marshal.SizeOf<ProcessMemoryCounters>()};
+        if(!GetProcessMemoryInfo(process.Handle,ref counters,counters.Size))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return checked((long)counters.PrivateUsage.ToUInt64());
     }
     public sealed class Lease : IDisposable
     {
@@ -173,6 +179,9 @@ public sealed class WorkerResources
         foreach(var row in rows)if(workerRoots.Contains(row.Pid)||(allApp.Contains(row.Pid)&&row.Name.Equals("msedgewebview2.exe",StringComparison.OrdinalIgnoreCase)))yield return row.Pid;
     }
     [StructLayout(LayoutKind.Sequential)]private struct MemoryStatus{public uint Length,Load;public ulong TotalPhysical,AvailablePhysical,TotalPageFile,AvailablePageFile,TotalVirtual,AvailableVirtual,AvailableExtendedVirtual;}
+    [StructLayout(LayoutKind.Sequential)]private struct ProcessMemoryCounters
+    {public uint Size,PageFaultCount;public UIntPtr PeakWorkingSetSize,WorkingSetSize,QuotaPeakPagedPoolUsage,QuotaPagedPoolUsage,QuotaPeakNonPagedPoolUsage,QuotaNonPagedPoolUsage,PagefileUsage,PeakPagefileUsage,PrivateUsage;}
+    [DllImport("psapi.dll",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GetProcessMemoryInfo(IntPtr process,ref ProcessMemoryCounters counters,uint size);
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]private struct ProcessEntry{public uint Size,Usage,ProcessId;public UIntPtr DefaultHeap;public uint ModuleId,Threads,ParentProcessId;public int Priority;public uint Flags;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)]public string Executable;}
     [DllImport("kernel32.dll",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
     [DllImport("kernel32.dll",SetLastError=true)]private static extern SafeFileHandle CreateToolhelp32Snapshot(uint flags,uint process);
