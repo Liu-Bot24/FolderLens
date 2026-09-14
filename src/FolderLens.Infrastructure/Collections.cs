@@ -88,10 +88,25 @@ public sealed partial class CatalogStore
         using var rows=command.ExecuteReader();var result=new List<FileCollection>();while(rows.Read())result.Add(new(rows.GetString(0),rows.GetString(1),rows.GetInt64(2)));
         if(result.Count>512)throw new InvalidDataException("收藏夹数量超过 512 个，请先整理收藏夹。");return result;
     },cancellation);
-    public Task<int> ChangeCollectionMembers(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,bool add,CancellationToken cancellation=default)=>writer.Execute(c=>
+    public Task<int> ChangeCollectionMembers(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,bool add,CancellationToken cancellation=default)=>ChangeCollectionMembersCore(collectionIds,entryIds,null,add,cancellation);
+    public Task<int> ChangeCollectionItems(IReadOnlyList<string> collectionIds,IReadOnlyList<SnapshotItem> items,bool add,CancellationToken cancellation=default)=>ChangeCollectionMembersCore(collectionIds,items.Select(i=>i.EntryId).ToArray(),items,add,cancellation);
+    private Task<int> ChangeCollectionMembersCore(IReadOnlyList<string> collectionIds,IReadOnlyList<string> entryIds,IReadOnlyList<SnapshotItem>? observed,bool add,CancellationToken cancellation)=>writer.Execute(c=>
     {
         if(collectionIds.Count is <1 or >64||entryIds.Count>256)throw new ArgumentException("收藏批次大小无效。");
         using var transaction=c.BeginTransaction();int changed=0;
+        using(var check=c.CreateCommand())
+        {
+            check.Transaction=transaction;
+            check.CommandText="SELECT f.entry_state,f.file_version,f.path_revision,f.relative_path,f.directory_id,f.root_id,r.display_path,r.root_epoch FROM Files f JOIN Roots r ON r.root_id=f.root_id WHERE f.entry_id=$entry";
+            check.Parameters.AddWithValue("$entry","");
+            foreach(string entry in entryIds.Distinct())
+            {
+                cancellation.ThrowIfCancellationRequested();check.Parameters["$entry"].Value=entry;using var row=check.ExecuteReader();
+                if(!row.Read()||(add&&row.GetString(0)=="missing"))throw StaleCollectionSelection();
+                if(observed is not null)foreach(var item in observed.Where(i=>i.EntryId==entry))
+                    if(row.GetInt64(1)!=item.Version||row.GetInt64(2)!=item.PathRevision||row.GetString(3)!=item.RelativePath||row.GetString(4)!=item.DirectoryId||row.GetString(5)!=item.SourceRootId||row.GetString(6)!=item.SourceRootPath||row.GetInt64(7)!=item.SourceRootEpoch)throw StaleCollectionSelection();
+            }
+        }
         using var command=c.CreateCommand();command.Transaction=transaction;
         command.CommandText=add?"""
             INSERT INTO CollectionMembers(collection_id,location_key,entry_id,added_utc_ticks)
@@ -104,6 +119,7 @@ public sealed partial class CatalogStore
         cancellation.ThrowIfCancellationRequested();transaction.Commit();return changed;
     },cancellation);
     internal const string CollectionSelectionRowsSql="FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i CROSS JOIN Files f WHERE i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count') AND f.entry_id=i.entry_id";
+    private static IOException StaleCollectionSelection()=>new("所选文件已更改或不存在，请刷新结果后重新选择；本次收藏修改未提交。");
     public Task<int> ChangeCollectionSelection(string[] collectionIds,string sessionId,IReadOnlyList<OrdinalRange> ranges,bool add,CancellationToken cancellation=default)=>writer.Execute(c=>
     {
         if(collectionIds.Length is <1 or >64||ranges.Count>8192)throw new ArgumentException("收藏选择范围无效。");
@@ -116,6 +132,14 @@ public sealed partial class CatalogStore
             command.CommandText="SELECT coalesce(max(ordinal)+1,0) FROM collection_selection.ResultItems WHERE session_id=$session";
             long total=(long)command.ExecuteScalar()!;
             command.Parameters.AddWithValue("$ranges",System.Text.Json.JsonSerializer.Serialize(OrdinalSelection.Normalize(ranges,total)));command.Parameters.AddWithValue("$collection","");command.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
+            command.Parameters.AddWithValue("$add",add?1:0);
+            command.CommandText="""
+                SELECT 1 FROM json_each($ranges) j CROSS JOIN collection_selection.ResultItems i
+                LEFT JOIN Files f ON f.entry_id=i.entry_id LEFT JOIN Roots r ON r.root_id=f.root_id
+                WHERE i.session_id=$session AND i.ordinal>=json_extract(j.value,'$.Start') AND i.ordinal<json_extract(j.value,'$.Start')+json_extract(j.value,'$.Count')
+                AND (f.entry_id IS NULL OR ($add=1 AND f.entry_state='missing') OR f.file_version IS NOT i.observed_version OR f.path_revision IS NOT i.observed_path_revision OR f.relative_path IS NOT i.snapshot_relative_path OR f.directory_id IS NOT i.directory_id OR f.root_id IS NOT i.source_root_id OR r.display_path IS NOT i.source_root_path OR r.root_epoch IS NOT i.source_root_epoch) LIMIT 1
+                """;
+            if(command.ExecuteScalar() is not null)throw StaleCollectionSelection();
             command.CommandText="CREATE TEMP TABLE SelectedCollectionLocations(location_key TEXT PRIMARY KEY,entry_id TEXT NOT NULL); INSERT INTO temp.SelectedCollectionLocations SELECT f.location_key,min(f.entry_id) "+CollectionSelectionRowsSql+" GROUP BY f.location_key";
             command.ExecuteNonQuery();
             command.CommandText=add?"INSERT INTO CollectionMembers SELECT $collection,location_key,entry_id,$now FROM temp.SelectedCollectionLocations WHERE true ON CONFLICT(collection_id,location_key) DO NOTHING":"DELETE FROM CollectionMembers WHERE collection_id=$collection AND location_key IN(SELECT location_key FROM temp.SelectedCollectionLocations)";

@@ -78,7 +78,7 @@ public sealed partial class MainWindow
     {
         using var work=browserWork.Enter();if(work is null||closing||catalog is not {} store)return;
         var handle=quickRow is null?resultHandle:null;IReadOnlyList<OrdinalRange> ranges=quickRow is null?SelectedOrdinals(ActiveBrowser):[];
-        var first=quickRow?.Item is {} quickItem?new[]{quickItem.EntryId}:handle is null?ActiveBrowser.SelectedItems.OfType<FileRow>().Where(r=>r.Item is not null).Select(r=>r.Item!.EntryId).ToArray():[];
+        var first=quickRow?.Item is {} quickItem?new[]{quickItem}:handle is null?ActiveBrowser.SelectedItems.OfType<FileRow>().Where(r=>r.Item is not null).Select(r=>r.Item!).ToArray():[];
         if(ranges.Count==0&&first.Length==0){Status.Text="请先选择要收藏的文件。";return;}
         bool retained=false;
         try
@@ -99,7 +99,7 @@ public sealed partial class MainWindow
                     if(add&&!string.IsNullOrWhiteSpace(name.Text)){var created=await store.CreateCollection(name.Text,lifetime.Token);ids.Add(created.Id);name.Text="";await RefreshCollectionsTree();choices.ItemsSource=fileCollections;foreach(var c in fileCollections.Where(c=>ids.Contains(c.Id)))choices.SelectedItems.Add(c);}
                     if(ids.Count==0)throw new ArgumentException("请选择收藏夹，或填写新收藏夹名称。");
                     using var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);stop.CancelAfter(TimeSpan.FromSeconds(30));
-                    int changed=handle is null?await store.ChangeCollectionMembers(ids,first,add,stop.Token):await store.ChangeCollectionSelection(ids.ToArray(),handle.Id,ranges,add,stop.Token);
+                    int changed=handle is null?await store.ChangeCollectionItems(ids,first,add,stop.Token):await store.ChangeCollectionSelection(ids.ToArray(),handle.Id,ranges,add,stop.Token);
                     if(add){lastCollectionTargets=ids.ToArray();if(quickRow is not null)quickCollectionUsed=true;}
                     RefreshCollectionBadges();
                     await RefreshCollectionsTree();Status.Text=add?$"已添加 {changed:N0} 条收藏归属。":$"已移除 {changed:N0} 条收藏归属，原文件保留。";

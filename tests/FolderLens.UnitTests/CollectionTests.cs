@@ -6,6 +6,56 @@ namespace FolderLens.UnitTests;
 
 public sealed class CollectionTests
 {
+    [Fact] public async Task V5UpgradeRemovesReaddedMissingButPreservesLiveMembership()
+    {
+        string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();await catalog.SeedBenchmark(2);string tag=(await catalog.CreateCollection("legacy references")).Id;
+            await catalog.ChangeCollectionMembers([tag],["000000000001","000000000002"],true);
+            await catalog.Write(c=>
+            {
+                LegacyV5CollectionSchema.Apply(c);
+                using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET entry_state='missing' WHERE entry_id='000000000001';INSERT INTO CollectionMembers SELECT $tag,location_key,entry_id,0 FROM Files WHERE entry_id='000000000001'";cmd.Parameters.AddWithValue("$tag",tag);return cmd.ExecuteNonQuery();
+            });
+            Assert.Equal(2,(await catalog.ReadCollections()).Single().Count);
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+            Assert.Equal(2,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files";return (long)cmd.ExecuteScalar()!;}));
+        }
+    }
+    [Fact] public async Task ExistingV5LocationTriggerRepairDoesNotRewriteDataOrRepeatDdl()
+    {
+        string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));long repairedVersion;
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();await catalog.SeedBenchmark(2);
+            string tag=(await catalog.CreateCollection("v5 persisted")).Id;await catalog.ChangeCollectionMembers([tag],["000000000001"],true);
+            await catalog.Write(c=>
+            {
+                LegacyV5CollectionSchema.Apply(c);
+                using var cmd=c.CreateCommand();cmd.CommandText="CREATE TABLE RepairWrites(value INTEGER);CREATE TRIGGER TrackRepairWrites AFTER UPDATE OF location_key ON Files BEGIN INSERT INTO RepairWrites VALUES(1);END;";
+                return cmd.ExecuteNonQuery();
+            });
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();
+            Assert.Single(Directory.GetFiles(data,"*.pre-v6-*.bak"));
+            Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
+            Assert.Equal(6,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
+            await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=physical_identity";return cmd.ExecuteNonQuery();});
+            Assert.Equal(0,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM RepairWrites";return (long)cmd.ExecuteScalar()!;}));
+            repairedVersion=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA schema_version";return (long)cmd.ExecuteScalar()!;});
+        }
+        await using(var catalog=new CatalogStore(data))
+        {
+            await catalog.Initialize();
+            Assert.Equal(repairedVersion,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA schema_version";return (long)cmd.ExecuteScalar()!;}));
+        }
+    }
     [Fact] public async Task ExistingV4TriggerIsRepairedAndCaseChangesRetainMembership()
     {
         string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));string id;
