@@ -184,7 +184,7 @@ function Get-BuildInputs {
     $bytes = [Text.Encoding]::UTF8.GetBytes((($records | ForEach-Object { $_.path+' '+$_.sha256 }) -join "`n"))
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $digest=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','') } finally { $sha.Dispose() }
-    $gitHead = & git -C $script:ProjectRoot rev-parse HEAD 2>$null
+    $gitHead = & git -c "safe.directory=$($script:ProjectRoot.Replace('\','/'))" -C $script:ProjectRoot rev-parse HEAD 2>$null
     if ($LASTEXITCODE -ne 0) { $gitHead='UNCOMMITTED' }
     return [pscustomobject]@{ sha256=$digest; gitHead=[string]$gitHead; files=$records }
 }
