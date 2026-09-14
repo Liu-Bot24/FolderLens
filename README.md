@@ -41,13 +41,17 @@ PDF、Office 和压缩文件目前支持分类、列表、文件属性和外部�
 
 CMake 优先从 `PATH` 查找，其次从 Visual Studio 安装位置查找，不要求 Community 版固定路径。非默认安装可在当前 PowerShell 会话设置 `$env:FOLDERLENS_CMAKE`（cmake.exe 路径）、`$env:FOLDERLENS_VS_ROOT`（Visual Studio 根目录）或 `$env:FOLDERLENS_CRT_DIR`（VC 运行库 DLL 所在目录）。运行库仍须与依赖锁定文件的版本和全部 SHA-256 一致；指定其他路径不会跳过校验。
 
-完成构建后运行：
+已有交付目录时，使用同一个入口运行：
 
 ```powershell
-.\src\FolderLens.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\FolderLens.App.exe
+.\scripts\Run-Local.ps1
 ```
 
-程序可接受 `--root <目录>` 或 `--open <文件>`。默认应用数据位于 `%LOCALAPPDATA%\FolderLens`；`--data-dir <本地目录>` 可用于隔离验证数据。
+脚本读取 `artifacts/publish/latest-candidate.json`，不会回退启动另一份 `bin` 程序。首次从源码构建的开发者可显式传入 `-AppRoot` 指向构建目录。
+
+程序可接受 `--root <目录>` 或 `--open <文件>`。默认应用数据位于 `%LOCALAPPDATA%\FolderLens`；便携模式位于程序旁的 `data`；`--data-dir <本地目录>` 可用于隔离验证数据。
+
+索引是扫描所选目录后生成的本地文件目录数据库，保存文件路径、大小、时间等信息，用于浏览和筛选；它不是训练数据。每位用户生成自己的索引，程序不自动上传索引或源文件。分发包不应包含使用后生成的索引、收藏、配置及缓存；不要直接把自己使用过的程序目录压缩后分享。
 
 ## 验证
 
@@ -59,7 +63,7 @@ $dotnet = Get-DotNet
 
 部分测试需要已构建的工作进程、FFmpeg 或实际样本；未准备环境时不应把失败或未运行当作通过。
 
-扫描刷新原生回归验证使用真实 WinUI 控件，在屏幕外创建独立验证窗口，仅写入指定验证目录：
+扫描刷新原生回归验证使用真实 WinUI 控件，会创建窗口。离屏位置不保证不影响任务栏或其他应用的输入，应在专用测试桌面执行，仅写入指定验证目录：
 
 ```powershell
 .\src\FolderLens.App\bin\Release\net10.0-windows10.0.26100.0\win-x64\FolderLens.App.exe --verify-refresh --data-dir .\artifacts\native-refresh-check
