@@ -7,6 +7,37 @@ public sealed record FileCollection(string Id,string Name,long Count);
 
 public sealed partial class CatalogStore
 {
+    // This connection owns catalog writes. A transactional TEMP counter tracks
+    // actual member changes without a persistent schema change or scan polling IO.
+    private static int InitializeCollectionRevision(SqliteConnection c)=>Execute(c,"""
+        CREATE TEMP TABLE IF NOT EXISTS CollectionRevision(value INTEGER NOT NULL);
+        INSERT INTO temp.CollectionRevision SELECT 0 WHERE NOT EXISTS(SELECT 1 FROM temp.CollectionRevision);
+        CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionInsert AFTER INSERT ON main.CollectionMembers BEGIN UPDATE CollectionRevision SET value=value+1; END;
+        CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionDelete AFTER DELETE ON main.CollectionMembers BEGIN UPDATE CollectionRevision SET value=value+1; END;
+        CREATE TEMP TRIGGER IF NOT EXISTS CollectionRevisionUpdate AFTER UPDATE ON main.CollectionMembers
+        WHEN OLD.collection_id IS NOT NEW.collection_id OR OLD.location_key IS NOT NEW.location_key OR OLD.entry_id IS NOT NEW.entry_id
+        BEGIN UPDATE CollectionRevision SET value=value+1; END;
+        """);
+    public Task<long> ReadCollectionRevision(CancellationToken cancellation=default)=>writer.Execute(c=>Scalar(c,"SELECT value FROM temp.CollectionRevision"),cancellation);
+    public Task<bool[]> ReadCollectionFlags(IReadOnlyList<SnapshotItem> items,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
+    {
+        if(items.Count>256)throw new ArgumentException("收藏状态批次过大。");
+        using var command=c.CreateCommand();command.CommandText="""
+            SELECT EXISTS(SELECT 1 FROM Files f JOIN Roots r ON r.root_id=f.root_id
+                WHERE f.entry_id=$entry AND f.file_version=$version AND f.path_revision=$revision AND f.relative_path=$path
+                AND f.root_id=$root AND r.root_epoch=$epoch AND f.entry_state<>'missing'
+                AND EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key))
+            """;
+        foreach(string parameter in new[]{"$entry","$version","$revision","$path","$root","$epoch"})command.Parameters.AddWithValue(parameter,DBNull.Value);
+        var flags=new bool[items.Count];for(int i=0;i<items.Count;i++)
+        {
+            cancellation.ThrowIfCancellationRequested();var item=items[i];
+            command.Parameters["$entry"].Value=item.EntryId;command.Parameters["$version"].Value=item.Version;command.Parameters["$revision"].Value=item.PathRevision;
+            command.Parameters["$path"].Value=item.RelativePath;command.Parameters["$root"].Value=(object?)item.SourceRootId??DBNull.Value;command.Parameters["$epoch"].Value=(object?)item.SourceRootEpoch??DBNull.Value;
+            flags[i]=(long)command.ExecuteScalar()! == 1;
+        }
+        return flags;
+    },cancellation);
     internal static string LocationKey(string root,string relative,string caseMode)
     {
         string path=Path.Combine(root,relative).Replace('/','\\');

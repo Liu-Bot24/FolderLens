@@ -8,7 +8,7 @@ $fixture=Join-Path $EvidenceRoot 'parent.ps1'
 @'
 param([string]$PidFile)
 $start=[Diagnostics.ProcessStartInfo]::new()
-$start.FileName=Join-Path $PSHOME 'pwsh.exe'
+$start.FileName=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
 $start.Arguments='-NoProfile -Command "Write-Output child-started; Start-Sleep -Seconds 60"'
 $start.UseShellExecute=$false
 $start.CreateNoWindow=$true

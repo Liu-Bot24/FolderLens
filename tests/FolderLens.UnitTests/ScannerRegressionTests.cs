@@ -8,6 +8,31 @@ namespace FolderLens.UnitTests;
 
 public sealed class ScannerRegressionTests
 {
+    [Theory]
+    [InlineData("😀", "B")]
+    [InlineData("中文😀", "新目录😀")]
+    [InlineData("普通中文", "新目录")]
+    public async Task NonrecursiveRenamePreservesUnicodeDescendantPaths(string oldName,string newName)
+    {
+        string source=Fixture();Directory.CreateDirectory(Path.Combine(source,oldName,"子😀目录"));
+        File.WriteAllText(Path.Combine(source,oldName,"inside.txt"),"direct child");
+        File.WriteAllText(Path.Combine(source,oldName,"子😀目录","nested.txt"),"nested child");
+        File.WriteAllText(Path.Combine(source,"root.txt"),"unrelated root file");
+        await using var catalog=new CatalogStore(Fixture());await catalog.Initialize();long epoch=await catalog.OpenRoot("unicode",source);
+        var scanner=new DirectoryIndexer(catalog,Worker());await scanner.Scan("unicode",source,epoch,true,[],null,CancellationToken.None);
+        Directory.Move(Path.Combine(source,oldName),Path.Combine(source,newName));
+        await scanner.Scan("unicode",source,epoch,false,[],null,CancellationToken.None);
+        var rows=await catalog.Read(c=>
+        {
+            using var command=c.CreateCommand();command.CommandText="SELECT name,relative_path,entry_state FROM Files WHERE root_id='unicode'";
+            using var reader=command.ExecuteReader();var values=new Dictionary<string,(string Path,string State)>();
+            while(reader.Read())values.Add(reader.GetString(0),(reader.GetString(1),reader.GetString(2)));return values;
+        });
+        Assert.Equal((newName+"\\inside.txt","excluded"),rows["inside.txt"]);
+        Assert.Equal((newName+"\\子😀目录\\nested.txt","excluded"),rows["nested.txt"]);
+        Assert.Equal(("root.txt","present"),rows["root.txt"]);
+        Assert.Equal(1,(await catalog.CreateSnapshot(new(){RootId="unicode",Kinds=[],Recursive=false},epoch,1)).Count);
+    }
     [Fact] public async Task DirectoryRenameWorkDoesNotScaleWithUnrelatedFiles()
     {
         string source=Fixture();Directory.CreateDirectory(Path.Combine(source,"A","child"));File.WriteAllText(Path.Combine(source,"A","child","kept.txt"),"rename fixture");

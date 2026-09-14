@@ -6,6 +6,21 @@ namespace FolderLens.UnitTests;
 
 public sealed class CollectionTests
 {
+    [Fact] public async Task CollectionRevisionChangesOnlyWithCommittedMembership()
+    {
+        await using var catalog=new CatalogStore(Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N")));
+        await catalog.Initialize();await catalog.SeedBenchmark(1);string tag=(await catalog.CreateCollection("revision")).Id;
+        long initial=await catalog.ReadCollectionRevision();await catalog.ChangeCollectionMembers([tag],["000000000001"],true);
+        long added=await catalog.ReadCollectionRevision();Assert.True(added>initial);
+        var selected=(await catalog.ReadFirstPage(new(){RootId="benchmark"})).Items;
+        Assert.True((await catalog.ReadCollectionFlags(selected)).Single());
+        await catalog.ChangeCollectionMembers([tag],["000000000001"],true);Assert.Equal(added,await catalog.ReadCollectionRevision());
+        await catalog.Write(c=>{using var t=c.BeginTransaction();using var cmd=c.CreateCommand();cmd.Transaction=t;cmd.CommandText="DELETE FROM CollectionMembers";cmd.ExecuteNonQuery();t.Rollback();return true;});
+        Assert.Equal(added,await catalog.ReadCollectionRevision());
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET entry_state='missing'";return cmd.ExecuteNonQuery();});
+        Assert.True(await catalog.ReadCollectionRevision()>added);Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
+        Assert.False((await catalog.ReadCollectionFlags(selected)).Single());
+    }
     [Fact] public async Task V5UpgradeRemovesReaddedMissingButPreservesLiveMembership()
     {
         string data=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));

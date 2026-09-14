@@ -249,7 +249,7 @@ public sealed partial class MainWindow : Window
             {
                 if(activeId!=rootId || activeEpoch!=epoch || requested!=rootChangeVersion || closing)return;
                 Status.Text=$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
-                if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();}
+                if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
                 if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
                 {
                     _=RefreshQuery(preserveViewport:true,scanPreview:true);
@@ -272,7 +272,7 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(requested==rootChangeVersion)ShowScanError(ex);}
-        finally{if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}if(requested==rootChangeVersion)UpdateBrowserEmptyState();}
+        finally{if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}if(requested==rootChangeVersion)UpdateBrowserEmptyState();if(!closing)await RefreshCollectionsAfterScan();}
     }
     private async Task Reconcile(bool force=false)
     {
@@ -299,7 +299,7 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
         catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}
-        finally{if(reconcilePending&&!closing&&rootVersion==rootChangeVersion&&!rootToken.IsCancellationRequested)_=Reconcile();}
+        finally{if(!closing)await RefreshCollectionsAfterScan();if(reconcilePending&&!closing&&rootVersion==rootChangeVersion&&!rootToken.IsCancellationRequested)_=Reconcile();}
     }
     private async void ApplyFilters(object sender,RoutedEventArgs e){FilterFlyout?.Hide();searchTimer?.Stop();await ApplyBrowserFilters();}
     private Task ApplyBrowserFilters()=>activeCollectionId is not null?RefreshQuery():scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(CurrentFilter())

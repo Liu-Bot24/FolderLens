@@ -61,6 +61,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     public async Task Initialize(CancellationToken cancellation=default,Action<string>? progress=null)
     {
         await writer.Execute(c=>InitializeSchema(c,"catalog",cancellation,progress),cancellation);
+        await writer.Execute(InitializeCollectionRevision,cancellation);
         await sessionReader.Execute(c=>InitializeSchema(c,"sessions",cancellation,progress),cancellation);
         await sessionReader.Execute(c=>Execute(c,"UPDATE ResultSessions SET active_leases=0; UPDATE ResultSessions SET state='failed',error_code='Interrupted',completed_utc_ticks=$now WHERE state='building'",("$now",DateTime.UtcNow.Ticks)),cancellation);
     }
