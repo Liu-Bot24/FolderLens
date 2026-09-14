@@ -185,10 +185,9 @@ public sealed partial class MainWindow : Window
     }
     private async Task RefreshCurrentRoot()
     {
-        if(activeCollectionId is not null){await RefreshQuery(preserveViewport:true);return;}
         try
         {
-            await OpenRoot(RootPath.Text,true,recordHistory:false,preserveDirectoryScope:true);
+            await OpenRoot(activeCollectionId is {} collection?"collection:"+collection:RootPath.Text,true,recordHistory:false,preserveDirectoryScope:true);
         }
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
@@ -245,7 +244,14 @@ public sealed partial class MainWindow : Window
             if(oldHandle is not null)await catalog.ReleaseSnapshot(oldHandle.Id);
             if(requested!=rootChangeVersion||closing)return;
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
-            if(collectionScope){await RefreshQuery();Status.Text="正在浏览收藏夹；原文件保留在各自目录。";return;}
+            if(collectionScope)
+            {
+                await RefreshQuery();
+                if(requested!=rootChangeVersion||closing||scanStop.IsCancellationRequested)return;
+                Status.Text="正在浏览收藏夹；原文件保留在各自目录。";
+                _=StartMetadataRefresh();
+                return;
+            }
             string activeRoot=root,activeId=rootId;long activeEpoch=epoch;
             RootChangeMonitor CreateScanMonitor()=>new(activeRoot,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,activeId,activeEpoch);
             var report=new Progress<ScanProgress>(p=>

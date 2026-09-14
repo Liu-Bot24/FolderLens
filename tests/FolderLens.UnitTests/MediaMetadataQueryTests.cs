@@ -6,6 +6,34 @@ namespace FolderLens.UnitTests;
 
 public sealed class MediaMetadataQueryTests
 {
+    [Fact]
+    public async Task ColdPlaylistMetadataIncludesFilteredOutMembersOnly()
+    {
+        string directory=Temp(),source=Path.Combine(directory,"source"),data=Path.Combine(directory,"data");Directory.CreateDirectory(source);
+        string wave=Path.Combine(source,"sample.wav");
+        using(var output=new BinaryWriter(File.Create(wave)))
+        {
+            output.Write("RIFF"u8);output.Write(36+96000);output.Write("WAVEfmt "u8);output.Write(16);output.Write((short)1);output.Write((short)1);output.Write(48000);output.Write(96000);output.Write((short)2);output.Write((short)16);output.Write("data"u8);output.Write(96000);output.Write(new byte[96000]);
+        }
+        string id;
+        await using(var session=await BrowsingSessionStorage.Open(data))
+        {
+            long epoch=await session.Catalog.OpenRoot("root",source);await new DirectoryIndexer(session.Catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+            id=(await session.Catalog.CreateCollection("one second")).Id;await session.Catalog.ChangeCollectionItems([id],(await session.Catalog.ReadFirstPage(new(){RootId="root",Kinds=[]})).Items,true);
+        }
+        File.Copy(wave,Path.Combine(source,"not-saved.wav"));
+        await using var current=await BrowsingSessionStorage.Open(data);await current.Catalog.RefreshPlaylist(id);
+        var filter=new FilterSpec{RootId="collection:"+id,CollectionId=id,Kinds=["audio"],Ranges=new(){["durationMs"]=new(1000,1000)}};
+        Assert.Empty((await current.Catalog.ReadFirstPage(filter)).Items);
+        var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;
+        Assert.NotNull(project);string native=Path.Combine(project.FullName,"native","ffmpeg");
+        await using var worker=new WorkerClient(Path.Combine(directory,"unused-image-worker.exe"),Path.Combine(directory,"temp"));
+        string scanWorker=Path.Combine(project.FullName,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe");
+        await new MetadataPump(current.Catalog,worker,new MediaTools(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe")),scanWorker).FillAll(filter.RootId,filter.RootId,1,null,CancellationToken.None,id,observedOnly:true);
+        Assert.Single((await current.Catalog.ReadFirstPage(filter)).Items);
+        Assert.Empty((await current.Catalog.ReadFirstPage(filter with{Ranges=new(){["durationMs"]=new(2000,null)}})).Items);
+        Assert.Equal(1,await current.Catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files";return (long)cmd.ExecuteScalar()!;}));
+    }
     private static string Temp()=>Path.Combine(Path.GetTempPath(),"FolderLens-metadata-tests",Guid.NewGuid().ToString("N"));
     [Fact]
     public async Task MediaCasRejectsOldEpochAndVersionAndPreservesRationalAndNulls()

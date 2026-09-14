@@ -6,6 +6,53 @@ namespace FolderLens.UnitTests;
 
 public sealed class PlaylistPersistenceTests
 {
+    [Theory]
+    [InlineData("unknown",false)]
+    [InlineData("sensitive",false)]
+    [InlineData("unknown",true)]
+    public async Task UnknownCaseObservationDoesNotDeletePersistentFavorite(string caseMode,bool replace)
+    {
+        string fixture=Path.Combine(Path.GetTempPath(),"FolderLens-playlist",Guid.NewGuid().ToString("N")),source=Path.Combine(fixture,"source"),data=Path.Combine(fixture,"data");
+        Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"photo.jpg"),"original");string id;
+        await using(var session=await BrowsingSessionStorage.Open(data))
+        {
+            long epoch=await session.Catalog.OpenRoot("root",source);await new DirectoryIndexer(session.Catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+            id=(await session.Catalog.CreateCollection("case proof")).Id;await session.Catalog.ChangeCollectionItems([id],(await session.Catalog.ReadFirstPage(new(){RootId="root"})).Items,true);
+        }
+        await using(var session=await BrowsingSessionStorage.Open(data))
+        {
+            if(replace){File.Move(Path.Combine(source,"photo.jpg"),Path.Combine(source,"old.jpg"));File.WriteAllText(Path.Combine(source,"photo.jpg"),"replacement");}
+            session.Catalog.PlaylistProbeOverride=(path,_)=>Task.FromResult(ScanPathProbe.Read(path) with{CaseMode=caseMode});
+            await session.Catalog.RefreshPlaylist(id);Assert.Equal(replace?0:1,Assert.Single(await session.Catalog.ReadCollections()).Count);
+            session.Catalog.PlaylistProbeOverride=null;
+            await session.Catalog.RefreshPlaylist(id);
+            Assert.Equal(replace?0:1,(await session.Catalog.ReadFirstPage(new(){RootId="collection:"+id,CollectionId=id})).Items.Count);
+        }
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task V1MappingUpgradeRequiresPositiveIdentityProof(bool replace)
+    {
+        string fixture=Path.Combine(Path.GetTempPath(),"FolderLens-playlist",Guid.NewGuid().ToString("N")),source=Path.Combine(fixture,"source"),data=Path.Combine(fixture,"data");
+        Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"photo.jpg"),"original");string id;
+        await using(var session=await BrowsingSessionStorage.Open(data))
+        {
+            long epoch=await session.Catalog.OpenRoot("root",source);await new DirectoryIndexer(session.Catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+            id=(await session.Catalog.CreateCollection("legacy proof")).Id;await session.Catalog.ChangeCollectionItems([id],(await session.Catalog.ReadFirstPage(new(){RootId="root"})).Items,true);
+        }
+        using(var c=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder{DataSource=Path.Combine(data,"collections","playlists.sqlite"),Pooling=false}.ToString()))
+        {
+            c.Open();using var cmd=c.CreateCommand();cmd.CommandText="ALTER TABLE SavedLinks DROP COLUMN file_identity;ALTER TABLE SavedLinks DROP COLUMN case_mode;UPDATE PlaylistInfo SET version=1";cmd.ExecuteNonQuery();
+        }
+        if(replace){File.Move(Path.Combine(source,"photo.jpg"),Path.Combine(source,"old.jpg"));File.WriteAllText(Path.Combine(source,"photo.jpg"),"replacement");}
+        await using(var session=await BrowsingSessionStorage.Open(data))
+        {
+            await session.Catalog.RefreshPlaylist(id);
+            Assert.Equal(1,Assert.Single(await session.Catalog.ReadCollections()).Count);
+            Assert.Equal(replace?0:1,(await session.Catalog.ReadFirstPage(new(){RootId="collection:"+id,CollectionId=id})).Items.Count);
+        }
+    }
     [Fact]
     public async Task LegacyImportCopiesOnlyMappingsAndDoesNotModifyCatalog()
     {
