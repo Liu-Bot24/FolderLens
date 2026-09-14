@@ -232,7 +232,7 @@ public sealed partial class MainWindow : Window
             FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在打开文件夹…";
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
-            if(!backgroundScans.Any(s=>ReferenceEquals(s.Monitor,monitor)))monitor?.Dispose();monitor=null;
+            monitor?.Dispose();monitor=null;
             bool ownedScan=backgroundScans.Any(s=>ReferenceEquals(s.Completion,scanTask));
             await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
             if(requested!=rootChangeVersion)return;
@@ -259,7 +259,7 @@ public sealed partial class MainWindow : Window
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
             if(collectionScope){await RefreshQuery();Status.Text="正在浏览收藏夹；原文件保留在各自目录。";return;}
             string activeRoot=root,activeId=rootId;long activeEpoch=epoch;
-            try{monitor=reusable?.Monitor??new(root,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,rootId,epoch);}catch(IOException){Status.Text="目录监听暂不可用；可手动刷新核对。";}
+            RootChangeMonitor CreateScanMonitor()=>new(activeRoot,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,activeId,activeEpoch);
             var report=new Progress<ScanProgress>(p=>
             {
                 if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
@@ -279,8 +279,9 @@ public sealed partial class MainWindow : Window
             {
                 var indexer=new DirectoryIndexer(catalog,scanWorker);
                 activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,backgroundScanSlots,lifetime.Token,
-                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token,forceRefresh)){Monitor=monitor};
+                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token,forceRefresh),CreateScanMonitor);
                 backgroundScans.Add(activeBackgroundScan);
+                _=ObserveBackgroundCompletion(activeBackgroundScan);
             }
             scanTask=activeBackgroundScan!.Completion;
             var openedScanTask=scanTask;
@@ -310,11 +311,11 @@ public sealed partial class MainWindow : Window
         {
             if(force)Status.Text="正在核对目录，保留已有结果…";
             string? executable=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
-            var task=Task.Run(async()=>
+            var task=Task.Run(()=>BackgroundScan.WithSlot(backgroundScanSlots,rootToken,async token=>
             {
-                if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(rootToken);
-                return await (force?new DirectoryIndexer(catalog,executable).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken,true):new DirectoryIndexer(catalog,executable).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,rootToken));
-            });
+                if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(token);
+                return await (force?new DirectoryIndexer(catalog,executable).Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token,true):new DirectoryIndexer(catalog,executable).ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token));
+            }));
             scanTask=task;var report=await task;
             if(rootVersion!=rootChangeVersion||activeId!=rootId||activeEpoch!=epoch||closing||rootToken.IsCancellationRequested)return;
             // A successful query or a dirty-subdirectory scan does not prove that a
