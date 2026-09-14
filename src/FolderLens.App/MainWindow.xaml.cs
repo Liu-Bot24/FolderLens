@@ -187,7 +187,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await OpenRoot(activeCollectionId is {} collection?"collection:"+collection:RootPath.Text,true,recordHistory:false,preserveDirectoryScope:true);
+            await OpenRoot(activeCollectionId is {} collection?"collection:"+collection:root,true,recordHistory:false,preserveDirectoryScope:true);
         }
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
@@ -196,6 +196,26 @@ public sealed partial class MainWindow : Window
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
+        long navigation=++directoryNavigationRequest;
+        try
+        {
+        if(!forceRefresh&&!preserveDirectoryScope&&!path.StartsWith("collection:",StringComparison.Ordinal))
+        {
+            path=PathRules.ValidateSource(path);
+            if(await TryBrowseCurrentRoot(path,navigation))return;
+            if(closing||navigation!=directoryNavigationRequest)return;
+            var covering=backgroundScans.Where(s=>!s.Cancelled&&!s.Completion.IsCompleted&&s.Policy.HasSameScanPolicy(CurrentFilter())&&DirectoryBrowseScope.Relative(s.Path,path) is not null)
+                .OrderByDescending(s=>s.Path.Length).FirstOrDefault();
+            if(covering is not null&&!string.Equals(covering.Path,path,StringComparison.Ordinal))
+            {
+                previousView??=rootId.Length>0?CaptureView():null;
+                advanced=CurrentFilter() with{DirectoryScope=DirectoryBrowseScope.Relative(covering.Path,path)!,ScopeDirectFiles=false};
+                path=covering.Path;preserveDirectoryScope=true;
+            }
+        }
+        }
+        catch(OperationCanceledException){return;}
+        catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
         long requested=++rootChangeVersion;scanStop.Cancel();queryStop.Cancel();selectionStop.Cancel();
         bool acquired=false;
         try
@@ -273,12 +293,19 @@ public sealed partial class MainWindow : Window
             {
                 var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
                 activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,scanScheduler,lifetime.Token,
-                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token,forceRefresh),CreateScanMonitor);
+                    // Re-enumeration does not invalidate unchanged media metadata.
+                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token),CreateScanMonitor);
                 backgroundScans.Add(activeBackgroundScan);
                 _=ObserveBackgroundCompletion(activeBackgroundScan);
             }
             scanTask=activeBackgroundScan!.Completion;
             var openedScanTask=activeBackgroundScan.Completion;
+            if(reusable is not null&&CurrentFilter().DirectoryScope.Length>0)
+            {
+                await new ScanDirtyDirectories(catalog).Mark(activeId,activeEpoch,[new(CurrentFilter().DirectoryScope,"BrowseNavigation",true)],rootToken);
+                if(requested!=rootChangeVersion||closing)return;
+                reconcilePending=true;
+            }
             PreferScanDirectory(activeId,CurrentFilter().DirectoryScope);
             UpdateBrowserEmptyState();
             rootChangeGate.Release();acquired=false;
@@ -321,7 +348,7 @@ public sealed partial class MainWindow : Window
             var task=Task.Run(async ()=>
             {
                 var token=rootToken;if(verifyReconcileBarrier is not null)await verifyReconcileBarrier(token);
-                return await (force?new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token,true):new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token));
+                return await (force?new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token):new DirectoryIndexer(catalog,executable){Scheduler=scanScheduler}.ReconcileDirty(activeId,activeRoot,activeEpoch,recursive,exclusions,null,token));
             });
             scanTask=task;var report=await task;
             if(rootVersion!=rootChangeVersion||activeId!=rootId||activeEpoch!=epoch||closing||rootToken.IsCancellationRequested)return;

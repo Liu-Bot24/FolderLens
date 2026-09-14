@@ -48,7 +48,7 @@ public sealed partial class MainWindow
         }
         finally{suppressFilters=false;UpdateDetailSort();}
     }
-    private async Task RestoreSavedView(SavedView saved,bool recordHistory=true)
+    private async Task RestoreSavedView(SavedView saved,bool recordHistory=true,bool recheckDirectory=false)
     {
         saved.Filter.Validate();saved=saved with{Filter=saved.Filter.ForBrowserView()};
         var previous=rootId.Length>0?CaptureView():null;
@@ -57,6 +57,12 @@ public sealed partial class MainWindow
         pendingViewRestore=new(saved,revision,requestedRoot);
         try
         {
+            if(sameRoot&&activeCollectionId is null&&(recheckDirectory||previous!.Filter.DirectoryScope!=saved.Filter.DirectoryScope))
+            {
+                await new FolderLens.Infrastructure.ScanDirtyDirectories(catalog!).Mark(rootId,epoch,[new(saved.Filter.DirectoryScope,"BrowseNavigation",true)],lifetime.Token);
+                if(closing||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion)return;
+                reconcilePending=true;PreferScanDirectory(rootId,saved.Filter.DirectoryScope);
+            }
             ApplySavedFilter(saved.Filter);RootPath.Text=saved.Root;DetailsMode.IsChecked=saved.Details;UpdatePathPresentationControl();
             if(sameRoot)
             {
@@ -64,6 +70,7 @@ public sealed partial class MainWindow
                 await RefreshQuery(preserveViewport:false);
             }
             else await OpenRoot(saved.Root,recordHistory:recordHistory,previousView:previous,preserveDirectoryScope:true);
+            if(revision==viewRestoreRevision&&activeCollectionId is null)RootPath.Text=BrowsedDirectory;
             await TryRestoreBrowserView();
         }
         finally
@@ -74,6 +81,7 @@ public sealed partial class MainWindow
                 // A fast metadata pass may have finished while restoration held
                 // query publication. Drain once more after releasing that gate.
                 if(activeCollectionId is not null&&requestedRoot==rootChangeVersion&&!closing)_=StartMetadataRefresh();
+                if(reconcilePending&&requestedRoot==rootChangeVersion&&!closing)_=Reconcile();
             }
         }
     }

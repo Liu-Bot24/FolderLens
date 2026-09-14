@@ -192,7 +192,7 @@ public sealed partial class MainWindow
         suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
         MinSize.Value=MaxSize.Value=MinWidth.Value=MinHeight.Value=double.NaN;suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
     }
-    private async void ParentRoot(object sender,RoutedEventArgs e){if(activeCollectionId is not null){ManageCollections(sender,e);return;}var parent=Directory.GetParent(root);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
+    private async void ParentRoot(object sender,RoutedEventArgs e){if(activeCollectionId is not null){ManageCollections(sender,e);return;}var parent=Directory.GetParent(BrowsedDirectory);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
     private void StartPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=true;PaneDivider.CapturePointer(e.Pointer);}
     private void ResizePane(object sender,PointerRoutedEventArgs e){if(resizingPane&&!immersive)PreviewColumn.Width=new GridLength(Math.Clamp(e.GetCurrentPoint(BodyGrid).Position.X,220,Math.Max(220,Math.Min(650,BodyGrid.ActualWidth*.5))));}
     private void EndPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=false;PaneDivider.ReleasePointerCapture(e.Pointer);}
@@ -250,7 +250,7 @@ public sealed partial class MainWindow
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}
     }
     private async Task NavigateFolder(FolderNode folder)
-    {if(folder.PageOffset is not null||string.Equals(folder.Path,root,StringComparison.Ordinal))return;RootPath.Text=folder.Path;await OpenRoot(folder.Path);}
+    {if(folder.PageOffset is not null||string.Equals(folder.Path,BrowsedDirectory,StringComparison.Ordinal))return;await OpenRoot(folder.Path);}
     private void FilesDragOver(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){e.AcceptedOperation=DataPackageOperation.Copy;e.DragUIOverride.Caption="打开并查看";}}
     private async void FilesDrop(object sender,DragEventArgs e)
     {
@@ -260,9 +260,9 @@ public sealed partial class MainWindow
     {
         if(Directory.Exists(path)){RootPath.Text=path;await OpenRoot(path);return;}
         string parent=Path.GetDirectoryName(Path.GetFullPath(path))!;suppressFilters=true;SelectTag(Category,"all");Search.Text="";advanced=null;suppressFilters=false;RootPath.Text=parent;await OpenRoot(parent);
-        if(closing||catalog is null||resultHandle is not {} handle||results is not {} source||!string.Equals(root,parent,StringComparison.OrdinalIgnoreCase))return;
+        if(closing||catalog is null||resultHandle is not {} handle||results is not {} source||!string.Equals(BrowsedDirectory,parent,StringComparison.OrdinalIgnoreCase))return;
         long rootVersion=rootChangeVersion;var token=queryStop.Token;
-        long? ordinal=await catalog.FindOrdinal(handle.Id,Path.GetFileName(path),token);
+        long? ordinal=await catalog.FindOrdinal(handle.Id,Path.GetRelativePath(root,path),token);
         if(closing||token.IsCancellationRequested||rootVersion!=rootChangeVersion||!ReferenceEquals(resultHandle,handle)||!ReferenceEquals(results,source))return;
         if(ordinal is >=0&&ordinal<source.Count)await SelectBrowserOrdinal(source,(int)ordinal.Value,token);
     }
