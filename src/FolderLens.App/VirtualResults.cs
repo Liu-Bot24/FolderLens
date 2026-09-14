@@ -26,16 +26,7 @@ public sealed class FileRow : ObservableObject
     public Visibility ThumbnailErrorVisibility=>ThumbnailError.Length==0?Visibility.Collapsed:Visibility.Visible;
     public void FailThumbnail(Exception error)
     {
-        string reason=error switch
-        {
-            UnauthorizedAccessException=>"没有读取权限。",
-            FileNotFoundException or DirectoryNotFoundException=>"原文件已不存在或目录暂不可用。",
-            TimeoutException=>"读取超时。",
-            InvalidDataException {Message:"UnsupportedCodec"}=>"暂不支持此编码。",
-            InvalidDataException {Message:"DecodeFailed"}=>"无法解码；文件可能损坏或编码不受支持。",
-            IOException {Message:"FileChanged"}=>"文件内容已变化。",
-            _=>"读取失败："+error.Message
-        };
+        string reason=UserMessages.Error(error);
         ThumbnailError=reason+" 按 F5 刷新后重试，或打开文件查看详情。";
     }
     private string resolution="未知",allocation="未知",modified="",duration="",format="";
@@ -83,7 +74,7 @@ public sealed class FileRow : ObservableObject
         Item=item;Ordinal=item.Ordinal;OnPropertyChanged(nameof(QuickCollectEnabled));
     }
     public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
-    public void Fail(Exception error){Name="加载失败";CardInfo="请刷新后重试";Detail=error.Message;}
+    public void Fail(Exception error){Name="加载失败";CardInfo="请刷新后重试";Detail=UserMessages.Error(error);}
     public void DescribeImage(int width,int height,string format){CardInfo=$"{width:N0} × {height:N0}  {format.ToUpperInvariant()}";Detail=$"{CardInfo} · {SizeText}";}
     public void UpdateProperties(FileProperties file,bool updateCollection=true)
     {

@@ -225,7 +225,7 @@ public sealed partial class MainWindow
     private void RememberViewerScale()
     {viewerCustomPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;if(viewerSizing==ViewerSizing.Locked){viewerLockedIntent=viewerScaleIntent;viewerLockedPhysicalScale=viewerCustomPhysicalScale;_=SaveViewerPreferences();}}
     private async Task RefreshViewerPixels()
-    {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"相机内嵌预览 · 原始开发未完成":"清晰适应屏幕";}
+    {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"当前显示相机预览":"清晰适应屏幕";}
     private void ApplyViewerScaleIntent()
     {
         zoom=viewerScaleIntent switch{ViewerScaleIntent.Default or ViewerScaleIntent.Fit=>0,ViewerScaleIntent.Width=>ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ViewerScaleIntent.Height=>ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth),_=>viewerCustomPhysicalScale/Shell.XamlRoot.RasterizationScale};
@@ -402,7 +402,7 @@ public sealed partial class MainWindow
                 if(!lensPending)PreviewSurface.SetMagnifierQuality($"{viewerPressZoom.Percent:0.##}% · 原图细节");
             }
         }
-        catch(OperationCanceledException){}catch(Exception ex){if(revision==viewerGestureRevision){lensPending=false;PreviewSurface.SetMagnifierQuality($"无法读取原像素：{ex.Message}");}}
+        catch(OperationCanceledException){}catch(Exception ex){if(revision==viewerGestureRevision){lensPending=false;PreviewSurface.SetMagnifierQuality($"无法读取原像素：{UserMessages.Error(ex)}");}}
         finally{lensLoading=false;if(lensPending&&viewerGesture==ViewerGesture.Magnifier&&lensStop is not null)_=LoadMagnifierPixels();}
     }
     private void DrawViewerMagnifier(CanvasControl sender,CanvasDrawEventArgs e)
@@ -419,7 +419,7 @@ public sealed partial class MainWindow
         viewerContextMenu=new();
         viewerContextMenu.Opened+=(_,_)=>SetViewerMenuNotice(true);
         viewerContextMenu.Closed+=(_,_)=>SetViewerMenuNotice(false);
-        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适应屏幕 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("只读旋转 · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
+        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适应屏幕 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("旋转画面（不修改原文件） · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
         {
             if(IsImageViewerAction(option.Item2)&&selected?.Kind!="image")continue;
             string label=selected?.Kind!="image"&&option.Item2==ViewerAction.Previous?"上一个文件 · PageUp":selected?.Kind!="image"&&option.Item2==ViewerAction.Next?"下一个文件 · PageDown":option.Item1;

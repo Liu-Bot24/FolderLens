@@ -9,7 +9,7 @@ public sealed partial class MainWindow
     private string? browserScanError;
     private void ShowScanError(Exception error)
     {
-        browserScanError=error.Message;reconcilePending=false;ShowBrowserError(error);
+        browserScanError=UserMessages.Error(error);reconcilePending=false;ShowBrowserError(error);
     }
     private void ClearScanError()
     {
@@ -24,7 +24,7 @@ public sealed partial class MainWindow
     }
     private void ShowBrowserError(Exception error)
     {
-        browserEmptyError=error.Message;ResultSummary.Text="浏览结果未完成";ShowError(error);UpdateBrowserEmptyState();
+        browserEmptyError=UserMessages.Error(error);ResultSummary.Text="文件列表未加载完成";ShowError(error);UpdateBrowserEmptyState();
     }
     private void UpdateBrowserEmptyState()
     {
@@ -49,7 +49,7 @@ public sealed partial class MainWindow
         else if(initial)
         {
             BrowserEmptyTitle.Text="从一个文件夹开始";
-            BrowserEmptyDescription.Text="穿透多层子文件夹，集中浏览图片和视频。";
+            BrowserEmptyDescription.Text="集中浏览文件夹及各层子文件夹中的文件。";
             BrowserEmptyDetail.Text="选择顶部文件夹，也可以把文件夹拖到这里。";
         }
         else if(replacingRoot||queryBusy||scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested)

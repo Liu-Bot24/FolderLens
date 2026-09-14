@@ -86,13 +86,13 @@ public sealed partial class MainWindow
             var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏夹",Content=panel,PrimaryButtonText="打开所选",CloseButtonText="关闭",IsPrimaryButtonEnabled=false};
             list.SelectionChanged+=(_,_)=>{var c=list.SelectedItem as FileCollection;name.Text=c?.Name??"";rename.IsEnabled=remove.IsEnabled=dialog.IsPrimaryButtonEnabled=c is not null;remove.Content="删除收藏夹";};
             async Task Reload(string? select=null){await RefreshCollectionsTree();list.ItemsSource=fileCollections;list.SelectedItem=fileCollections.FirstOrDefault(c=>c.Id==select);}
-            create.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing)return;try{var created=await catalog!.CreateCollection(name.Text,lifetime.Token);await Reload(created.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
-            rename.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;try{await catalog!.RenameCollection(c.Id,name.Text,lifetime.Token);await Reload(c.Id);error.Text="";}catch(Exception ex){error.Text=ex.Message;}};
+            create.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing)return;try{var created=await catalog!.CreateCollection(name.Text,lifetime.Token);await Reload(created.Id);error.Text="";}catch(Exception ex){error.Text=UserMessages.Error(ex);}};
+            rename.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;try{await catalog!.RenameCollection(c.Id,name.Text,lifetime.Token);await Reload(c.Id);error.Text="";}catch(Exception ex){error.Text=UserMessages.Error(ex);}};
             remove.Click+=async(_,_)=>
             {
                 using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;
                 if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="删除此收藏夹及其中的收藏记录，不删除原文件。再次点击确认。";return;}
-                try{await DeleteCollectionAndRefresh(c.Id);await Reload();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=ex.Message;}
+                try{await DeleteCollectionAndRefresh(c.Id);await Reload();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=UserMessages.Error(ex);}
             };
             if(await ShowCollectionDialog(dialog)==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
         }
@@ -132,7 +132,7 @@ public sealed partial class MainWindow
                     return true;
                 }
                 catch(OperationCanceledException){error.Text="收藏操作已取消，未提交的修改已撤销。";}
-                catch(Exception ex){error.Text=ex.Message;}
+                catch(Exception ex){error.Text=UserMessages.Error(ex);}
                 finally{dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=true;}
                 return false;
             }

@@ -40,7 +40,7 @@ internal sealed class DirectoryRuleEditor
         var browse=new Button{Content="选择文件夹…"};browse.Click+=async(_,_)=>
         {
             try{string? path=await pick();if(path is null||cancellation.IsCancellationRequested)return;target.SelectedIndex=1;match.SelectedIndex=0;pattern.Text=path;}
-            catch(Exception ex){feedback.Text=ex.Message;}
+            catch(Exception ex){feedback.Text=UserMessages.Error(ex);}
         };View.Children.Add(browse);
         add.Click+=(_,_)=>
         {
@@ -56,7 +56,7 @@ internal sealed class DirectoryRuleEditor
                 }
                 EndEdit();Refresh();
             }
-            catch(Exception ex){feedback.Text=ex.Message;}
+            catch(Exception ex){feedback.Text=UserMessages.Error(ex);}
         };View.Children.Add(add);cancelEdit.Click+=(_,_)=>EndEdit();View.Children.Add(cancelEdit);
         var test=new Button{Content="预览筛选结果"};test.Click+=async(_,_)=>
         {
@@ -67,7 +67,7 @@ internal sealed class DirectoryRuleEditor
                 if(!cancellation.IsCancellationRequested&&draft.SequenceEqual(rules))feedback.Text=$"仅计算文件夹规则，按当前已扫描内容：保留 {result.VisibleFiles:N0} 个文件；隐藏 {result.HiddenFiles:N0} 个文件、{result.HiddenDirectories:N0} 个文件夹。\n"+
                     (result.HiddenExamples.Length==0?"没有匹配的隐藏目录。":"隐藏示例（最多 20 个）：\n"+string.Join("\n",result.HiddenExamples));
             }
-            catch(OperationCanceledException){}catch(Exception ex){feedback.Text=ex.Message;}
+            catch(OperationCanceledException){}catch(Exception ex){feedback.Text=UserMessages.Error(ex);}
             finally{test.IsEnabled=true;}
         };View.Children.Add(test);View.Children.Add(feedback);Refresh();
     }

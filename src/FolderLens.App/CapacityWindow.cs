@@ -18,7 +18,7 @@ public sealed class CapacityDisplayRow(CapacityViewRow row,bool complete=true)
     public string Files=>UnconfirmedEmpty?"—":$"{Value.Files:N0} 文件";
     public string Percent=>complete?Value.Fraction?.ToString("P1")??"—":"—";
     public double Bar=>100*(Value.Fraction??0);
-    public string Detail=>UnconfirmedEmpty?"扫描未完成，不能判断为空":Value.UnknownCount>0?$"{Value.UnknownCount:N0} 项占用空间未知":Value.IsDirectFiles?"直属文件":"双击查看子目录";
+    public string Detail=>UnconfirmedEmpty?"扫描未完成，不能判断为空":Value.UnknownCount>0?$"{Value.UnknownCount:N0} 项占用空间未知":Value.IsDirectFiles?"当前文件夹中的文件":"双击查看子目录";
 }
 
 public sealed partial class CapacityWindow : Window
@@ -45,8 +45,8 @@ public sealed partial class CapacityWindow : Window
     private readonly Dictionary<string,string> selectedPaths=new(StringComparer.Ordinal);
     private readonly ComboBox scope=new(){Width=240};
     private readonly CheckBox allocation=new(){Content="占用空间"};
-    private readonly CheckBox descendants=new(){Content="所有后代目录排名"};
-    private readonly Button parent=new(){Content="↑ 上层",IsEnabled=false};
+    private readonly CheckBox descendants=new(){Content="所有子文件夹排名"};
+    private readonly Button parent=new(){Content="↑ 上一级",IsEnabled=false};
     private readonly Button refresh=new(){Content="刷新统计"};
     private readonly Button browseButton=new(){Content="在主窗口浏览",IsEnabled=false};
     private readonly TextBlock currentPath=new(){FontSize=15,TextTrimming=TextTrimming.CharacterEllipsis};
@@ -73,13 +73,13 @@ public sealed partial class CapacityWindow : Window
         var title=new StackPanel{Spacing=5};title.Children.Add(new TextBlock{Text="目录容量",FontSize=28});
         var rootLabel=new TextBlock{Text=rootPath,TextTrimming=TextTrimming.CharacterEllipsis,Style=(Style)Application.Current.Resources["CapacitySecondaryTextStyle"]};ToolTipService.SetToolTip(rootLabel,rootPath);title.Children.Add(rootLabel);root.Children.Add(title);
         scope.Items.Add(new ComboBoxItem{Content="整个已扫描目录"});
-        scope.Items.Add(new ComboBoxItem{Content="筛选结果（打开看板时）",IsEnabled=snapshot is not null});scope.SelectedIndex=0;
-        ToolTipService.SetToolTip(scope,"筛选结果固定在打开看板时的浏览顺序；主窗口后续筛选不会悄悄改变此统计");
+        scope.Items.Add(new ComboBoxItem{Content="打开窗口时的筛选结果",IsEnabled=snapshot is not null});scope.SelectedIndex=0;
+        ToolTipService.SetToolTip(scope,"统计打开此窗口时的筛选结果；之后在主窗口更改筛选，不会改变这里的统计");
         ToolTipService.SetToolTip(allocation,"只统计已知占用空间，无法读取的项单列；不代表删除后可释放的空间");
-        ToolTipService.SetToolTip(descendants,"显示所有后代目录，父子容量有重叠，不能相加");
+        ToolTipService.SetToolTip(descendants,"显示各层子文件夹；上一级包含下一级的容量，不能相加");
         ToolTipService.SetToolTip(parent,"返回上一级目录，并恢复之前选中的目录");ToolTipService.SetToolTip(refresh,"更新当前统计；如需重新查找文件，请在主窗口刷新目录");
         ToolTipService.SetToolTip(browseButton,"查看选中目录的文件；未选中时查看当前目录。保持主窗口原有扫描根和其他筛选。");
-        SetCommandContent(parent,"\uE74A","上层");SetCommandContent(refresh,"\uE72C","刷新统计");SetCommandContent(browseButton,"\uE8B7","在主窗口浏览");
+        SetCommandContent(parent,"\uE74A","上一级");SetCommandContent(refresh,"\uE72C","刷新统计");SetCommandContent(browseButton,"\uE8B7","在主窗口浏览");
         var toolbar=new Grid{ColumnSpacing=16,RowSpacing=12};for(int i=0;i<3;i++){toolbar.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});toolbar.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});}
         var options=new StackPanel{Orientation=Orientation.Horizontal,Spacing=16};options.Children.Add(allocation);options.Children.Add(descendants);
         var commands=new StackPanel{Orientation=Orientation.Horizontal,Spacing=12};foreach(var item in new UIElement[]{parent,refresh,browseButton,busy})commands.Children.Add(item);
@@ -92,8 +92,8 @@ public sealed partial class CapacityWindow : Window
             Grid.SetColumn(commands,compact?0:2);Grid.SetRow(commands,small?2:compact?1:0);Grid.SetColumnSpan(commands,compact?3:1);
         };
         var overview=new Grid{ColumnSpacing=18};for(int i=0;i<3;i++)overview.ColumnDefinitions.Add(new ColumnDefinition());
-        AddMetric(overview,0,"大小",logical,new TextBlock{Text="普通文件主数据流，按路径累计"});
-        AddMetric(overview,1,"已知占用空间",allocated,unknown);AddMetric(overview,2,"文件数量",files,new TextBlock{Text="含当前目录及全部后代文件"});Grid.SetRow(overview,2);root.Children.Add(overview);
+        AddMetric(overview,0,"大小",logical,new TextBlock{Text="文件大小合计（含子文件夹）"});
+        AddMetric(overview,1,"已知占用空间",allocated,unknown);AddMetric(overview,2,"文件数量",files,new TextBlock{Text="含当前文件夹及子文件夹中的文件"});Grid.SetRow(overview,2);root.Children.Add(overview);
         var body=new Grid{ColumnSpacing=20};body.ColumnDefinitions.Add(new ColumnDefinition());body.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(310)});
         body.RowDefinitions.Add(new RowDefinition());body.RowDefinitions.Add(new RowDefinition{Height=new GridLength(0)});
         var table=new Grid{RowSpacing=10};table.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});table.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});table.RowDefinitions.Add(new RowDefinition());
@@ -144,7 +144,7 @@ public sealed partial class CapacityWindow : Window
             browseButton.IsEnabled=false;
             var row=(ranking.SelectedItem as CapacityDisplayRow)?.Value;
             try{await browse(row?.RelativePath??directory,row?.IsDirectFiles??false);}
-            catch(Exception error){if(!closed)state.Text="无法进入浏览："+error.Message;}
+            catch(Exception error){if(!closed)state.Text="无法进入浏览："+UserMessages.Error(error);}
             finally{if(!closed)browseButton.IsEnabled=hasDisplayedPage&&!busy.IsActive;}
         }
         browseButton.Click+=(_,_)=>{if(browseWork.IsCompleted)browseWork=Browse();};
@@ -176,7 +176,7 @@ public sealed partial class CapacityWindow : Window
             SaveSelection();dataVersion++;QueueRender(preserve:true);await work;
         }
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
-        catch(Exception error){if(!closed)state.Text="自动更新统计失败："+error.Message;}
+        catch(Exception error){if(!closed)state.Text="自动更新统计失败："+UserMessages.Error(error);}
     }
     private void QueueRender(bool preserve=false)
     {
@@ -217,16 +217,16 @@ public sealed partial class CapacityWindow : Window
             if(!captured.IsComplete&&page.total!.SubtreeFiles==0)logical.Text=allocated.Text=files.Text="未统计完整";
             ToolTipService.SetToolTip(logical,$"{page.total?.SubtreeLogical??0:N0} 字节");ToolTipService.SetToolTip(allocated,$"{page.total?.SubtreeAllocatedKnown??0:N0} 字节");
             unknown.Text=$"{page.total?.AllocationUnknown??0:N0} 项占用空间未知";
-            count.Text=$"{(all?"全部后代目录排名":"本层目录排名")} · {page.rows.Length:N0} 项 · {(useAllocated?"已知占用空间":"大小")}降序";
+            count.Text=$"{(all?"所有子文件夹排名":"本层目录排名")} · {page.rows.Length:N0} 项 · {(useAllocated?"已知占用空间":"大小")}降序";
             ranking.ItemsSource=page.rows;if(selectedPaths.TryGetValue(directory,out string? selected))ranking.SelectedItem=page.rows.FirstOrDefault(r=>r.Value.RelativePath==selected);
-            shares.ItemsSource=page.bars;chartCaption.Text=all?"排名口径":"本层容量分布";
-            chartNote.Text=all?"父子目录容量有重叠，不能相加；切回本层排名可查看占比。":useAllocated?"占比基于已知占用空间。前20项单列，其余合并；完整排名在左侧。":"各直属子目录与直属文件互不重叠。前20项单列，其余合并；完整排名在左侧。";
+            shares.ItemsSource=page.bars;chartCaption.Text=all?"统计说明":"本层容量分布";
+            chartNote.Text=all?"父子目录容量有重叠，不能相加；切回本层排名可查看占比。":useAllocated?"占比基于已知占用空间。前20项单列，其余合并；完整排名在左侧。":"本层各子文件夹与当前文件夹中的文件分别统计。前20项单列，其余合并；完整排名在左侧。";
             if(!captured.IsComplete)chartNote.Text="统计尚未完成，暂不计算占比。已统计的容量保留；没有统计到文件不表示目录为空。";
             string status=captured.State switch{"ready"=>"扫描完成","snapshot"=>"打开窗口时的筛选结果","scanning"=>"扫描中，统计不完整","cancelled"=>"扫描已取消，统计不完整","failed"=>"扫描失败，统计不完整","offline" or "offlineSnapshot"=>"文件夹暂时无法访问，显示上次统计","notStarted"=>"尚未完成扫描",_=>"部分统计"};
-            state.Text=$"{status} · 计算于 {captured.CalculatedAt:HH:mm:ss} · 待判断 {captured.Pending:N0} 项 / 无法判断 {captured.Unresolvable:N0} 项\n按路径累计；占用空间不代表删除可释放空间。如需重新查找文件，请在主窗口刷新目录。";
+            state.Text=$"{status} · 更新于 {captured.CalculatedAt:HH:mm:ss}"+(captured.Pending>0?$" · {captured.Pending:N0} 个文件的信息尚未读全":"")+(captured.Unresolvable>0?$" · {captured.Unresolvable:N0} 个文件的信息无法读取":"");
         }
         catch(OperationCanceledException) when(token.IsCancellationRequested){}
-        catch(Exception error){if(!closed&&current==generation)state.Text="统计未完成："+error.Message;}
+        catch(Exception error){if(!closed&&current==generation)state.Text="统计未完成："+UserMessages.Error(error);}
         finally{if(!closed&&current==generation){busy.IsActive=false;ranking.IsEnabled=true;}}
     }
     public Task ShutdownAsync()=>shutdown??=ShutdownCore();

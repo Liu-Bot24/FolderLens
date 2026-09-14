@@ -298,7 +298,7 @@ public sealed partial class MainWindow
                 dialog.Hide();
             }
             catch(OperationCanceledException){note.Text="已取消生成播放列表。";}
-            catch(Exception ex){note.Text=$"无法播放：{ex.Message}";dialog.IsPrimaryButtonEnabled=true;scope.IsEnabled=true;}
+            catch(Exception ex){note.Text=$"无法播放：{UserMessages.Error(ex)}";dialog.IsPrimaryButtonEnabled=true;scope.IsEnabled=true;}
             finally{busy=false;}
         }
         dialog.PrimaryButtonClick+=(_,args)=>{args.Cancel=true;if(!busy)operation=GeneratePlaylist();};

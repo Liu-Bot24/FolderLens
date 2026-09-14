@@ -10,13 +10,13 @@ public sealed partial class MainWindow
     {
         bool scoped=displayed.DirectoryScope.Length>0||displayed.ScopeDirectFiles;
         DirectoryScopePanel.Visibility=scoped?Visibility.Visible:Visibility.Collapsed;
-        DirectoryScopeLabel.Text=$"浏览范围：{(displayed.DirectoryScope.Length==0?"根目录":displayed.DirectoryScope)}{(displayed.ScopeDirectFiles?" · 仅直属文件":"")}";
+        DirectoryScopeLabel.Text=$"浏览范围：{(displayed.DirectoryScope.Length==0?"根目录":displayed.DirectoryScope)}{(displayed.ScopeDirectFiles?" · 仅当前文件夹中的文件":"")}";
         ToolTipService.SetToolTip(DirectoryScopeLabel,$"扫描根：{root}\n{DirectoryScopeLabel.Text}");
     }
     private async Task BrowseCapacityDirectory(string expectedRoot,string path,bool directFiles)
     {
         long requestedForeground=WindowFocus.Foreground;
-        if(closing||replacingRoot||rootId!=expectedRoot)throw new InvalidOperationException("主窗口根目录已变化，请关闭旧看板后从当前目录重新打开。");
+        if(closing||replacingRoot||rootId!=expectedRoot)throw new InvalidOperationException("主窗口已切换文件夹，请关闭此统计窗口后重新打开。");
         await ReturnToBrowser();
         if(closing||replacingRoot||rootId!=expectedRoot)throw new OperationCanceledException("浏览目录已变化。");
         var current=CaptureView();

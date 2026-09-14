@@ -39,7 +39,7 @@ public partial class LensApplication : Application
         {
             if(Environment.GetCommandLineArgs().Contains("--verify-refresh"))
             {Console.Error.WriteLine(error);Environment.ExitCode=1;Exit();return;}
-            window=new Window{Title="FolderLens",Content=new Microsoft.UI.Xaml.Controls.TextBlock{Text="无法启动 FolderLens："+error.Message,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24)}};window.Closed+=(_,_)=>Exit();WindowFocus.Show(window,launchForeground);
+            window=new Window{Title="FolderLens",Content=new Microsoft.UI.Xaml.Controls.TextBlock{Text="无法启动 FolderLens："+UserMessages.Error(error),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24)}};window.Closed+=(_,_)=>Exit();WindowFocus.Show(window,launchForeground);
         }
     }
 }

@@ -107,9 +107,9 @@ public sealed partial class MainWindow
         if(settings is null)return;var views=await settings.Load<Dictionary<string,SavedView>>("views.json")??[];
         var pick=new ComboBox{ItemsSource=views.Keys.Order(StringComparer.CurrentCulture).ToArray(),HorizontalAlignment=HorizontalAlignment.Stretch,MinWidth=400};if(views.Count>0)pick.SelectedIndex=0;
         var rename=new TextBox{Header="重命名（留空保持原名）",MaxLength=100};var panel=new StackPanel{Spacing=10};panel.Children.Add(pick);panel.Children.Add(rename);
-        var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="保存的视图",Content=panel,PrimaryButtonText="恢复视图",SecondaryButtonText="删除所选",CloseButtonText="取消",IsPrimaryButtonEnabled=views.Count>0,IsSecondaryButtonEnabled=views.Count>0};
+        var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="已保存的浏览设置",Content=panel,PrimaryButtonText="应用浏览设置",SecondaryButtonText="删除所选",CloseButtonText="取消",IsPrimaryButtonEnabled=views.Count>0,IsSecondaryButtonEnabled=views.Count>0};
         var choice=await dialog.ShowAsync();if(pick.SelectedItem is not string name||choice==ContentDialogResult.None)return;
-        if(choice==ContentDialogResult.Secondary){views.Remove(name);await settings.Save("views.json",views);Status.Text="视图已删除。";return;}
+        if(choice==ContentDialogResult.Secondary){views.Remove(name);await settings.Save("views.json",views);Status.Text="浏览设置已删除。";return;}
         var saved=views[name];string replacement=rename.Text.Trim();
         if(replacement.Length>0&&replacement!=name){if(views.ContainsKey(replacement))throw new InvalidOperationException("同名视图已存在，请使用其他名称。");views.Remove(name);views.Add(replacement,saved);await settings.Save("views.json",views);}
         await RestoreSavedView(saved);
