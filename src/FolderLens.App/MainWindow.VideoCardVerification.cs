@@ -55,7 +55,7 @@ public sealed partial class MainWindow
         await SelectPreview(video);
         if(previewReadySelection!=selection||previewLoading||fitBitmap is null)
             throw new InvalidOperationException("视频封面加载后未能完成预览及临时文件释放。");
-        if(Directory.EnumerateFiles(Path.Combine(dataDirectory,"temp","covers")).Any())
+        if(Directory.EnumerateFiles(Path.Combine(RuntimeDataDirectory,"temp","covers")).Any())
             throw new InvalidOperationException("视频封面预览留下临时资产。");
         report["selectedVideoCoverReleased"]=true;
         var panel=new StackPanel{Spacing=12,Padding=new Thickness(16),Background=BrowserPane.Background};

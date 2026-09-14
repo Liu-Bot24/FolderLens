@@ -42,16 +42,18 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private readonly DatabaseExecutor sessionReader;
     private readonly string sessionPath;
     private readonly string catalogPath;
+    private readonly string? playlistPath;
     private readonly SnapshotLimits limits;
     private readonly SemaphoreSlim snapshotGate = new(1,1);
     private string? activeSessionId;
     private int snapshotUnderPressure;
     public bool SnapshotUnderPressure => Volatile.Read(ref snapshotUnderPressure) != 0;
     public CatalogStore(string dataDirectory) : this(dataDirectory, new SnapshotLimits()) { }
-    public CatalogStore(string dataDirectory, SnapshotLimits limits)
+    public CatalogStore(string dataDirectory, SnapshotLimits limits,string? playlistPath=null)
     {
         if(limits.HardDeadline <= TimeSpan.Zero || limits.SoftDeadline < TimeSpan.Zero || limits.SoftDeadline > limits.HardDeadline || limits.CatalogWalBytes < 4096 || limits.SessionDiskBytes < 262144 || limits.HistoryCount is <0 or >2) throw new ArgumentException("快照预算无效。",nameof(limits));
         this.limits=limits;
+        this.playlistPath=playlistPath;
         Directory.CreateDirectory(dataDirectory);
         catalogPath=Path.Combine(dataDirectory,"catalog.sqlite");
         writer=new(catalogPath);
@@ -64,6 +66,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     {
         await writer.Execute(c=>InitializeSchema(c,"catalog",cancellation,progress),cancellation);
         await writer.Execute(InitializeCollectionRevision,cancellation);
+        if(playlistPath is not null)await writer.Execute(c=>InitializePlaylist(c,playlistPath),cancellation);
         await sessionReader.Execute(c=>InitializeSchema(c,"sessions",cancellation,progress),cancellation);
         await sessionReader.Execute(c=>Execute(c,"UPDATE ResultSessions SET active_leases=0; UPDATE ResultSessions SET state='failed',error_code='Interrupted',completed_utc_ticks=$now WHERE state='building'",("$now",DateTime.UtcNow.Ticks)),cancellation);
     }

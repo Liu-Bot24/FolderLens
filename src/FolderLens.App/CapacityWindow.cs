@@ -26,7 +26,7 @@ public sealed partial class CapacityWindow : Window
     private readonly CatalogStore catalog;
     private readonly Action<string>? preferScan;
     private readonly string rootId;
-    private readonly long? observedRootEpoch;
+    private readonly bool currentObservationsOnly;
     private readonly ResultHandle? snapshot;
     private readonly CancellationTokenSource lifetime;
     private CancellationTokenSource operation=new();
@@ -62,9 +62,9 @@ public sealed partial class CapacityWindow : Window
     private readonly ListView ranking=new(){SelectionMode=ListViewSelectionMode.Single};
     private readonly ItemsControl shares=new();
 
-    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse,Action<string>? preferScan=null,long? observedRootEpoch=null)
+    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse,Action<string>? preferScan=null,bool currentObservationsOnly=false)
     {
-        this.observedRootEpoch=observedRootEpoch;this.catalog=catalog;this.rootId=rootId;snapshot=retainedSnapshot;this.preferScan=preferScan;
+        this.currentObservationsOnly=currentObservationsOnly;this.catalog=catalog;this.rootId=rootId;snapshot=retainedSnapshot;this.preferScan=preferScan;
         lifetime=CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Title="目录容量 · FolderLens";AppWindow.Resize(new Windows.Graphics.SizeInt32(1180,820));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory,"Assets","FolderLens.ico"));
@@ -172,7 +172,7 @@ public sealed partial class CapacityWindow : Window
         {
             var stamp=await new CapacityService(catalog).ChangeStamp(rootId,lifetime.Token);
             if(closed||scope.SelectedIndex!=0||!work.IsCompleted||report is null)return;
-            if(stamp.State==report.State&&(stamp.Revision==report.Revision||DateTimeOffset.UtcNow-lastAggregate<TimeSpan.FromSeconds(15)))return;
+            if(stamp.RootEpoch==report.RootEpoch&&stamp.State==report.State&&(stamp.Revision==report.Revision||DateTimeOffset.UtcNow-lastAggregate<TimeSpan.FromSeconds(15)))return;
             SaveSelection();dataVersion++;QueueRender(preserve:true);await work;
         }
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
@@ -194,7 +194,7 @@ public sealed partial class CapacityWindow : Window
             if(report is null||loadedVersion!=dataVersion)
             {
                 var service=new CapacityService(catalog);
-                var next=scope.SelectedIndex==1&&snapshot is not null?await service.Result(snapshot,token):await service.EntireRoot(rootId,token,observedRootEpoch);
+                var next=scope.SelectedIndex==1&&snapshot is not null?await service.Result(snapshot,token):await service.EntireRoot(rootId,token,currentObservationsOnly);
                 if(closed||current!=generation)return;report=next;loadedVersion=dataVersion;lastAggregate=DateTimeOffset.UtcNow;
             }
             var captured=report;string path=directory;bool useAllocated=allocation.IsChecked==true,all=descendants.IsChecked==true;

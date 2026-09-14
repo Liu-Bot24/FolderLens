@@ -8,19 +8,20 @@ public sealed record CapacityReport(string ScopeId,string State,IReadOnlyList<Ca
     public long Pending {get;init;}
     public long Unresolvable {get;init;}
     public long Revision {get;init;}
+    public long RootEpoch {get;init;}
     public bool IsComplete=>State is "ready" or "snapshot";
 }
 public sealed class CapacityService(CatalogStore catalog)
 {
-    public Task<(string State,long Revision)> ChangeStamp(string root,CancellationToken cancellation)=>catalog.Read(c=>
+    public Task<(string State,long Revision,long RootEpoch)> ChangeStamp(string root,CancellationToken cancellation)=>catalog.Read(c=>
     {
-        using var cmd=c.CreateCommand();cmd.CommandText="SELECT scan_state,catalog_revision FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",root);
-        using var row=cmd.ExecuteReader();if(!row.Read())throw new InvalidOperationException("目录索引已不存在。");return(row.GetString(0),row.GetInt64(1));
+        using var cmd=c.CreateCommand();cmd.CommandText="SELECT scan_state,catalog_revision,root_epoch FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",root);
+        using var row=cmd.ExecuteReader();if(!row.Read())throw new InvalidOperationException("目录索引已不存在。");return(row.GetString(0),row.GetInt64(1),row.GetInt64(2));
     },cancellation);
-    public Task<CapacityReport> EntireRoot(string root,CancellationToken cancellation,long? observedRootEpoch=null)=>catalog.Read(c=>
+    public Task<CapacityReport> EntireRoot(string root,CancellationToken cancellation,bool currentObservationsOnly=false)=>catalog.Read(c=>
     {
-        using var transaction=c.BeginTransaction(deferred:true);using var state=c.CreateCommand();state.Transaction=transaction;state.CommandText="SELECT scan_state,catalog_revision FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";state.Parameters.AddWithValue("$root",root);
-        string status;long revision;using(var row=state.ExecuteReader()){if(!row.Read())throw new InvalidOperationException("该根目录没有可用的索引统计。");status=row.GetString(0);revision=row.GetInt64(1);}
+        using var transaction=c.BeginTransaction(deferred:true);using var state=c.CreateCommand();state.Transaction=transaction;state.CommandText="SELECT scan_state,catalog_revision,root_epoch FROM Roots CROSS JOIN SchemaInfo WHERE root_id=$root";state.Parameters.AddWithValue("$root",root);
+        string status;long revision,rootEpoch;using(var row=state.ExecuteReader()){if(!row.Read())throw new InvalidOperationException("该根目录没有可用的索引统计。");status=row.GetString(0);revision=row.GetInt64(1);rootEpoch=row.GetInt64(2);}
         IEnumerable<DirectoryCapacity> Directories()
         {
             using var cmd=c.CreateCommand();cmd.Transaction=transaction;
@@ -34,10 +35,10 @@ public sealed class CapacityService(CatalogStore catalog)
                 WHERE d.root_id=$root AND (d.entry_state='present' OR f.entry_id IS NOT NULL)
                 GROUP BY d.directory_id
                 """;
-            cmd.Parameters.AddWithValue("$root",root);cmd.Parameters.AddWithValue("$epoch",(object?)observedRootEpoch??DBNull.Value);using var rows=cmd.ExecuteReader();
+            cmd.Parameters.AddWithValue("$root",root);cmd.Parameters.AddWithValue("$epoch",currentObservationsOnly?rootEpoch:DBNull.Value);using var rows=cmd.ExecuteReader();
             while(rows.Read()){cancellation.ThrowIfCancellationRequested();yield return new(rows.GetString(0),rows.GetInt64(1),rows.GetInt64(2),rows.GetInt64(3),rows.GetInt64(4));}
         }
-        var result=Capacity.BuildDirectories(Directories(),cancellation);transaction.Commit();return new CapacityReport(root,status,result){Revision=revision};
+        var result=Capacity.BuildDirectories(Directories(),cancellation);transaction.Commit();return new CapacityReport(root,status,result){Revision=revision,RootEpoch=rootEpoch};
     },cancellation);
     public async Task<CapacityReport> Result(ResultHandle handle,CancellationToken cancellation)
     {

@@ -6,6 +6,29 @@ namespace FolderLens.UnitTests;
 
 public sealed class ThumbnailCacheTests
 {
+    [Fact]
+    public async Task SevenDayExpiryUsesLastAccessAndCountBudgetEvictsOldest()
+    {
+        Assert.Equal(TimeSpan.FromDays(7),new ThumbnailCacheOptions().MaxAge);
+        Assert.Equal(256L<<20,new ThumbnailCacheOptions().DiskBytes);
+        string directory=Temp();Directory.CreateDirectory(directory);string source=Path.Combine(directory,"source.png"),owned=Path.Combine(directory,"owned");await File.WriteAllBytesAsync(source,Png);
+        var key=new ThumbnailCacheKey("old",1,1,10,256,"v1");
+        await using(var cache=new ThumbnailCache(owned,new(){MinimumFreeBytes=0,DiskEntries=2}))
+        {
+            await cache.Initialize();using(await cache.Store(key,source)){}using(await cache.Store(key with{EntryId="recent"},source)){}
+            await using(var index=new DatabaseExecutor(Path.Combine(owned,"index.sqlite")))await index.Execute(c=>
+            {
+                using var cmd=c.CreateCommand();cmd.CommandText="UPDATE ThumbnailItems SET created=1,last_access=CASE WHEN cache_key=$old THEN $expired ELSE $recent END";
+                cmd.Parameters.AddWithValue("$old",key.Hash());cmd.Parameters.AddWithValue("$expired",DateTime.UtcNow.AddDays(-8).Ticks);cmd.Parameters.AddWithValue("$recent",DateTime.UtcNow.AddDays(-6).Ticks);return cmd.ExecuteNonQuery();
+            });
+        }
+        await using(var reopened=new ThumbnailCache(owned,new(){MinimumFreeBytes=0,DiskEntries=2}))
+        {
+            await reopened.Initialize();Assert.Null(await reopened.TryGet(key));using(await reopened.TryGet(key with{EntryId="recent"})){}
+            using(await reopened.Store(key with{EntryId="second"},source)){}using(await reopened.Store(key with{EntryId="third"},source)){}
+            Assert.Null(await reopened.TryGet(key with{EntryId="recent"}));Assert.Equal(2,(await reopened.GetStatistics()).DiskEntries);
+        }
+    }
     private static string Temp()=>Path.Combine(Path.GetTempPath(),"FolderLens-cache-tests",Guid.NewGuid().ToString("N"));
     private static readonly byte[] Png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1uoAAAAASUVORK5CYII=");
     [Fact]
@@ -25,7 +48,7 @@ public sealed class ThumbnailCacheTests
         }
         await using(var reopened=new ThumbnailCache(owned,options)){await reopened.Initialize();using(var hit=await reopened.TryGet(key)){Assert.NotNull(hit);using var input=hit.OpenRead();Assert.Equal(Png.Length,input.Length);}var clear=await reopened.Clear();Assert.Equal(2,clear.RemovedEntries);Assert.Equal(0,(await reopened.GetStatistics()).DiskEntries);}
         Assert.Equal(Png,await File.ReadAllBytesAsync(source));
-        Assert.NotEqual(key.Hash(),(key with{Representation="rawEmbedded"}).Hash());Assert.NotEqual(key.Hash(),(key with{ProviderVersion="provider-v2"}).Hash());Assert.NotEqual(key.Hash(),(key with{ModifiedUtcTicks=2}).Hash());
+        Assert.NotEqual(key.Hash(),(key with{Representation="rawEmbedded"}).Hash());Assert.NotEqual(key.Hash(),(key with{ProviderVersion="provider-v2"}).Hash());Assert.NotEqual(key.Hash(),(key with{ModifiedUtcTicks=2}).Hash()); Assert.NotEqual((key with{SourceSignature="original-identity"}).Hash(),(key with{SourceSignature="replacement-identity"}).Hash());
     }
     [Fact]
     public async Task RejectsNonOwnedDirectoryAndHardlinkPayloadWithoutTouchingSource()

@@ -8,12 +8,13 @@ using Microsoft.Win32.SafeHandles;
 
 namespace FolderLens.Infrastructure;
 
-public sealed record ThumbnailCacheKey(string EntryId,long FileVersion,long ModifiedUtcTicks,long LogicalBytes,int Edge,string ProviderVersion,string Representation="thumbnail",string OrientationPolicy="exif-v1",string ColorPolicy="srgb-v1")
+public sealed record ThumbnailCacheKey(string EntryId,long FileVersion,long ModifiedUtcTicks,long LogicalBytes,int Edge,string ProviderVersion,string Representation="thumbnail",string OrientationPolicy="exif-v1",string ColorPolicy="srgb-v1",string SourceSignature="")
 {
     public string Hash()
     {
         if(string.IsNullOrWhiteSpace(EntryId)||EntryId.Length>512||FileVersion<1||ModifiedUtcTicks<0||LogicalBytes<0||Edge is not(256 or 512 or 1024)||string.IsNullOrWhiteSpace(ProviderVersion)||ProviderVersion.Length>512||Representation is not("thumbnail" or "rawEmbedded" or "videoCover" or "audioCover")||OrientationPolicy.Length>128||ColorPolicy.Length>128)throw new ArgumentException("缩略图缓存键无效。");
         using var bytes=new MemoryStream();using(var writer=new BinaryWriter(bytes,Encoding.UTF8,true)){writer.Write(1);writer.Write(EntryId);writer.Write(FileVersion);writer.Write(ModifiedUtcTicks);writer.Write(LogicalBytes);writer.Write(Edge);writer.Write(ProviderVersion);writer.Write(Representation);writer.Write(OrientationPolicy);writer.Write(ColorPolicy);}
+        using(var signature=new BinaryWriter(bytes,Encoding.UTF8,true))signature.Write(SourceSignature);
         return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0,checked((int)bytes.Length))));
     }
 }
@@ -21,9 +22,10 @@ public sealed record ThumbnailCacheOptions
 {
     public long MemoryBytes {get;init;}=64L<<20;
     public int MemoryEntries {get;init;}=2048;
-    public long DiskBytes {get;init;}=10L<<30;
+    public long DiskBytes {get;init;}=256L<<20;
+    public int DiskEntries {get;init;}=4096;
     public long MaxEntryBytes {get;init;}=16L<<20;
-    public TimeSpan MaxAge {get;init;}=TimeSpan.FromDays(30);
+    public TimeSpan MaxAge {get;init;}=TimeSpan.FromDays(7);
     public long MinimumFreeBytes {get;init;}=5L<<30;
 }
 public sealed record ThumbnailCacheStatistics(long DiskEntries,long PayloadBytes,long TotalDiskBytes,long MemoryBytes,int MemoryEntries,long Hits,long Misses,long Stores,long Evictions,int ActiveLeases);
@@ -63,6 +65,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     private readonly Dictionary<string,int> leases=[];
     private readonly object leaseGate=new();
     private long bytes,entries,memoryBytes,hits,misses,stores,evictions;
+    private DateTime lastMaintenance=DateTime.MinValue;
     private bool disposed;
     private int pressureTrim;
     public ThumbnailCache(string directory,ThumbnailCacheOptions? options=null)
@@ -157,6 +160,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private ThumbnailCacheLease? Get(SqliteConnection c,string hash,int edge)
     {
+        Maintain(c);
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT byte_count,last_access FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);
         long size,last;using(var row=cmd.ExecuteReader()){if(!row.Read()){misses++;return null;}size=row.GetInt64(0);last=row.GetInt64(1);}
         if(last<DateTime.UtcNow.Subtract(options.MaxAge).Ticks&&!IsLeased(hash)){Remove(c,hash,size);misses++;return null;}
@@ -213,6 +217,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     {
         string hash=key.Hash();return Db().Execute<ReadOnlyMemory<byte>?>(c=>
         {
+            Maintain(c);
             if(memory.TryGetValue(hash,out var hit)){recent.Remove(hit);recent.AddLast(hit);UpdateAccess(c,hash);hits++;return hit.Value.Bytes;}
             using var lease=Get(c,hash,key.Edge);if(lease is null)return null;
             using var input=lease.OpenRead();byte[] buffer=new byte[checked((int)input.Length)];input.ReadExactly(buffer);
@@ -241,6 +246,13 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private void EnsureRoom(SqliteConnection c,long incoming,CancellationToken cancellation)
     {
+        if(options.DiskEntries<1)throw new ArgumentException("缩略图数量预算无效。");
+        while(entries>=options.DiskEntries)
+        {
+            using var oldest=c.CreateCommand();oldest.CommandText="SELECT cache_key,byte_count FROM ThumbnailItems ORDER BY last_access,cache_key";
+            var candidates=new List<(string Key,long Bytes)>();using(var rows=oldest.ExecuteReader())while(rows.Read()){cancellation.ThrowIfCancellationRequested();if(!IsLeased(rows.GetString(0))){candidates.Add((rows.GetString(0),rows.GetInt64(1)));break;}}
+            if(candidates.Count==0||!Remove(c,candidates[0].Key,candidates[0].Bytes))throw new IOException("缩略图数量已达到预算，正在显示的缩略图已保留。");
+        }
         long reserve=IndexBytes()+Math.Min(8L<<20,options.DiskBytes/8);
         while(bytes+incoming>options.DiskBytes-reserve)
         {
@@ -268,7 +280,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
             foreach(var item in page)
             {
                 cancellation.ThrowIfCancellationRequested();afterTime=item.Access;afterKey=item.Hash;
-                if(!clear&&item.Access>=cutoff&&bytes<=target){finished=true;break;}
+                if(!clear&&item.Access>=cutoff&&bytes<=target&&entries<=options.DiskEntries){finished=true;break;}
                 if(Remove(c,item.Hash,item.Size)){removed++;removedBytes+=item.Size;}
             }
             if(finished)break;
@@ -279,7 +291,12 @@ public sealed class ThumbnailCache : IAsyncDisposable
             cancellation.ThrowIfCancellationRequested();string name=Path.GetFileName(temp);if(name.Length!=102||!name.AsSpan(1,64).ToString().All(Uri.IsHexDigit)||!name.AsSpan(66,32).ToString().All(Uri.IsHexDigit))continue;
             if(File.GetLastWriteTimeUtc(temp)<DateTime.UtcNow.AddHours(-1))try{DeleteOwned(temp);}catch(IOException){}
         }
+        lastMaintenance=DateTime.UtcNow;
         return new(removed,removedBytes,ActiveLeases());
+    }
+    private void Maintain(SqliteConnection c)
+    {
+        if(DateTime.UtcNow-lastMaintenance>=TimeSpan.FromHours(1))TrimCore(c,false,0,CancellationToken.None);
     }
     public Task<ThumbnailCacheStatistics> GetStatistics(CancellationToken cancellation=default)=>Db().Execute(c=>
     {

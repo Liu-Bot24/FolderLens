@@ -39,7 +39,7 @@ public sealed partial class MainWindow
     private sealed record TreePageIntent(long Version,long Start);
     private readonly Dictionary<TreeViewNode,TreePageIntent> treePageIntents=[];
     private long treePageVersion;
-    private string TreeListingDirectory=>Path.Combine(dataDirectory,"temp","tree-listings");
+    private string TreeListingDirectory=>Path.Combine(RuntimeDataDirectory,"temp","tree-listings");
 
     private void ShowTreeRoot(string path)
     {
