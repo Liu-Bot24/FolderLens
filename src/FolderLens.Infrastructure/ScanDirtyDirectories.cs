@@ -19,6 +19,15 @@ public sealed class ScanDirtyDirectories(CatalogStore catalog)
         using var t=c.BeginTransaction();Ensure(c,t);CheckEpoch(c,t,rootId,epoch);int count=0;
         foreach(var hint in hints)
         {
+            if(hint.Reason=="PeriodicReconcile")
+            {
+                // A periodic hint is only a fallback for idle roots. Real watcher,
+                // reconnect and navigation events below always keep their revision.
+                using var active=c.CreateCommand();active.Transaction=t;
+                active.CommandText="SELECT 1 FROM ScanRuns WHERE root_id=$r AND root_epoch=$e AND state='running' LIMIT 1";
+                active.Parameters.AddWithValue("$r",rootId);active.Parameters.AddWithValue("$e",epoch);
+                if(active.ExecuteScalar() is not null){count++;continue;}
+            }
             string path=hint.RelativePath.Replace('/','\\').TrimEnd('\\');
             if(Path.IsPathRooted(path)||path.Split('\\').Any(p=>p is "." or "..")||path.Contains(':'))throw new ArgumentException("无效的核对目录范围。");
             using var nearest=c.CreateCommand();nearest.Transaction=t;nearest.CommandText="SELECT directory_id FROM Directories WHERE root_id=$r AND canonical_key=relative_path AND entry_state<>'missing' AND (relative_path=$p OR relative_path='' OR substr($p,1,length(relative_path)+1)=relative_path||char(92)) ORDER BY length(relative_path) DESC LIMIT 1";nearest.Parameters.AddWithValue("$r",rootId);nearest.Parameters.AddWithValue("$p",path);

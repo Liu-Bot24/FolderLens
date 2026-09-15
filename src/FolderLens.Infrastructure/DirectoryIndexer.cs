@@ -45,7 +45,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         await using var probe=executable is null?null:new ScanWorkerClient(executable);
         var renames=new ScanRenames(catalog,probe,PathProbeOverride);
         var dirtyStore=new ScanDirtyDirectories(catalog);
-        IReadOnlyList<DirtyScanScope> captured=scopeRelative is null?await dirtyStore.Read(rootId,epoch,cancellation,includeDeferred:true).ConfigureAwait(false):[];
+        IReadOnlyList<DirtyScanScope> captured=[];
         string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false,rootMissing=false;string availability="online",outcome="failed";
         try
         {
@@ -67,6 +67,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             }
             Execute(c,t,"UPDATE Roots SET scan_state='scanning' WHERE root_id=$root",("$root",rootId));t.Commit();initialized=true;return true;
         },cancellation).ConfigureAwait(false);
+            // Register the running traversal before capturing covered hints, so a
+            // periodic tick cannot slip between capture and scan registration.
+            if(scopeRelative is null)captured=await dirtyStore.Read(rootId,epoch,cancellation,includeDeferred:true).ConfigureAwait(false);
             if(!string.IsNullOrEmpty(scopeRelative))
             {
                 var rootState=probe is null?await Task.Run(()=>ScanPathProbe.Read(root),cancellation).ConfigureAwait(false):await probe.Probe(root,cancellation).ConfigureAwait(false);

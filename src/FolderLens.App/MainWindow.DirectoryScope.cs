@@ -11,7 +11,7 @@ public sealed partial class MainWindow
         ?Path.Combine(root,CurrentFilter().DirectoryScope):root;
     private async Task<bool> TryBrowseCurrentRoot(string path,long navigation)
     {
-        if(closing||replacingRoot||catalog is null||activeCollectionId is not null||rootId.Length==0||
+        if(closing||replacingRoot||!browserRootReady||catalog is null||activeCollectionId is not null||rootId.Length==0||
             scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(CurrentFilter()))return false;
         string? relative=DirectoryBrowseScope.Relative(root,path);
         if(relative is null)return false;
