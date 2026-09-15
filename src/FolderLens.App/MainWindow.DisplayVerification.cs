@@ -14,6 +14,15 @@ public sealed partial class MainWindow
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         await SelectPreview((FileRow)results![0]!);await SetImmersive(true);
+        // A completed failure must remain visible even when full-screen chrome is hidden.
+        PreparePreview();ShowPreviewError(new InvalidDataException("DecodeFailed"));FinishPreview();
+        SetFullScreenChrome(true);
+        if(loadingBadge?.Visibility!=Visibility.Visible||loadingText?.Text!=previewFailure)
+            throw new InvalidOperationException("全屏预览失败后没有保留可见错误。");
+        SetFullScreenChrome(false);PreparePreview();FinishPreview();
+        if(loadingBadge?.Visibility!=Visibility.Collapsed||previewFailure is not null)
+            throw new InvalidOperationException("新预览没有清除上一次错误。");
+        report["previewFailureVisibleAndReset"]=true;
         var handle=WinRT.Interop.WindowNative.GetWindowHandle(this);
         var observations=new List<object>();var scales=new HashSet<double>();
         var originalPosition=AppWindow.Position;var originalSize=AppWindow.Size;

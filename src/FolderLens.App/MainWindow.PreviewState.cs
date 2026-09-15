@@ -9,6 +9,7 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private bool previewLoading;
+    private string? previewFailure;
     private Border? loadingBadge;
     private TextBlock? loadingText;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? fitResizeTimer;
@@ -25,16 +26,17 @@ public sealed partial class MainWindow
     }
     private void PreparePreview()
     {
+        previewFailure=null;
         foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=fitBitmap is null?1:.4;
         if(loadingBadge is not null){loadingText!.Text="正在打开 "+selected?.Name;loadingText.MaxWidth=Math.Max(120,PreviewSurface.ActualWidth-48);loadingBadge.Visibility=Visibility.Visible;}
     }
-    private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;}
+    private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=previewFailure is null?Visibility.Collapsed:Visibility.Visible;}
     private void ClearResultSelection()
     {
         pendingPreviewRestore=null;previewReadySelection=-1;
         selectionStop.Cancel();prefetchStop.Cancel();selection++;selected=null;selectedProperties=null;
         ResetViewerGesture();slideShow=false;slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;animationRevision++;
-        StopAudio();_=ResetTextSession();ClearImage();FinishPreview();
+        StopAudio();_=ResetTextSession();ClearImage();previewFailure=null;FinishPreview();
         TextContent.Text="";FileTitle.Text="未选择文件";QualityLabel.Text="请选择当前结果中的文件。";
         PreviewCopyFeedback.Visibility=Visibility.Collapsed;
         foreach(var element in new FrameworkElement[]{TextScroll,TextTools,MarkdownHost,AudioTools,FrameTools})element.Visibility=Visibility.Collapsed;
