@@ -99,6 +99,7 @@ public sealed partial class MainWindow
         PreviewReturn.Visibility=immersive&&!fullScreen?Visibility.Visible:Visibility.Collapsed;
         PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=picture?Visibility.Visible:Visibility.Collapsed;
         PreviewExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
+        VideoExternalOpen.Visibility=PreviewExternalPlayer.Visibility;
         foreach(var item in viewerActionButtons)
         {
             item.Button.Visibility=IsImageViewerAction(item.Action)

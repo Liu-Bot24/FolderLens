@@ -24,7 +24,18 @@ public static class TextEncodingPolicy
             var decoder=encoding.GetDecoder();char[] output=new char[encoding.GetMaxCharCount(sample.Length)];
             decoder.Convert(sample[bom..],output,isWholeFile,out _,out _,out _);
         }
-        catch(DecoderFallbackException ex){throw new InvalidDataException("编码无法确定或内容无效，请选择正确编码。",ex);}
+        catch(DecoderFallbackException ex)
+        {
+            if(bom==0&&selectedEncoding is null)
+            {
+                // Strict GB18030 includes GBK; never replace invalid bytes or
+                // silently override an encoding explicitly chosen by the user.
+                var fallback=Detect(sample,isWholeFile,"gb18030");
+                if(sample.Contains((byte)0))throw new InvalidDataException("该文件可能是二进制文件，请选择正确编码。");
+                return fallback;
+            }
+            throw new InvalidDataException("无法按所选编码读取文本，请在文本工具中选择其他编码。",ex);
+        }
         if(bom==0 && selectedEncoding is null && sample.Contains((byte)0))throw new InvalidDataException("该文件可能是二进制文件，请选择正确编码。");
         return new(encoding,bom);
     }

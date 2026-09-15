@@ -417,7 +417,8 @@
           <Button x:Name="PreviewFit" Width="Auto" MinWidth="64" Padding="6,2" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
           <Button x:Name="PreviewActual" Width="Auto" MinWidth="48" Padding="6,2" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
           <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
-          <Button x:Name="PreviewExternalPlayer" Content="播放" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用本地播放器打开当前视频" />
+          <Button x:Name="PreviewExternalPlayer" Content="播放" Width="Auto" MinWidth="52" Padding="8,2" Visibility="Collapsed" Click="PlayVideo" ToolTipService.ToolTip="在预览窗口播放或暂停视频" />
+          <Button x:Name="VideoExternalOpen" Content="外部播放" Width="Auto" Padding="8,2" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用设置中的外部播放器打开视频" />
         </StackPanel>
         </ScrollViewer>
         <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="#20242B">
@@ -432,6 +433,7 @@
             </TextBox>
           </ScrollViewer>
           <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+          <ContentControl x:Name="VideoHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" PointerWheelChanged="ViewerWheel" />
         </local:ViewerSurface>
         <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
           <Button x:Name="CopyPreviewPathButton" Tag="path" Click="CopyPreviewLabel" Visibility="Collapsed" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制完整文件路径" AutomationProperties.Name="复制完整文件路径"><TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.Name="文件路径" /></Button>

@@ -36,7 +36,7 @@ public sealed partial class MainWindow
         pendingPreviewRestore=null;previewReadySelection=-1;
         selectionStop.Cancel();prefetchStop.Cancel();selection++;selected=null;selectedProperties=null;
         ResetViewerGesture();slideShow=false;slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;animationRevision++;
-        StopAudio();_=ResetTextSession();ClearImage();previewFailure=null;FinishPreview();
+        StopVideo();StopAudio();_=ResetTextSession();ClearImage();previewFailure=null;FinishPreview();
         TextContent.Text="";FileTitle.Text="未选择文件";QualityLabel.Text="请选择当前结果中的文件。";
         PreviewCopyFeedback.Visibility=Visibility.Collapsed;
         foreach(var element in new FrameworkElement[]{TextScroll,TextTools,MarkdownHost,AudioTools,FrameTools})element.Visibility=Visibility.Collapsed;
