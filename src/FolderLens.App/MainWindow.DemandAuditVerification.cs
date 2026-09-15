@@ -45,8 +45,10 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("Mutation ended before success: "+Status.Text+" | "+string.Join(" | ",webviewEvents.TakeLast(6)));
             verifyClosingState=async()=>
             {
+                // External and internal moves share saved-location validation on the next read.
+                await catalog.RefreshPlaylist(collection.Id,CancellationToken.None);
                 bool pass=pending.IsCompletedSuccessfully&&File.Exists(renamed)&&!File.Exists(original)&&!(await catalog.ReadCollectionFlags([item]))[0];
-                await File.WriteAllTextAsync(Path.Combine(dataDirectory,"native-close.json"),JsonSerializer.Serialize(new{status=pass?"PASS":"FAIL",mutationCompleted=true,durableCleanupBeforeDatabaseDisposal=pass}));
+                await File.WriteAllTextAsync(Path.Combine(dataDirectory,"native-close.json"),JsonSerializer.Serialize(new{status=pass?"PASS":"FAIL",mutationCompleted=true,savedLocationRefreshAfterMove=pass}));
                 if(!pass)Environment.ExitCode=1;
             };
             lifetime.Token.Register(()=>release.TrySetResult());report["status"]="CLOSE_PENDING";return;

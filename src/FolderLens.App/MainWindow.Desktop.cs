@@ -51,6 +51,7 @@ public sealed partial class MainWindow
 
     private void InitializeDesktop()
     {
+        InitializeFileTransfer();
         searchTimer=DispatcherQueue.CreateTimer();searchTimer.Interval=TimeSpan.FromMilliseconds(280);searchTimer.IsRepeating=false;searchTimer.Tick+=async(_,_)=>await RefreshQuery();
         slideTimer=DispatcherQueue.CreateTimer();slideTimer.Interval=TimeSpan.FromSeconds(5);slideTimer.IsRepeating=false;
         slideTimer.Tick+=async(_,_)=>
@@ -255,11 +256,6 @@ public sealed partial class MainWindow
     }
     private async Task NavigateFolder(FolderNode folder)
     {if(folder.PageOffset is not null||string.Equals(folder.Path,BrowsedDirectory,StringComparison.Ordinal))return;await OpenRoot(folder.Path);}
-    private void FilesDragOver(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){e.AcceptedOperation=DataPackageOperation.Copy;e.DragUIOverride.Caption="打开并查看";}}
-    private async void FilesDrop(object sender,DragEventArgs e)
-    {
-        if(!e.DataView.Contains(StandardDataFormats.StorageItems))return;try{var items=await e.DataView.GetStorageItemsAsync();if(items.FirstOrDefault() is {} item)await OpenPath(item.Path);}catch(Exception ex){ShowError(ex);}
-    }
     private async Task OpenPath(string path)
     {
         if(Directory.Exists(path)){RootPath.Text=path;await OpenRoot(path);return;}
@@ -272,7 +268,7 @@ public sealed partial class MainWindow
     }
     private async void CopyFileReference(object sender,RoutedEventArgs e)
     {
-        if(selected is null)return;try{var file=await StorageFile.GetFileFromPathAsync(SourcePath(selected));var data=new DataPackage();data.SetStorageItems([file],true);data.RequestedOperation=DataPackageOperation.Copy;Clipboard.SetContent(data);}catch(Exception ex){ShowError(ex);}
+        await SetFileClipboard(false);
     }
     private void UpdatePlaylistCommand()=>PlaylistMenu.IsEnabled=playerSupportsPlaylists&&!string.IsNullOrWhiteSpace(playerExecutable);
     private void StartPlayer(string path)

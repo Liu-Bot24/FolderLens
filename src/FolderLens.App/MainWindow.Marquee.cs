@@ -43,6 +43,8 @@ public sealed partial class MainWindow
         for(var node=e.OriginalSource as DependencyObject;node is not null&&!ReferenceEquals(node,view);node=VisualTreeHelper.GetParent(node))
         {
             if(node is ButtonBase or ScrollBar or TextBox)return;
+            // Dragging a file belongs to Windows drag-and-drop. Blank space starts marquee selection.
+            if(node is ListViewItem or GridViewItem)return;
         }
         CancelMarquee();
         marqueeView=view;marqueeSource=view.ItemsSource;marqueeStart=e.GetCurrentPoint(view).Position;marqueePointer=e.Pointer.PointerId;

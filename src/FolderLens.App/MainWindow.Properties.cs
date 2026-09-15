@@ -22,6 +22,7 @@ public sealed partial class MainWindow
         {
             var menu=new MenuFlyout();void Add(string title,RoutedEventHandler action){var item=new MenuFlyoutItem{Text=title};item.Click+=action;menu.Items.Add(item);}
             Add("收藏所选文件…",CollectSelected);menu.Items.Add(new MenuFlyoutSeparator());
+            Add("剪切  Ctrl+X",CutFiles);Add("粘贴  Ctrl+V",PasteFiles);
             Add(FileCommandLabels.Properties,ShowProperties);Add(FileCommandLabels.CopyPath,CopyPath);Add(FileCommandLabels.CopyFileReference,CopyFileReference);Add(FileCommandLabels.Reveal,Reveal);Add(FileCommandLabels.ExternalOpen,ExternalOpen);menu.Items.Add(new MenuFlyoutSeparator());Add("重命名…  F2",RenameFile);Add("移动到…",MoveFile);Add("删除…  Delete",DeleteFile);list.ContextFlyout=menu;
             list.RightTapped+=(_,e)=>
             {
