@@ -116,7 +116,7 @@ public sealed partial class MainWindow
         string groupCaption=selected.Item?.Group is {} group?$"    文件夹：{(group.RelativePath.Length==0?"本目录文件":group.RelativePath)}    {FileRow.FormatBytes(group.Bytes)}{(group.ScanState=="ready"?"":" · 部分统计")}":"";
         if(viewerCaption is not null)viewerCaption.Text=$"{position}    {selected.Name}    {selected.Detail}{groupCaption}";
         if(viewerPosition is not null)viewerPosition.Text=position;
-        string help=video?"视频封面预览\n滚轮 / ← → / PageUp、PageDown：切换文件\n双击：使用本地播放器打开\nEsc：返回列表\nF11：全屏 / 窗口查看"
+        string help=video?"视频预览\n滚轮 / ← → / PageUp、PageDown：切换文件\n双击：内置播放 / 暂停\n外部播放：使用已配置的播放器\nEsc：返回列表\nF11：全屏 / 窗口查看"
             :$"滚轮：{(EffectiveViewerWheelBehavior()=="next"?"切换图片":EffectiveViewerWheelBehavior()=="pan"?"平移阅读":"缩放")}\n短击：100% / 适应屏幕\n按住：{(viewerPressZoom.UsesWholeImage(immersive||fullScreen)?"整图临时放大":"局部放大镜")} · {viewerPressZoom.Percent}%\n放大后拖动：平移\n双击 / Esc：返回列表\nF11：全屏 / 窗口查看\n锁定缩放：{(viewerSizing==ViewerSizing.Locked?"已开启":"已关闭")}";
         string exif=selected.Kind=="image"&&selectedProperties?.EntryId==selected.Item?.EntryId&&selectedProperties?.Version==selected.Item?.Version?FormatViewerExif(selectedProperties?.Details):"";
         if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}{(exif.Length>0?"\n\n"+exif:"")}\n\n{help}";

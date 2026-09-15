@@ -795,8 +795,14 @@ public sealed partial class MainWindow : Window
     private async void NextImagePage(object sender,RoutedEventArgs e)=>await ImagePage(1);
     private async Task LoadMedia(string path,string kind,long current,CancellationToken token)
     {
+        using var request=CancellationTokenSource.CreateLinkedTokenSource(token);
+        mediaCoverStop=request;token=request.Token;
+        try
+        {
+        if(verifyMediaCoverBarrier is not null)await verifyMediaCoverBarrier(token);
+        token.ThrowIfCancellationRequested();
         long resources=imageResourceRevision;
-        AudioTools.Visibility=kind=="audio"?Visibility.Visible:Visibility.Collapsed;var info=await Task.Run(()=>media!.Probe(path,token,WorkerPriority.Foreground),token);if(current!=selection)return;
+        AudioTools.Visibility=kind=="audio"?Visibility.Visible:Visibility.Collapsed;var info=await Task.Run(()=>media!.Probe(path,token,WorkerPriority.Foreground),token);if(current!=selection||token.IsCancellationRequested)return;
         QualityLabel.Text=$"{info.VideoCodec??info.AudioCodec??"编码未知"} · {(info.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():"时长未知")}";
         if(kind=="video" || info.HasCover)
         {
@@ -815,6 +821,14 @@ public sealed partial class MainWindow : Window
             }
             finally{if(File.Exists(output))File.Delete(output);}
         }
+        }
+        catch(Exception) when(request.IsCancellationRequested)
+        {
+            // Playing or switching superseded this cover request. Its result
+            // (including decoder failure) no longer owns the preview surface.
+            RecordPreviewStage(current,"coverCancelled");
+        }
+        finally{if(ReferenceEquals(mediaCoverStop,request))mediaCoverStop=null;}
     }
     private async Task<CanvasBitmap> LoadRenderedBitmap(ImageReply reply)
     {
