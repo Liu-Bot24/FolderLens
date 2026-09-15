@@ -6,6 +6,68 @@ namespace FolderLens.UnitTests;
 
 public sealed class DemandAndFileOperationTests
 {
+    [Fact]
+    public async Task SameSizeAndTimeReplacementMustNotBeRenamed()
+    {
+        string folder=Temp();Directory.CreateDirectory(folder);string source=Path.Combine(folder,"original.bin"),away=Path.Combine(folder,"away.bin");
+        await File.WriteAllTextAsync(source,"first");var file=new FileInfo(source);
+        var stamp=new SourceFileStamp(file.Length,file.LastWriteTimeUtc.Ticks);
+        var request=new FileOperationRequest(source,stamp,FileOperationKind.Rename,Path.Combine(folder,"renamed.bin"),FileAllocation.InspectMetadata(source).PhysicalIdentity);
+        File.Move(source,away);await File.WriteAllTextAsync(source,"other");File.SetLastWriteTimeUtc(source,new DateTime(stamp.ModifiedUtcTicks,DateTimeKind.Utc));
+        await Assert.ThrowsAsync<IOException>(()=>FileOperations.Execute(request));
+        Assert.Equal("other",await File.ReadAllTextAsync(source));Assert.True(File.Exists(away));
+    }
+    [Theory]
+    [InlineData("sample.bin",false)]
+    [InlineData("no-extension",true)]
+    public async Task OrdinaryFileMutationCompletesDurableCleanupAfterCancellationAndRecoversFailure(string name,bool failCleanup)
+    {
+        string folder=Temp(),source=Path.Combine(folder,"source"),playlist=Path.Combine(folder,"saved.sqlite");Directory.CreateDirectory(source);
+        string path=Path.Combine(source,name);await File.WriteAllTextAsync(path,"generated test file");
+        string destination=Path.Combine(folder,"moved.bin");
+        await using(var catalog=new CatalogStore(Path.Combine(folder,"runtime"),new(),playlist))
+        {
+            await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);
+            await new DirectoryIndexer(catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+            var item=Assert.Single((await catalog.ReadFirstPage(new(){RootId="root",Kinds=[]})).Items);
+            var collection=await catalog.CreateCollection("generated");await catalog.ChangeCollectionItems([collection.Id],[item],true);
+            var target=await catalog.ResolveFileOperation(item);
+            using var lifetime=new CancellationTokenSource();
+            await FileOperations.Execute(new(target.Path,target.Stamp,FileOperationKind.Move,destination,target.PhysicalIdentity),lifetime.Token);
+            lifetime.Cancel(); // Actual disk action has succeeded; shutdown must not cancel completion.
+            if(failCleanup)
+            {
+                await catalog.Write(c=>{using var q=c.CreateCommand();q.CommandText="CREATE TEMP TRIGGER RejectCleanup BEFORE DELETE ON playlist.SavedLinks BEGIN SELECT RAISE(ABORT,'generated failure'); END";return q.ExecuteNonQuery();});
+                await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(()=>catalog.CompleteFileOperation(target));
+                Assert.True(File.Exists(playlist+".completed-operation.json"));
+            }
+            else {await catalog.CompleteFileOperation(target);Assert.False((await catalog.ReadCollectionFlags([item]))[0]);}
+        }
+        Assert.False(File.Exists(path));Assert.Equal("generated test file",await File.ReadAllTextAsync(destination));
+        await using(var restarted=new CatalogStore(Path.Combine(folder,"next-runtime"),new(),playlist)){await restarted.Initialize();}
+        using var connection=new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={playlist};Pooling=False");connection.Open();using var count=connection.CreateCommand();count.CommandText="SELECT count(*) FROM SavedLinks";Assert.Equal(0L,(long)count.ExecuteScalar()!);
+        Assert.False(File.Exists(playlist+".completed-operation.json"));
+    }
+    [Fact]
+    public async Task MutationRejectsRevisedPathAndEveryStaleObservation()
+    {
+        string folder=Temp();Directory.CreateDirectory(folder);await File.WriteAllTextAsync(Path.Combine(folder,"sample.bin"),"generated");
+        await using var catalog=new CatalogStore(Temp());await catalog.Initialize();long epoch=await catalog.OpenRoot("root",folder);
+        await new DirectoryIndexer(catalog).Scan("root",folder,epoch,true,[],null,CancellationToken.None);
+        var item=Assert.Single((await catalog.ReadFirstPage(new(){RootId="root",Kinds=[]})).Items);
+        await catalog.ResolveFileOperation(item);
+        foreach(var stale in new[]{item with{PathRevision=item.PathRevision+1},item with{SourceRootEpoch=epoch+1},item with{BindingRevision=item.BindingRevision+1},item with{PhysicalIdentity="replacement"},item with{DirectoryLocationId="other"}})
+            await Assert.ThrowsAsync<IOException>(()=>catalog.ResolveFileOperation(stale));
+        await catalog.Write(c=>{using var q=c.CreateCommand();q.CommandText="UPDATE Files SET relative_path='renamed.bin',path_revision=path_revision+1";return q.ExecuteNonQuery();});
+        await Assert.ThrowsAsync<IOException>(()=>catalog.ResolveFileOperation(item));
+    }
+    [Fact]
+    public async Task FailedSettingSaveLeavesNoTemporaryFile()
+    {
+        string folder=Temp();Directory.CreateDirectory(Path.Combine(folder,"slideshow.json"));
+        await Assert.ThrowsAsync<IOException>(()=>new AtomicSettings(folder).Save("slideshow.json",new{Seconds=10}));
+        Assert.Empty(Directory.GetFiles(folder,"*.tmp"));
+    }
     [Theory]
     [InlineData("name",false)] [InlineData("path",false)] [InlineData("logicalBytes",false)]
     [InlineData("modified",false)] [InlineData("width",true)] [InlineData("captured",true)] [InlineData("durationMs",true)]
@@ -51,14 +113,14 @@ public sealed class DemandAndFileOperationTests
     public async Task RenameAndMovePreserveContentsAndRefuseCollisionsOrChangedSources()
     {
         string folder=Temp();Directory.CreateDirectory(folder);string source=Path.Combine(folder,"old.txt");await File.WriteAllTextAsync(source,"original");
-        var stat=new FileInfo(source);var stamp=new SourceFileStamp(stat.Length,stat.LastWriteTimeUtc.Ticks);string renamed=FileOperations.RenameTarget(source,"renamed.txt");
-        await FileOperations.Execute(new(source,stamp,FileOperationKind.Rename,renamed));Assert.False(File.Exists(source));Assert.Equal("original",await File.ReadAllTextAsync(renamed));
+        var stat=new FileInfo(source);var stamp=new SourceFileStamp(stat.Length,stat.LastWriteTimeUtc.Ticks);string renamed=FileOperations.RenameTarget(source,"renamed.txt");string identity=FileAllocation.InspectMetadata(source).PhysicalIdentity!;
+        await FileOperations.Execute(new(source,stamp,FileOperationKind.Rename,renamed,identity));Assert.False(File.Exists(source));Assert.Equal("original",await File.ReadAllTextAsync(renamed));
         string targetFolder=Path.Combine(folder,"destination");Directory.CreateDirectory(targetFolder);string destination=Path.Combine(targetFolder,"renamed.txt");
-        await FileOperations.Execute(new(renamed,stamp,FileOperationKind.Move,destination));Assert.False(File.Exists(renamed));Assert.Equal("original",await File.ReadAllTextAsync(destination));
+        await FileOperations.Execute(new(renamed,stamp,FileOperationKind.Move,destination,identity));Assert.False(File.Exists(renamed));Assert.Equal("original",await File.ReadAllTextAsync(destination));
         await File.WriteAllTextAsync(renamed,"collision");
-        await Assert.ThrowsAsync<IOException>(()=>FileOperations.Execute(new(destination,stamp,FileOperationKind.Move,renamed)));Assert.Equal("collision",await File.ReadAllTextAsync(renamed));
+        await Assert.ThrowsAsync<IOException>(()=>FileOperations.Execute(new(destination,stamp,FileOperationKind.Move,renamed,identity)));Assert.Equal("collision",await File.ReadAllTextAsync(renamed));
         await File.WriteAllTextAsync(destination,"a different source");
-        await Assert.ThrowsAsync<IOException>(()=>FileOperations.Execute(new(destination,stamp,FileOperationKind.Rename,Path.Combine(targetFolder,"bad.txt"))));Assert.True(File.Exists(destination));
+        await Assert.ThrowsAsync<IOException>(()=>FileOperations.Execute(new(destination,stamp,FileOperationKind.Rename,Path.Combine(targetFolder,"bad.txt"),identity)));Assert.True(File.Exists(destination));
     }
     [Fact]
     public async Task SuccessfulOperationRetiresOldCollectionMappingWithoutFollowingNewName()

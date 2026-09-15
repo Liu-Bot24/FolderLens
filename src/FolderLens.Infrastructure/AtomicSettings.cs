@@ -8,15 +8,16 @@ public sealed class AtomicSettings(string directory)
     public async Task Save<T>(string name,T value,CancellationToken cancellation=default)
     {
         if(Path.GetFileName(name)!=name)throw new ArgumentException("Invalid settings filename.");
+        string? temp=null;
         await gate.WaitAsync(cancellation);
         try
         {
-            Directory.CreateDirectory(directory);string path=Path.Combine(directory,name),temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+            Directory.CreateDirectory(directory);string path=Path.Combine(directory,name);temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
             await using(var stream=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None,64*1024,FileOptions.WriteThrough)){await JsonSerializer.SerializeAsync(stream,value,cancellationToken:cancellation);await stream.FlushAsync(cancellation);}
             cancellation.ThrowIfCancellationRequested();
             if(File.Exists(path))File.Replace(temp,path,path+".bak",true);else File.Move(temp,path);
         }
-        finally{gate.Release();}
+        finally{try{if(temp is not null&&File.Exists(temp))File.Delete(temp);}finally{gate.Release();}}
     }
     public async Task<T?> Load<T>(string name,CancellationToken cancellation=default)
     {

@@ -4,7 +4,7 @@ using Microsoft.VisualBasic.FileIO;
 namespace FolderLens.Infrastructure;
 
 public enum FileOperationKind { Rename, Move, Recycle }
-public sealed record FileOperationRequest(string Source,SourceFileStamp Stamp,FileOperationKind Kind,string? Destination=null);
+public sealed record FileOperationRequest(string Source,SourceFileStamp Stamp,FileOperationKind Kind,string? Destination=null,string? PhysicalIdentity=null);
 
 public static class FileOperations
 {
@@ -32,6 +32,7 @@ public static class FileOperations
                 var file=new FileInfo(source);
                 if(!file.Exists)throw new FileNotFoundException("文件已不存在，请刷新目录。",source);
                 if((file.Attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("暂不操作链接或在线占位文件，请在资源管理器中操作。");
+                if(request.PhysicalIdentity is null||FileAllocation.InspectMetadata(source).PhysicalIdentity!=request.PhysicalIdentity)throw new IOException("文件身份已变化或无法核实，请刷新后重试。");
                 if(new SourceFileStamp(file.Length,file.LastWriteTimeUtc.Ticks)!=request.Stamp)throw new IOException("文件已变化，请刷新后重试。");
                 if(request.Kind==FileOperationKind.Recycle)
                     FileSystem.DeleteFile(source,UIOption.AllDialogs,RecycleOption.SendToRecycleBin,UICancelOption.ThrowException);

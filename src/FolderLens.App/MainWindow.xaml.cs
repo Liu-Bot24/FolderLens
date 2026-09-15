@@ -997,10 +997,10 @@ public sealed partial class MainWindow : Window
         using var operation=browserWork.Enter();
         if(operation is null||closing||results is not {} source)return;
         if(refresh)propertyRefreshPending.Add(row);
-        if(!propertyRequests.Add(row))return;
-        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,scanStop.Token);
+        if(!propertyRequests.Add(row)){if(propertyCancellations.TryGetValue(row,out var pending)&&pending.IsCancellationRequested)propertyRetryPending.Add(row);return;}
+        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         propertyCancellations[row]=request;
-        var token=request.Token;string id=rootId;bool slot=false;
+        var token=request.Token;string id=rootId;long requestedRoot=rootChangeVersion;bool slot=false;
         try
         {
             while(true)
@@ -1027,7 +1027,13 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(!token.IsCancellationRequested)ShowError(ex);}
-        finally{propertyCancellations.Remove(row);propertyRequests.Remove(row);propertyRefreshPending.Remove(row);if(slot)thumbnailSlots.Release();}
+        finally
+        {
+            propertyCancellations.Remove(row);propertyRequests.Remove(row);propertyRefreshPending.Remove(row);if(slot)thumbnailSlots.Release();
+            bool retry=propertyRetryPending.Remove(row);
+            if(retry&&!closing&&requestedRoot==rootChangeVersion&&id==rootId&&visible.Contains(row)&&results?.Contains(row)==true)
+                await LoadRowProperties(row,true);
+        }
     }
     private void CancelObsoleteThumbnails(VirtualResults next)
     {
@@ -1045,6 +1051,7 @@ public sealed partial class MainWindow : Window
         firstPageSequence=[];firstPageFilter=null;
         foreach(var token in thumbnailRequests.Values){token.Cancel();token.Dispose();}
         thumbnailRequests.Clear();
+        propertyRetryPending.Clear();foreach(var request in propertyCancellations.Values)request.Cancel();
         foreach(var row in visible)row.Thumbnail=null;
         visible.Clear();visibleContainers.Clear();visibleConsumerCounts.Clear();
     }
