@@ -8,6 +8,60 @@ namespace FolderLens.UnitTests;
 
 public sealed class ProScanCloseoutTests
 {
+    [Theory]
+    [InlineData(2)]
+    [InlineData(31)]
+    public async Task ExplicitStopPublishesDeferredCommittedFilesAfterRetirement(int count)
+    {
+        string directory=Fixture();await using var catalog=new CatalogStore(directory);await catalog.Initialize();await catalog.SeedBenchmark(count);
+        var filter=new FilterSpec{RootId="benchmark",Kinds=[]};
+        Assert.True(ScanPreviewRefresh.DeferFirstBatch((await catalog.ReadFirstPage(filter)).Items.Count,true));
+        var retirement=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stopped=new CancellationTokenSource();stopped.Cancel();
+        long? displayed=null;
+        var publish=StoppedScanPublication.Run(retirement.Task,CancellationToken.None,()=>true,async()=>displayed=(await catalog.CreateSnapshot(filter,1,1)).Count);
+        Assert.Null(displayed);retirement.SetCanceled(stopped.Token);await publish;
+        Assert.Equal(count,displayed);Assert.True(stopped.IsCancellationRequested);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StoppedScanNeverPublishesIntoAnotherRootOrClosingApplication(bool closing)
+    {
+        var retirement=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var lifetime=new CancellationTokenSource();bool current=true,published=false;
+        var publish=StoppedScanPublication.Run(retirement.Task,lifetime.Token,()=>current,()=>{published=true;return Task.CompletedTask;});
+        if(closing)lifetime.Cancel();else current=false;
+        retirement.SetResult();
+        if(closing)await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>publish);else await publish;
+        Assert.False(published);
+    }
+
+    [Fact]
+    public async Task SnapshotRecoversOversizedCheckpointedWalWithoutAnotherBusinessWrite()
+    {
+        string directory=Fixture();
+        await using var catalog=new CatalogStore(directory,new SnapshotLimits{CatalogWalBytes=4L<<20});
+        await catalog.Initialize();await catalog.SeedBenchmark(20);await catalog.CheckpointCatalog(true);
+        using var capacity=DatabaseExecutor.Open(Path.Combine(directory,"catalog.sqlite"));
+        using var held=capacity.BeginTransaction(deferred:true);
+        using(var q=capacity.CreateCommand()){q.Transaction=held;q.CommandText="SELECT count(*) FROM Files";Assert.Equal(20L,q.ExecuteScalar());}
+        await catalog.Write(c=>{using var q=c.CreateCommand();q.CommandText="CREATE TABLE WalFixture(payload BLOB); INSERT INTO WalFixture VALUES(zeroblob(8388608));";return q.ExecuteNonQuery();});
+        var pinned=await catalog.CheckpointCatalog();Assert.True(pinned.Bytes>4L<<20);
+        var watch=Stopwatch.StartNew();var busy=await catalog.PrepareSnapshotWal();
+        Assert.NotEqual(0,busy.Busy);
+        await catalog.Write(c=>{using var q=c.CreateCommand();q.CommandText="UPDATE Files SET logical_bytes=logical_bytes+1";return q.ExecuteNonQuery();});
+        Assert.True(watch.Elapsed<TimeSpan.FromSeconds(1),$"High-water maintenance blocked the writer for {watch.Elapsed.TotalMilliseconds:N0} ms.");
+        Assert.Equal(5000L,await catalog.Read(c=>{using var q=c.CreateCommand();q.CommandText="PRAGMA busy_timeout";return (long)q.ExecuteScalar()!;}));
+        held.Rollback();
+        var checkpoint=await catalog.CheckpointCatalog();
+        Assert.Equal(checkpoint.LogFrames,checkpoint.CheckpointedFrames);Assert.True(checkpoint.Bytes>4L<<20);
+        var snapshot=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=[]},1,1);
+        Assert.Equal(20,snapshot.Count);
+        Assert.True(new FileInfo(Path.Combine(directory,"catalog.sqlite-wal")).Length<4L<<20);
+    }
+
     [Fact]
     public async Task RefusedRefreshDoesNotAdvanceObservedEpochOrLoseFiles()
     {

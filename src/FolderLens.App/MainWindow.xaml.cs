@@ -193,11 +193,29 @@ public sealed partial class MainWindow : Window
         catch(Exception error){ShowError(error);}
     }
     private long scanCancelRevision;
-    private void CancelScan(object sender,RoutedEventArgs e){scanCancelRevision++;activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";}
+    private void CancelScan(object sender,RoutedEventArgs e)
+    {
+        scanCancelRevision++;activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";
+        if(browserRootReady&&!replacingRoot)_=PublishStoppedScan(scanTask,scanStop,rootChangeVersion,directoryNavigationRequest,scanCancelRevision);
+    }
+    private async Task PublishStoppedScan(Task? task,CancellationTokenSource stopped,long version,long navigation,long revision)
+    {
+        using var operation=browserWork.Enter();if(operation is null)return;
+        try
+        {
+            await StoppedScanPublication.Run(task,lifetime.Token,
+                ()=>!closing&&!replacingRoot&&browserRootReady&&!BrowserSequenceLocked&&version==rootChangeVersion&&navigation==directoryNavigationRequest&&revision==scanCancelRevision&&ReferenceEquals(stopped,scanStop),
+                ()=>RefreshQuery(preserveViewport:true));
+        }
+        catch(OperationCanceledException){}
+        catch(Exception error){if(version==rootChangeVersion&&!closing)ShowScanError(error);}
+    }
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
         long navigation=++directoryNavigationRequest;
+        var acceptedView=rootId.Length>0?CaptureView():null;
+        var requestedAdvanced=advanced;
         try
         {
         if(!forceRefresh&&!preserveDirectoryScope&&!path.StartsWith("collection:",StringComparison.Ordinal))
@@ -210,7 +228,7 @@ public sealed partial class MainWindow : Window
             if(covering is not null&&!string.Equals(covering.Path,path,StringComparison.Ordinal))
             {
                 previousView??=rootId.Length>0?CaptureView():null;
-                advanced=CurrentFilter() with{DirectoryScope=DirectoryBrowseScope.Relative(covering.Path,path)!,ScopeDirectFiles=false};
+                requestedAdvanced=CurrentFilter() with{DirectoryScope=DirectoryBrowseScope.Relative(covering.Path,path)!,ScopeDirectFiles=false};
                 path=covering.Path;preserveDirectoryScope=true;
             }
         }
@@ -222,19 +240,14 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){return;}
         catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
         long requested=++rootChangeVersion;scanStop.Cancel();queryStop.Cancel();selectionStop.Cancel();
-        bool acquired=false;
+        bool acquired=false,accepted=false;
         try
         {
             bool collectionScope=path.StartsWith("collection:",StringComparison.Ordinal)&&Guid.TryParseExact(path[11..],"N",out _);
             if(!collectionScope)path=PathRules.ValidateSource(path);
-            if(recordHistory&&rootId.Length>0&&!string.Equals(root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??CaptureView());
-            if(!preserveDirectoryScope&&!string.Equals(root,path,StringComparison.Ordinal)&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
-            DirectoryScopePanel.Visibility=Visibility.Collapsed;
-            activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
-            if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
-            RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):path;if(!collectionScope)ShowTreeRoot(path);else activeTreeRoot=null;UpdateNavigationButtons();
-            browserRootReady=false;browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
-            firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
+            // Keep the accepted rows, snapshot and root until admission succeeds.
+            // Another scan can exhaust the budget during the identity probe.
+            replacingRoot=true;
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
             monitor?.Dispose();monitor=null;
@@ -258,11 +271,22 @@ public sealed partial class MainWindow : Window
             }
             else
             {
+                if(verifyRootAdmissionBarrier is not null)await verifyRootAdmissionBarrier(scanStop.Token);
                 var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token,reusable is null?null:(reusable.RootId,reusable.Epoch));
                 if(reusable is not null&&(opened.RootId!=reusable.RootId||opened.Epoch!=reusable.Epoch))
                 {reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;}
                 if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=reusable;
             }
+            accepted=true;
+            if(recordHistory&&acceptedView is not null&&!string.Equals(acceptedView.Root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??acceptedView);
+            advanced=requestedAdvanced;
+            if(!preserveDirectoryScope&&acceptedView?.Root!=path&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
+            DirectoryScopePanel.Visibility=Visibility.Collapsed;
+            activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
+            if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
+            RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):Path.Combine(path,advanced?.DirectoryScope??"");if(!collectionScope)ShowTreeRoot(path);else activeTreeRoot=null;UpdateNavigationButtons();
+            browserScanError=null;browserEmptyError=null;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
+            firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
             browserRootReady=true;
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
@@ -339,7 +363,21 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(requested==rootChangeVersion)ShowScanError(ex);}
-        finally{if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}if(requested==rootChangeVersion)UpdateBrowserEmptyState();if(!closing)await RefreshCollectionsAfterScan();}
+        finally
+        {
+            if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}
+            if(requested==rootChangeVersion)
+            {
+                replacingRoot=false;
+                if(!accepted&&acceptedView is not null)
+                {
+                    RootPath.Text=activeCollectionId is null?Path.Combine(acceptedView.Root,acceptedView.Filter.DirectoryScope):"收藏夹："+CollectionLabel(activeCollectionId);
+                    queryBusy=false;UpdateNavigationButtons();
+                }
+                UpdateBrowserEmptyState();
+            }
+            if(!closing)await RefreshCollectionsAfterScan();
+        }
     }
     private async Task Reconcile(bool force=false)
     {
