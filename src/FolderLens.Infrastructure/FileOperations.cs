@@ -18,38 +18,12 @@ public static class FileOperations
         return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(source))!,name);
     }
 
-    // One user operation at a time; native shell calls run on a dedicated STA thread.
-    // Cancellation is checked before dispatch, never reported as success mid-operation.
-    public static Task Execute(FileOperationRequest request,CancellationToken cancellation=default)
+    // Compatibility entry for non-UI callers; all filesystem mutations still use the Shell.
+    public static async Task Execute(FileOperationRequest request,CancellationToken cancellation=default)
     {
-        var done=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread=new Thread(()=>
-        {
-            try
-            {
-                cancellation.ThrowIfCancellationRequested();
-                string source=PathRules.ValidateSource(request.Source);
-                var file=new FileInfo(source);
-                if(!file.Exists)throw new FileNotFoundException("文件已不存在，请刷新目录。",source);
-                if((file.Attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("暂不操作链接或在线占位文件，请在资源管理器中操作。");
-                if(request.PhysicalIdentity is null||FileAllocation.InspectMetadata(source).PhysicalIdentity!=request.PhysicalIdentity)throw new IOException("文件身份已变化或无法核实，请刷新后重试。");
-                if(new SourceFileStamp(file.Length,file.LastWriteTimeUtc.Ticks)!=request.Stamp)throw new IOException("文件已变化，请刷新后重试。");
-                if(request.Kind==FileOperationKind.Recycle)
-                    FileSystem.DeleteFile(source,UIOption.AllDialogs,RecycleOption.SendToRecycleBin,UICancelOption.ThrowException);
-                else
-                {
-                    string destination=PathRules.ValidateSource(request.Destination??throw new ArgumentException("请选择目标位置。"));
-                    if(string.Equals(source,destination,StringComparison.Ordinal))throw new IOException("文件已经位于此位置。");
-                    if(File.Exists(destination)||Directory.Exists(destination))throw new IOException("目标位置已有同名文件，请换一个名称或位置。");
-                    // File.Move never overwrites an existing target, including a target
-                    // created between our check and the actual operation.
-                    File.Move(source,destination,overwrite:false);
-                }
-                done.SetResult();
-            }
-            catch(OperationCanceledException ex){done.SetCanceled(ex.CancellationToken);}
-            catch(Exception ex){done.SetException(ex);}
-        }){IsBackground=true,Name="FolderLens file operation"};
-        thread.SetApartmentState(ApartmentState.STA);thread.Start();return done.Task;
+        var action=request.Kind==FileOperationKind.Rename?ShellFileAction.Rename:request.Kind==FileOperationKind.Move?ShellFileAction.Move:ShellFileAction.Recycle;
+        var shell=new ShellFileRequest(request.Source,action,request.Destination is null?null:Path.GetDirectoryName(request.Destination),request.Destination is null?null:Path.GetFileName(request.Destination),request.Stamp,request.PhysicalIdentity);
+        var result=await ShellFileOperations.ExecuteCore([shell],0,cancellation,true);
+        if(result.Items.Single().Outcome!=ShellItemOutcome.Completed)throw new IOException("文件操作未完整完成，请检查源位置和目标位置。");
     }
 }

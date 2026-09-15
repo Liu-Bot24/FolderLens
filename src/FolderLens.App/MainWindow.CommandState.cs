@@ -26,6 +26,8 @@ public sealed partial class MainWindow
             bool? enabled=(item.Tag as string) switch
             {
                 "RenameFile" or "MoveFile" or "DeleteFile"=>file&&!fileOperationBusy,
+                "CutFiles"=>ActiveBrowser.SelectedRanges.Count>0&&!fileOperationBusy,
+                "PasteFiles"=>FileTransferDirectory is not null&&!fileOperationBusy,
                 "CopyPath" or "CopyFileReference" or "Reveal" or "ExternalOpen" or "ShowProperties"=>file,
                 "RefreshRoot" or "AdvancedFilters" or "FillMetadata" or "SaveView"=>folder,
                 "ShowCapacity"=>folder&&activeCollectionId is null,
@@ -43,6 +45,6 @@ public sealed partial class MainWindow
         PreviewFit.IsEnabled=PreviewActual.IsEnabled=PreviewRotate.IsEnabled=CanUseViewerAction(ViewerAction.Fit);
         foreach(var item in viewerActionButtons)item.Button.IsEnabled=CanUseViewerAction(item.Action);
         foreach(var list in new ListViewBase[]{FilesGrid,FilesList})
-            if(list.ContextFlyout is MenuFlyout menu)foreach(var item in menu.Items.OfType<MenuFlyoutItem>())item.IsEnabled=file;
+            if(list.ContextFlyout is MenuFlyout menu)foreach(var item in menu.Items.OfType<MenuFlyoutItem>())item.IsEnabled=item.Text.StartsWith("粘贴")?FileTransferDirectory is not null&&!fileOperationBusy:file;
     }
 }

@@ -132,6 +132,7 @@ public sealed partial class CatalogStore
                 var file=await Probe(path).ConfigureAwait(false);
                 string key=FileLocationKey(parent,Path.GetFileName(path),directory.CaseMode,directory.PhysicalIdentity,file.PhysicalIdentity,"");
                 bool changed=directory.PhysicalIdentity!=link.Identity||directory.ResolvedLocation!=link.Anchor||file.State=="missing"||
+                    file.State=="present"&&file.ResolvedLocation is not null&&file.ResolvedLocation!=Path.Combine(link.Anchor,Path.GetFileName(link.Path))||
                     file.State=="present"&&file.PhysicalIdentity is not null&&link.FileIdentity is not null&&file.PhysicalIdentity!=link.FileIdentity;
                 if(changed)
                 {

@@ -15,68 +15,53 @@ public sealed partial class MainWindow
     private async void DeleteFile(object sender,RoutedEventArgs e)=>await OperateFile(FileOperationKind.Recycle);
     private async Task OperateFile(FileOperationKind kind)
     {
-        if(fileOperationBusy||selected?.Item is null||catalog is null||closing)return;
+        if(fileOperationBusy||catalog is null||closing)return;
         using var operation=browserWork.Enter();if(operation is null)return;
         fileOperationBusy=true;UpdateCommandAvailability();
-        var row=selected;var item=row.Item;var store=catalog;string source=SourcePath(row);long rootVersion=rootChangeVersion;
-        bool filesystemCompleted=false;
-        bool OwnsOperation()
-        {
-            bool owns=!closing&&rootVersion==rootChangeVersion&&selected?.Item is {} current&&SameCollectionObservation(current,item)&&
-                CurrentFileOperationSelection()?.Item is {} listed&&SameCollectionObservation(listed,item);
-            if(!owns)RecordWebView($"FileOperation superseded closing={closing} root={rootVersion}/{rootChangeVersion} selected={selected?.Item?.EntryId} expected={item.EntryId}");
-            return owns;
-        }
         try
         {
-            if(ActiveBrowser.SelectedItems.Count>1)
+            var targets=await CaptureTransferSelection();if(targets.Length==0)return;
+            if(kind==FileOperationKind.Rename&&targets.Length!=1){await ShowOwnedDialog(new ContentDialog{XamlRoot=Shell.XamlRoot,Title="请选择一个文件",Content="重命名每次操作一个文件。",CloseButtonText="关闭"});return;}
+            long version=rootChangeVersion;var view=ActiveBrowser;var source=view.ItemsSource;var handle=resultHandle;var selectedRanges=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
+            bool Current()
             {
-                await ShowOwnedDialog(new ContentDialog{XamlRoot=Shell.XamlRoot,Title="请选择一个文件",Content="重命名、移动和删除目前每次操作一个文件。",CloseButtonText="关闭"});return;
+                bool sameHandle=ReferenceEquals(handle,resultHandle),sameSource=ReferenceEquals(source,view.ItemsSource),sameSelection=selectedRanges.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)));
+                bool current=!closing&&version==rootChangeVersion&&sameSource&&sameSelection;
+                if(!current)RecordWebView($"File operation superseded closing={closing} root={version==rootChangeVersion} handle={sameHandle} source={sameSource} selection={sameSelection}");
+                return current;
             }
-            if(!OwnsOperation()){Status.Text="选择已变化，请重新选择要操作的文件。";return;}
-            var target=await store.ResolveFileOperation(item,lifetime.Token);
-            source=target.Path;
-            if(!OwnsOperation())return;
-            string? destination=null;
+            string? newName=null,destination=null;
             if(kind==FileOperationKind.Rename)
             {
-                var name=new TextBox{Text=Path.GetFileName(source),MinWidth=360,Header="新文件名（包含扩展名）"};
+                var name=new TextBox{Text=Path.GetFileName(targets[0].Path),MinWidth=360,Header="新文件名（包含扩展名）"};
                 var error=new TextBlock{TextWrapping=TextWrapping.Wrap};var body=new StackPanel{Spacing=12};body.Children.Add(name);body.Children.Add(error);
                 var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="重命名文件",Content=body,PrimaryButtonText="重命名",CloseButtonText="取消"};
-                dialog.PrimaryButtonClick+=(_,args)=>{try{destination=FileOperations.RenameTarget(source,name.Text);}catch(Exception ex){error.Text=ex.Message;args.Cancel=true;}};
-                var answer=await ShowOwnedDialog(dialog);if(answer!=ContentDialogResult.Primary){RecordWebView($"FileOperation dialog result={answer}");return;}
+                dialog.PrimaryButtonClick+=(_,args)=>{try{FileOperations.RenameTarget(targets[0].Path,name.Text);newName=name.Text;}catch(Exception ex){error.Text=ex.Message;args.Cancel=true;}};
+                if(await ShowOwnedDialog(dialog)!=ContentDialogResult.Primary)return;
             }
             else if(kind==FileOperationKind.Move)
             {
-                var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
-                var folder=await picker.PickSingleFolderAsync();if(folder is null)return;destination=Path.Combine(folder.Path,Path.GetFileName(source));
+                var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,FileOperationOwner);
+                var pending=picker.PickSingleFolderAsync();
+                var folder=await pending.AsTask(lifetime.Token);if(folder is null)return;destination=folder.Path;
             }
-            if(!OwnsOperation())return;
-            await store.ResolveFileOperation(item,lifetime.Token);
-            if(!OwnsOperation())return;
-            // Await viewer retirement, then validate ownership again before mutation.
-            await ReturnToBrowser();
-            if(!OwnsOperation())return;
-            target=await store.ResolveFileOperation(item,lifetime.Token);
-            if(!OwnsOperation())return;
+            if(!Current())return;
+            await ReturnToBrowser();if(!Current())return;
+            // A background publication can replace a snapshot without changing the
+            // selection. Re-resolve the actual selected files, not the handle object.
+            var currentTargets=await CaptureTransferSelection();
+            if(!Current()||!targets.Select(t=>(t.Item.EntryId,t.Item.Version,t.Path,t.PhysicalIdentity,t.Stamp)).SequenceEqual(currentTargets.Select(t=>(t.Item.EntryId,t.Item.Version,t.Path,t.PhysicalIdentity,t.Stamp))))
+                throw new IOException("所选文件已变化，请重新选择后操作。");
             ClearResultSelection();CancelThumbnails();ClearPrefetchedImages();ClearImage();
-            Status.Text=kind==FileOperationKind.Recycle?"正在删除文件…":"正在更新文件…";
-            await FileOperations.Execute(new(target.Path,target.Stamp,kind,destination,target.PhysicalIdentity),lifetime.Token);
-            filesystemCompleted=true;
-            if(verifyFileMutationCompleted is not null)await verifyFileMutationCompleted();
-            await store.CompleteFileOperation(target);
-            if(closing)return;
-            await RefreshCollectionsAfterScan();
-            RecordWebView($"FileOperation completed kind={kind} entry={item.EntryId}");
-            if(!closing&&rootVersion==rootChangeVersion)
-            {
-                if(activeCollectionId is not null)await RefreshQuery();
-                else await OpenRoot(root,true,recordHistory:false,preserveDirectoryScope:true);
-                Status.Text=kind==FileOperationKind.Recycle?"删除操作已完成。":kind==FileOperationKind.Rename?"文件已重命名。":"文件已移动。";
-            }
+            var action=kind==FileOperationKind.Rename?ShellFileAction.Rename:kind==FileOperationKind.Move?ShellFileAction.Move:ShellFileAction.Recycle;
+            var result=await ShellFileOperations.Execute(targets.Select(t=>new ShellFileRequest(t.Path,action,destination,newName,t.Stamp,t.PhysicalIdentity)).ToArray(),FileOperationOwner,lifetime.Token);
+            if(verifyFileMutationCompleted is not null&&result.Items.All(i=>i.Outcome==ShellItemOutcome.Completed))await verifyFileMutationCompleted();
+            // File operations do not mutate playlists. Filesystem observations and
+            // the saved-location validator reconcile changes from any application.
+            await RefreshAfterShellOperation();ShowShellResult(result);
         }
-        catch(OperationCanceledException){if(!closing){Status.Text=filesystemCompleted?"文件操作已完成，收藏清理未完成，请重新打开应用重试。":"文件操作已取消。";await RefreshQuery();}}
-        catch(Exception error){RecordWebView($"FileOperation failed kind={kind} entry={item.EntryId} error={error}");if(filesystemCompleted){if(!closing)Status.Text="文件操作已完成，但收藏清理失败；请重新打开应用完成清理。";}else ShowError(error);if(!closing)await RefreshQuery();}
+        catch(OperationCanceledException){if(!closing)Status.Text="操作已取消。";}
+        catch(Exception error){RecordWebView($"FileOperation failed kind={kind} error={error}");if(!closing)ShowError(error);}
         finally{fileOperationBusy=false;UpdateCommandAvailability();}
     }
 }

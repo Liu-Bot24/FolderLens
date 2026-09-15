@@ -117,7 +117,9 @@
         <MenuFlyoutItem Text="刷新目录" Tag="RefreshRoot" Click="RefreshRoot" />
         <MenuFlyoutSeparator />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyPath}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C" Tag="CopyPath" Click="CopyPath" />
-        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyFileReference}" Tag="CopyFileReference" Click="CopyFileReference" />
+        <MenuFlyoutItem Text="剪切" KeyboardAcceleratorTextOverride="Ctrl+X" Tag="CutFiles" Click="CutFiles" />
+        <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.CopyFileReference}" KeyboardAcceleratorTextOverride="Ctrl+C" Tag="CopyFileReference" Click="CopyFileReference" />
+        <MenuFlyoutItem Text="粘贴" KeyboardAcceleratorTextOverride="Ctrl+V" Tag="PasteFiles" Click="PasteFiles" />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Reveal}" Tag="Reveal" Click="Reveal" />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.ExternalOpen}" Tag="ExternalOpen" Click="ExternalOpen" />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Properties}" Tag="ShowProperties" Click="ShowProperties" />
