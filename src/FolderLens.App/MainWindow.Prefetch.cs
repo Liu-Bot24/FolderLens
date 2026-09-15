@@ -167,7 +167,7 @@ public sealed partial class MainWindow
                     // Selection validates again: this warm-up does not authorize stale pixels.
                     var sourceStat=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
                     if(sourceStat.Length!=expectedStamp.Length||sourceStat.ModifiedUtcTicks!=expectedStamp.ModifiedUtcTicks)continue;
-                    bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));reply=await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",new(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1),new(width,height),token,expectedStamp);
+                    bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));reply=await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",new(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1),new(width,height),token,expectedStamp,approvedCloud.Contains(CloudKey(row)));
                     pending.PixelsDecoded=true;
                     if(verifyPrefetchBarrier is not null)await verifyPrefetchBarrier(row,token);
                     if(reply.Message.Metadata!.Value.GetProperty("isAnimated").GetBoolean())continue;
@@ -204,7 +204,7 @@ public sealed partial class MainWindow
             ImageReply? reply=null;
             try
             {
-                reply=await prefetchWorker!.Request(path,"fullTile",new(id,activeEpoch,generation,current,row.Item!.Version,1),new(1024,1024,TileX:x,TileY:y),token,stamp);
+                reply=await prefetchWorker!.Request(path,"fullTile",new(id,activeEpoch,generation,current,row.Item!.Version,1),new(1024,1024,TileX:x,TileY:y),token,stamp,approvedCloud.Contains(CloudKey(row)));
                 if(new FileInfo(reply.AssetPath!).Length>8L*1024*1024)continue;
                 byte[] bytes=await File.ReadAllBytesAsync(reply.AssetPath!,token);
                 if(current!=selection||rootId!=id||epoch!=activeEpoch||token.IsCancellationRequested)return;

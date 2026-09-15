@@ -31,6 +31,7 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
         var approved=await JsonSerializer.DeserializeAsync<ApprovedTextInput>(input,WorkerProtocol.Json,cancellation)??throw new InvalidDataException("InvalidTextInput");
         if(!Path.IsPathFullyQualified(approved.Path)||approved.Path.Any(c=>char.IsControl(c)))throw new InvalidDataException("InvalidTextPath");
         string requestedPath=Path.GetFullPath(approved.Path);
+        ApprovedInput.CheckAccess(File.GetAttributes(requestedPath),approved.AllowCloud);
         if(reader is null || path!=requestedPath || selectedEncoding!=options.Encoding || fileVersion!=request.Context.FileVersion)
         {
             await CloseDocument();path=requestedPath;selectedEncoding=options.Encoding;fileVersion=request.Context.FileVersion;

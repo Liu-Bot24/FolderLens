@@ -9,6 +9,7 @@ namespace FolderLens.Infrastructure;
 /// The supplied WorkerClient must target FolderLens.Content.Worker and a local application-owned task directory.</summary>
 public sealed class RemoteTextClient
 {
+    private readonly bool allowCloud;
     private readonly WorkerClient worker;
     private readonly string path;
     private readonly RequestContext context;
@@ -23,9 +24,9 @@ public sealed class RemoteTextClient
     public TextIndexProgress? IndexProgress {get;private set;}
     public SourceFileStamp? SourceStamp=>stamp;
     public const int MaxCopyCharacters=16*1024*1024/sizeof(char);
-    public RemoteTextClient(WorkerClient worker,string path,RequestContext context,string? encoding=null,SourceFileStamp? sourceStamp=null)
+    public RemoteTextClient(WorkerClient worker,string path,RequestContext context,string? encoding=null,SourceFileStamp? sourceStamp=null,bool allowCloud=false)
     {
-        this.worker=worker;this.path=Path.GetFullPath(path);this.context=context;this.encoding=encoding;stamp=sourceStamp;
+        this.allowCloud=allowCloud;this.worker=worker;this.path=Path.GetFullPath(path);this.context=context;this.encoding=encoding;stamp=sourceStamp;
     }
     public async Task<TextWindow> ReadWindow(long byteOffset,int maxBytes=64*1024,CancellationToken cancellation=default)
     {
@@ -109,7 +110,7 @@ public sealed class RemoteTextClient
         try
         {
             ImageReply reply;
-            try{reply=await worker.RequestData(path,operation,context,parameters with{ExpectedSnapshot=snapshot},cancellation,stamp).ConfigureAwait(false);}
+            try{reply=await worker.RequestData(path,operation,context,parameters with{ExpectedSnapshot=snapshot},cancellation,stamp,allowCloud).ConfigureAwait(false);}
             catch(InvalidDataException ex) when(ex.Message=="FileChanged"){throw new IOException("文本文件已变化，请重新加载。",ex);}
             if(reply.AssetPath is not null || reply.Message.AssetToken is not null)throw new InvalidDataException("文本数据不能作为图片缓存返回。");
             var result=reply.Message.Metadata?.Deserialize<TextWorkerResponse>(WorkerProtocol.Json)??throw new InvalidDataException("文本工作进程返回了无效数据。");

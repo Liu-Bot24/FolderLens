@@ -63,6 +63,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     private readonly Dictionary<string,LinkedListNode<(string Key,byte[] Bytes)>> memory=[];
     private readonly LinkedList<(string Key,byte[] Bytes)> recent=[];
     private readonly Dictionary<string,int> leases=[];
+    private readonly HashSet<string> rejected=[];
     private readonly object leaseGate=new();
     private long bytes,entries,memoryBytes,hits,misses,stores,evictions;
     private DateTime lastMaintenance=DateTime.MinValue;
@@ -163,6 +164,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
         Maintain(c);
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT byte_count,last_access FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);
         long size,last;using(var row=cmd.ExecuteReader()){if(!row.Read()){misses++;return null;}size=row.GetInt64(0);last=row.GetInt64(1);}
+        if(rejected.Contains(hash)){Remove(c,hash,size);misses++;return null;}
         if(last<DateTime.UtcNow.Subtract(options.MaxAge).Ticks&&!IsLeased(hash)){Remove(c,hash,size);misses++;return null;}
         string path=AssetPath(hash);SafeFileHandle? pin=null;
         try
@@ -194,6 +196,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
             using var source=new FileStream(encodedPngPath,FileMode.Open,FileAccess.Read,FileShare.Read,64*1024,FileOptions.SequentialScan);
             ValidatePng(source,key.Edge);if(source.Length>options.MaxEntryBytes)throw new IOException("缩略图超过单项缓存预算。");source.Position=0;
             var existing=Get(c,hash,key.Edge);if(existing is not null)return existing;
+            if(IsLeased(hash))throw new IOException("失效缩略图仍在释放，暂不写入缓存。");
             long size=source.Length;EnsureRoom(c,size,cancellation);
             string temporary=Path.Combine(directory,"."+hash+"."+Guid.NewGuid().ToString("N")+".tmp"),target=AssetPath(hash);
             bool recorded=false,moved=false;
@@ -242,7 +245,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
         try{string path=AssetPath(hash);if(File.Exists(path))DeleteOwned(path);}
         catch(IOException){return false;}catch(Win32Exception){return false;}
         using var cmd=c.CreateCommand();cmd.CommandText="DELETE FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);
-        if(cmd.ExecuteNonQuery()!=0){bytes-=size;entries--;evictions++;}RemoveMemory(hash);BoundJournal(c);return true;
+        if(cmd.ExecuteNonQuery()!=0){bytes-=size;entries--;evictions++;}rejected.Remove(hash);RemoveMemory(hash);BoundJournal(c);return true;
     }
     private void EnsureRoom(SqliteConnection c,long incoming,CancellationToken cancellation)
     {
@@ -265,7 +268,18 @@ public sealed class ThumbnailCache : IAsyncDisposable
     public Task<ThumbnailCacheCleanup> Clear(CancellationToken cancellation=default)=>Db().Execute(c=>TrimCore(c,true,0,cancellation),cancellation);
     public Task<bool> Invalidate(ThumbnailCacheKey key,CancellationToken cancellation=default)
     {
-        string hash=key.Hash();return Db().Execute(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT byte_count FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);object? size=cmd.ExecuteScalar();return size is long length&&Remove(c,hash,length);},cancellation);
+        string hash=key.Hash();return Db().Execute(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT byte_count FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);object? size=cmd.ExecuteScalar();if(size is not long length)return false;rejected.Add(hash);RemoveMemory(hash);return Remove(c,hash,length);},cancellation);
+    }
+    public async Task<T?> TryLoad<T>(ThumbnailCacheKey key,Func<ThumbnailCacheLease,Task<T>> decode,CancellationToken cancellation=default) where T:class
+    {
+        using(var lease=await TryGet(key,cancellation))
+        {
+            if(lease is null)return null;
+            try{return await decode(lease);}
+            catch(COMException error) when(error.HResult is unchecked((int)0x88982F07) or unchecked((int)0x88982F60) or unchecked((int)0x88982F61) or unchecked((int)0x88982F62))
+            { /* WIC rejected encoded PNG content; release the pin before invalidating. */ }
+        }
+        await Invalidate(key,cancellation);return null;
     }
     private ThumbnailCacheCleanup TrimCore(SqliteConnection c,bool clear,long incoming,CancellationToken cancellation)
     {

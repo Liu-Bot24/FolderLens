@@ -42,7 +42,7 @@ public static class FilterSql
         if(filter.CollectionId is {} collection)
         {
             Known(Membership([collection]));
-            Known("f.entry_id=(SELECT pick.entry_id FROM Files pick WHERE pick.location_key=f.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=pick.directory_id)=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id) ORDER BY (pick.entry_state='present') DESC,pick.entry_id LIMIT 1)");
+            Known("f.entry_id=(SELECT pick.entry_id FROM Files pick WHERE pick.location_key=f.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=pick.directory_id)=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id) ORDER BY pick.observed_revision DESC,(pick.entry_state='present') DESC,pick.entry_id LIMIT 1)");
         }
         else Known($"f.root_id={Param(filter.RootId)} AND f.entry_state='present'");
         if(filter.CollectionId is null&&filter.ObservedRootEpoch is {} observedEpoch)

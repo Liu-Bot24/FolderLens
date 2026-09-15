@@ -70,7 +70,7 @@ public sealed partial class CatalogStore
         {
             using var legacy=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=legacyPath,Mode=SqliteOpenMode.ReadOnly,Pooling=false}.ToString());legacy.Open();
             using var read=legacy.CreateCommand();read.CommandText="PRAGMA user_version";
-            if((long)read.ExecuteScalar()! !=7)throw new InvalidDataException("旧收藏库版本不匹配，已保留原数据，未进行扫描库升级。");
+            if((long)read.ExecuteScalar()! is not (7 or 8))throw new InvalidDataException("旧收藏库版本不匹配，已保留原数据，未进行扫描库升级。");
             using var stable=legacy.BeginTransaction(deferred:true);read.Transaction=stable;
             read.CommandText="SELECT collection_id,name,name_key,created_utc_ticks FROM Collections";
             using(var rows=read.ExecuteReader())while(rows.Read())
@@ -170,13 +170,10 @@ public sealed partial class CatalogStore
         DirectoryIndexer.Execute(c,t,"INSERT OR IGNORE INTO Directories(directory_id,root_id,name,relative_path,canonical_key,case_mode) VALUES($dir,$root,'','','',$case)",("$dir",dir),("$root",root),("$case",directory.CaseMode));
         DirectoryIndexer.Execute(c,t,"UPDATE Directories SET case_mode=$case WHERE directory_id=$dir",("$case",directory.CaseMode),("$dir",dir));
         BindDirectoryLocation(c,t,dir,directory.PhysicalIdentity,directory.ResolvedLocation);
-        string entry=DirectoryIndexer.StablePathId(root,name);var stamp=file.FileStamp!.Value;
-        DirectoryIndexer.Execute(c,t,"""
-            INSERT INTO Files(entry_id,root_id,directory_id,name,extension,relative_path,canonical_key,path_sort_key,name_sort_key,natural_key_version,stat_signature,kind,kind_confidence,logical_bytes,mtime_utc_ticks,physical_identity,updated_revision)
-            VALUES($id,$root,$dir,$name,$ext,$name,$name,$sort,$sort,1,$signature,$kind,'extension',$bytes,$time,$identity,0)
-            ON CONFLICT(entry_id) DO UPDATE SET logical_bytes=excluded.logical_bytes,mtime_utc_ticks=excluded.mtime_utc_ticks,physical_identity=excluded.physical_identity,entry_state='present',
-                file_version=Files.file_version+CASE WHEN Files.stat_signature<>excluded.stat_signature THEN 1 ELSE 0 END,stat_signature=excluded.stat_signature
-            """,("$id",entry),("$root",root),("$dir",dir),("$name",name),("$ext",Path.GetExtension(name).ToLowerInvariant()),("$sort",NaturalOrder.Key(name)),("$signature",$"{stamp.Length}:{stamp.ModifiedUtcTicks}:{file.PhysicalIdentity}"),("$kind",FileKinds.Candidate(name)),("$bytes",stamp.Length),("$time",stamp.ModifiedUtcTicks),("$identity",file.PhysicalIdentity));
+        string entry=DirectoryIndexer.StablePathId(root,name);
+        var observation=file.FileObservation??throw new InvalidDataException("文件属性观察不完整。");
+        using var commands=new DirectoryIndexer.BatchCommands(c,t);
+        FileObservationWriter.Write(commands,entry,root,dir,name,null,observation,1,false,FileObservationWriter.NextRevision(c,t));
         // Existing matching entries also restore membership after a new tag was added.
         DirectoryIndexer.Execute(c,t,"UPDATE Files SET location_key=location_key WHERE entry_id=$id",("$id",entry));
         t.Commit();return 0;

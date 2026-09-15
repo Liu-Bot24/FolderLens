@@ -686,8 +686,8 @@ public sealed partial class MainWindow : Window
         {
             RecordPreviewStage(current,"decode");
             var reply=raw
-                ?await RawPreview.Open(operation=>previewWorker!.Request(path,operation,Context(row,current),new(width,height),cancellation,Stamp(row)))
-                :await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
+                ?await RawPreview.Open(operation=>previewWorker!.Request(path,operation,Context(row,current),new(width,height),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row))))
+                :await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));
             message=reply.Message;
             verifyPreviewStage?.Invoke("workerFit");
             // Display first. Metadata writes do not gate the loading indicator.
@@ -724,7 +724,7 @@ public sealed partial class MainWindow : Window
         int width=Math.Clamp((int)Math.Ceiling(sourceWidth*Math.Min(1,scale)),1,16384);
         int height=Math.Clamp((int)Math.Ceiling(sourceHeight*Math.Min(1,scale)),1,16384);
         if(fitBitmap.SizeInPixels.Width+1>=width&&fitBitmap.SizeInPixels.Height+1>=height)return;
-        var reply=await previewWorker!.Request(SourcePath(row),"rawEmbedded",Context(row,current),new(width,height),token,Stamp(row));
+        var reply=await previewWorker!.Request(SourcePath(row),"rawEmbedded",Context(row,current),new(width,height),token,Stamp(row),approvedCloud.Contains(CloudKey(row)));
         await PresentFit(reply,current,token);
     }
     private async Task AdvanceAnimation(bool open)
@@ -740,9 +740,9 @@ public sealed partial class MainWindow : Window
             else
             {
                 ImageReply reply;
-                try{reply=await previewWorker!.Request(SourcePath(selected),open?"animationOpen":"animationFrame",Context(selected,current),open?new(1280,1280,FrameIndex:animationNextFrame,CompletedLoops:animationCompletedLoops):new(1280,1280),token,Stamp(selected));}
+                try{reply=await previewWorker!.Request(SourcePath(selected),open?"animationOpen":"animationFrame",Context(selected,current),open?new(1280,1280,FrameIndex:animationNextFrame,CompletedLoops:animationCompletedLoops):new(1280,1280),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));}
                 catch(InvalidDataException ex) when(!open&&ex.Message=="AnimationSessionLost"&&current==selection&&revision==animationRevision)
-                {reply=await previewWorker!.Request(SourcePath(selected),"animationOpen",Context(selected,current),new(1280,1280,FrameIndex:animationNextFrame,CompletedLoops:animationCompletedLoops),token,Stamp(selected));animationDeadline=0;}
+                {reply=await previewWorker!.Request(SourcePath(selected),"animationOpen",Context(selected,current),new(1280,1280,FrameIndex:animationNextFrame,CompletedLoops:animationCompletedLoops),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));animationDeadline=0;}
                 frame=await LoadRenderedBitmap(reply);data=reply.Message.Metadata!.Value;
             }
             if(current!=selection||revision!=animationRevision||token.IsCancellationRequested){frame.Dispose();return;}
@@ -785,7 +785,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if(verifyPageBarrier is not null)await verifyPageBarrier(token);
-            var reply=await previewWorker!.Request(SourcePath(row),"page",Context(row,current),new(1600,1200,PageIndex:page),token,Stamp(row));
+            var reply=await previewWorker!.Request(SourcePath(row),"page",Context(row,current),new(1600,1200,PageIndex:page),token,Stamp(row),approvedCloud.Contains(CloudKey(row)));
             await PresentFit(reply,current,token);if(current!=selection||token.IsCancellationRequested)return null;
             imagePage=page;ImagePageLabel.Text=$"{page+1} / {imagePageCount}";previewReadySelection=current;FinishPreview();
             if(zoom>0)await LoadVisibleTiles();
@@ -900,7 +900,7 @@ public sealed partial class MainWindow : Window
             for(int y=firstY;y<=lastY;y++)for(int x=firstX;x<=lastX;x++)
             {
                 token.ThrowIfCancellationRequested();if(tiles.ContainsKey((x,y)))continue;
-                var reply=await previewWorker!.Request(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?frameIndex:0,TileX:x,TileY:y,PageIndex:imagePage),token,Stamp(selected));
+                var reply=await previewWorker!.Request(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?frameIndex:0,TileX:x,TileY:y,PageIndex:imagePage),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
                 var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || token.IsCancellationRequested||tileReloadPending||animated&&(animationRunning||frameIndex!=animationFrameIndex)){bitmap.Dispose();return;}tiles[(x,y)]=bitmap;ImageCanvas.Invalidate();
             }
             QualityLabel.Text=$"原始分辨率 · {zoom*Shell.XamlRoot.RasterizationScale:P0} · {sourceWidth:N0} × {sourceHeight:N0}";
@@ -978,20 +978,31 @@ public sealed partial class MainWindow : Window
             string representation=kind=="video"?"videoCover":kind=="audio"?"audioCover":FileKinds.Raw.Contains(Path.GetExtension(source))?"rawEmbedded":"thumbnail";
             var cacheKey=new ThumbnailCacheKey(row.Item.EntryId,row.Item.Version,stat.Modified,stat.Length,edge,kind is "video" or "audio"?providerIdentity+"/"+MediaTools.CoverStrategyVersion:providerIdentity,representation,SourceSignature:properties.SourceSignature);
             if(verifyThumbnailReadBarrier is not null)await verifyThumbnailReadBarrier(row,token);
-            cacheLease=await thumbnailCache!.TryGet(cacheKey,token);Mark("cacheLookup");
-            if(cacheLease is not null)
+            var cached=await thumbnailCache!.TryLoad(cacheKey,async lease=>
+            {using var stream=lease.OpenRead();var image=new BitmapImage();await image.SetSourceAsync(stream.AsRandomAccessStream());return image;},token);Mark("cacheLookup");
+            if(cached is not null)
             {
-                using var stream=cacheLease.OpenRead();var cached=new BitmapImage();await cached.SetSourceAsync(stream.AsRandomAccessStream());if(OwnsRow()){row.Thumbnail=cached;await ReadDemandedMetadata(row,token,decoder:decoder);if(OwnsRow())await ResolveRow(row,activeId,token);}return;
+                if(OwnsRow()){row.Thumbnail=cached;await ReadDemandedMetadata(row,token,decoder:decoder);if(OwnsRow())await ResolveRow(row,activeId,token);}return;
             }
             if(properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))return;
             if(kind=="image")
             {
-                var reply=await decoder.Request(source,representation,new(activeId,activeEpoch,activeGeneration,1,row.Item!.Version,1),new(edge,edge),token,Stamp(row));produced=reply;asset=reply.AssetPath!;Mark("decode");
+                var reply=await decoder.Request(source,representation,new(activeId,activeEpoch,activeGeneration,1,row.Item!.Version,1),new(edge,edge),token,Stamp(row),approvedCloud.Contains(CloudKey(row)));produced=reply;asset=reply.AssetPath!;Mark("decode");
                 metadataReply=reply;if(!OwnsRow())return;var info=reply.Message.Metadata!.Value;row.DescribeImage(info.GetProperty("width").GetInt32(),info.GetProperty("height").GetInt32(),Path.GetExtension(source).TrimStart('.'));
             }
             else if(kind is "video" or "audio")
             {
-                var info=await media!.Probe(source,token,WorkerPriority.Visible);await catalog!.ApplyMediaMetadata(row.Item.EntryId,row.Item.Version,SourceRootId(row),SourceRootEpoch(row),info,"ffprobe-v1",token);if(info.Details is {} mediaDetails)await catalog.ApplyFileDetails(row.Item.EntryId,row.Item.Version,SourceRootId(row),SourceRootEpoch(row),mediaDetails,"ffprobe-v1",token);await ResolveRow(row,activeId,token);if(kind=="audio"&&!info.HasCover)return;string directory=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");await media.Cover(source,asset,info,token,edge);
+                string directory=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");
+                bool allowCloud=approvedCloud.Contains(CloudKey(row));
+                var info=await media!.ReadCover(source,asset,properties.SourceSignature,prefetchSourceProbe,token,edge,allowCloud);
+                if(!OwnsRow())return;
+                var expected=requestedItem!;
+                await catalog!.ApplyMediaMetadata(expected.EntryId,expected.Version,expected.SourceRootId??activeId,expected.SourceRootEpoch??activeEpoch,info,"ffprobe-v1",token);
+                if(info.Details is {} mediaDetails)await catalog.ApplyFileDetails(expected.EntryId,expected.Version,expected.SourceRootId??activeId,expected.SourceRootEpoch??activeEpoch,mediaDetails,"ffprobe-v1",token);
+                if(!OwnsRow())return;
+                await ResolveRow(row,activeId,token);
+                if(kind=="audio"&&!info.HasCover)return;
+                await MediaTools.VerifySource(prefetchSourceProbe,source,properties.SourceSignature,token,allowCloud);
             }
             else return;
             var cacheWrite=await thumbnailCache.StoreOptional(cacheKey,asset,token);cacheLease=cacheWrite.Lease;Mark("cacheStore");
@@ -1128,7 +1139,7 @@ public sealed partial class MainWindow : Window
         {
             await markdownLoadGate.WaitAsync(token);entered=true;if(current!=selection||closing)return;
             markdownLoading=true;ScheduleMarkdownRelease();
-            reply=await contentWorker.RenderMarkdown(document,Context(selected,current),token,textEncoding,Stamp(selected));if(current!=selection)return;
+            reply=await contentWorker.RenderMarkdown(document,Context(selected,current),token,textEncoding,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));if(current!=selection)return;
             markdownImages.Clear();int resourceIndex=0;long resourceBytes=0,resourcePixels=0;
             foreach(var resource in reply.Message.Metadata!.Value.GetProperty("resources").EnumerateArray())
             {
@@ -1227,6 +1238,7 @@ public sealed partial class MainWindow : Window
         RecordPreviewFailure(ex);
         if(!closing&&ReportDeviceLoss(ex))return;
         if(closing)return;
+        if(ex is CloudFileRequiresApprovalException&&cloudPreviewButton is not null)cloudPreviewButton.Visibility=Visibility.Visible;
         previewFailure=$"无法预览：{UserMessages.Error(ex)}";QualityLabel.Text=previewFailure;
         if(loadingBadge is not null){loadingText!.Text=previewFailure;loadingBadge.Visibility=Visibility.Visible;}
     }

@@ -8,13 +8,18 @@ public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=nu
     private bool disposed;
     public async Task<SourceFileStamp> Read(string path,CancellationToken cancellation,bool allowCloud=false)
     {
+        var observation=await ReadObservation(path,cancellation,allowCloud).ConfigureAwait(false);
+        return new(observation.Bytes,observation.Modified);
+    }
+    public async Task<ScanEntry> ReadObservation(string path,CancellationToken cancellation,bool allowCloud=false)
+    {
         await gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(disposed,this);
             worker??=new(executable??ScanWorkerClient.FindExecutable()??throw new InvalidOperationException("缺少文件访问组件 FolderLens.Scan.Worker.exe。"),timeout);
             var result=await worker.Probe(path,cancellation,allowCloud).ConfigureAwait(false);
-            if(result.State=="present"&&result.FileStamp is {} stamp){stamp.Validate();return stamp;}
+            if(result.State=="present"&&result.FileStamp is {} stamp&&result.FileObservation is {} observation){stamp.Validate();return observation;}
             throw result.State switch
             {
                 "missing"=>new FileNotFoundException("原文件已不存在。",path),

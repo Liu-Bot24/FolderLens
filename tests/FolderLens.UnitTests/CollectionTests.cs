@@ -60,7 +60,7 @@ public sealed class CollectionTests
             await catalog.Initialize();
             Assert.Empty(Directory.GetFiles(data,"*.pre-v6-*.bak"));
             Assert.Equal(1,(await catalog.ReadCollections()).Single().Count);
-            Assert.Equal(7,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
+            Assert.Equal(8,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";return (long)cmd.ExecuteScalar()!;}));
             await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET physical_identity=physical_identity";return cmd.ExecuteNonQuery();});
             Assert.Equal(0,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM RepairWrites";return (long)cmd.ExecuteScalar()!;}));
             repairedVersion=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA schema_version";return (long)cmd.ExecuteScalar()!;});

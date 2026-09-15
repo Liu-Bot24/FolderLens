@@ -40,7 +40,7 @@ internal static class WorkerServer
                     }
                     string inputFile=Path.Combine(taskDirectory,request.FileRef!.InputToken+".input.json");
                     var input=JsonSerializer.Deserialize<ApprovedInput>(await File.ReadAllTextAsync(inputFile),WorkerProtocol.Json)??throw new InvalidDataException();
-                    inspectingSource=true;var stat=new FileInfo(input.Path);
+                    inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);var stat=new FileInfo(input.Path);
                     input=input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);
                     inspectingSource=false;
                     if(currentToken!=request.FileRef.InputToken||currentSource!=input)
@@ -48,7 +48,7 @@ internal static class WorkerServer
                         animation?.Dispose();animation=null;decoder?.Dispose();decoder=null;currentSource=null;
                         decoder=new StaticDecoder(input.Path);currentToken=request.FileRef.InputToken;currentSource=input;
                     }
-                    void CheckSource(){decoder!.CheckVersion();inspectingSource=true;stat.Refresh();input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;}
+                    void CheckSource(){ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);decoder!.CheckVersion();inspectingSource=true;stat.Refresh();input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;}
                     NetVips.NetVips.Concurrency=(int)budget.CpuThreads;
                     string token=request.RequestId;
                     if(!decoder!.Animated&&request.Operation is "animationOpen" or "animationFrame")throw new NotSupportedException("Image is not animated.");
@@ -83,7 +83,7 @@ internal static class WorkerServer
                     {
                         TimeoutException=>"Timeout",NotSupportedException=>"UnsupportedCodec",UnauthorizedAccessException=>"AccessDenied",
                         FileNotFoundException or DirectoryNotFoundException when inspectingSource=>"SourceMissing",IOException {Message:"FileChanged"}=>"FileChanged",
-                        IOException when inspectingSource=>"SourceIoError",_=>"DecodeFailed"
+                        IOException {Message:"CloudReadNotApproved"}=>"CloudReadNotApproved",IOException when inspectingSource=>"SourceIoError",_=>"DecodeFailed"
                     };
                     response=response with{Status=ex is TimeoutException?"timeout":ex is NotSupportedException?"unsupported":error=="FileChanged"?"stale":"failed",ErrorCode=error,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,errorType=ex.GetType().FullName,detail=ex.Message[..Math.Min(ex.Message.Length,1024)]})};
                 }

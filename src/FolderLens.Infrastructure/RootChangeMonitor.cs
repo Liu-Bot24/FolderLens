@@ -18,7 +18,7 @@ public sealed class RootChangeMonitor : IDisposable
     private FileSystemWatcher? watcher;
     private bool reconnect=true;
     private int attempt,ticking,disposed,tokenDisposed;
-    private long lastEvent,nextReconnect,lastTick=Environment.TickCount64,lastPeriodic=Environment.TickCount64,lastSignal;
+    private long firstPending,lastEvent,nextReconnect,lastTick=Environment.TickCount64,lastPeriodic=Environment.TickCount64,lastSignal;
     public string? LastError {get;private set;}
     public RootChangeMonitor(string root,Action dirty,CatalogStore? catalog=null,string? rootId=null,long epoch=0,string[]? ignoredDirectories=null)
     {
@@ -51,6 +51,7 @@ public sealed class RootChangeMonitor : IDisposable
         {
             if(disposed!=0)return;
             lastEvent=Environment.TickCount64;
+            if(pending.Count==0)firstPending=lastEvent;
             if(pending.Count>=1024){pending.Clear();pending[""]=new("","EventBudgetOverflow",true);}
             else if(pending.TryGetValue(hint.RelativePath,out var old))pending[hint.RelativePath]=hint with{Subtree=hint.Subtree||old.Subtree};
             else pending[hint.RelativePath]=hint;
@@ -80,7 +81,7 @@ public sealed class RootChangeMonitor : IDisposable
             DirectoryChangeHint[] batch;
             lock(sync)
             {
-                batch=now-lastEvent>=300?pending.Values.Take(128).ToArray():[];
+                batch=now-lastEvent>=300||now-firstPending>=1500?pending.Values.Take(128).ToArray():[];
                 foreach(var hint in batch)pending.Remove(hint.RelativePath);
             }
             if(batch.Length>0)

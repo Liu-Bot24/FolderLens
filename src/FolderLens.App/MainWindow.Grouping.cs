@@ -50,7 +50,7 @@ public sealed partial class MainWindow
     private void ToggleFolderGroup(BrowserFileGroup group)
     {
         if(browserGroups is null)return;int index=browserGroups.IndexOf(group);if(index<0)return;
-        var retained=ActiveBrowser.SelectedItem;double offset=FindScrollViewer(ActiveBrowser)?.VerticalOffset??0;
+        var retained=SelectedOrdinals(ActiveBrowser);double offset=FindScrollViewer(ActiveBrowser)?.VerticalOffset??0;
         bool ownsPublicationRows=publicationRows is null;publicationRows??=visible.ToHashSet();
         bool previous=syncingBrowserSelection;syncingBrowserSelection=true;
         try
@@ -62,7 +62,19 @@ public sealed partial class MainWindow
             groupedBrowserSource=null;group.ToggleCollapsed();
             groupedBrowserSource=new BrowserCollectionView(browserGroups);
             AttachBrowserView(groupedBrowserSource.View);
-            ActiveBrowser.SelectedItem=retained is not null&&ActiveBrowser.Items.Contains(retained)?retained:null;
+            // Reproject ordinal ranges without materializing rows. Collapsing a
+            // selected group removes its hidden targets from subsequent commands.
+            long visibleOffset=0;
+            foreach(var visibleGroup in browserGroups)
+            {
+                if(visibleGroup.IsCollapsed)continue;
+                foreach(var range in retained)
+                {
+                    long start=Math.Max(range.Start,visibleGroup.Info.Start),end=Math.Min(range.Start+range.Count,visibleGroup.Info.Start+visibleGroup.Info.Count);
+                    if(end>start)ActiveBrowser.SelectRange(new ItemIndexRange(checked((int)(visibleOffset+start-visibleGroup.Info.Start)),checked((uint)(end-start))));
+                }
+                visibleOffset+=visibleGroup.Info.Count;
+            }
             ActiveBrowser.UpdateLayout();FindScrollViewer(ActiveBrowser)?.ChangeView(null,offset,null,true);
         }
         finally{syncingBrowserSelection=previous;if(ownsPublicationRows)ReleasePublicationRows();UpdateBrowserEmptyState();}

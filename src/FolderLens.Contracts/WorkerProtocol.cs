@@ -13,8 +13,12 @@ public sealed record ResourceBudget(long MemoryBytes=2L*1024*1024*1024,long Temp
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ImageParameters(int TargetWidth=1920,int TargetHeight=1080,int FrameIndex=0,int TileX=0,int TileY=0,int TileSize=1024,int Level=0,int PageIndex=0,long CompletedLoops=0,bool ReadDetails=true);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record ApprovedInput(string Path,long? Length=null,long? LastWriteTicks=null)
+public sealed record ApprovedInput(string Path,long? Length=null,long? LastWriteTicks=null,bool AllowCloud=false)
 {
+    public static void CheckAccess(FileAttributes attributes,bool allowCloud)
+    {
+        if(!allowCloud&&((long)attributes&(0x1000|0x40000|0x400000))!=0)throw new IOException("CloudReadNotApproved");
+    }
     // A missing pair asks the isolated worker to observe the source. A supplied
     // pair is an immutable indexed version and must never be silently refreshed.
     public ApprovedInput Observe(long length,long lastWriteTicks)

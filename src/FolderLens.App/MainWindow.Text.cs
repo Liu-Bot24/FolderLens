@@ -51,7 +51,7 @@ public sealed partial class MainWindow
     private RemoteTextClient CurrentTextClient()
     {
         if(selected?.Item is null||contentWorker is null)throw new InvalidOperationException("文档尚未就绪。");
-        return remoteText??=new(contentWorker,SourcePath(selected),Context(selected,selection),textEncoding,Stamp(selected));
+        return remoteText??=new(contentWorker,SourcePath(selected),Context(selected,selection),textEncoding,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
     }
     private Task StartTextIndex(long current,CancellationToken token)
     {

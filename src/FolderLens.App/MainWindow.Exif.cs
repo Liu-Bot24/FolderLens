@@ -12,7 +12,7 @@ public sealed partial class MainWindow
         try
         {
             var context=Context(row,current);
-            var reply=await previewWorker.Request(SourcePath(row),"probe",context,new(),token,Stamp(row));
+            var reply=await previewWorker.Request(SourcePath(row),"probe",context,new(),token,Stamp(row),approvedCloud.Contains(CloudKey(row)));
             if(current!=selection||closing||token.IsCancellationRequested)return;
             var metadata=reply.Message.Metadata!.Value;
             var details=metadata.GetProperty("details").Deserialize<ContentMetadataDetails>(WorkerProtocol.Json)??throw new InvalidDataException("EXIF 信息未返回。");
