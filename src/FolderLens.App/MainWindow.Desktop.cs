@@ -20,6 +20,7 @@ public sealed partial class MainWindow
     private bool playerSupportsPlaylists;
     private readonly Dictionary<FileRow,CancellationTokenSource> thumbnailRequests=[];
     private readonly HashSet<FileRow> propertyRequests=[];
+    private readonly HashSet<FileRow> propertyRetryPending=[];
     private readonly Dictionary<FileRow,CancellationTokenSource> propertyCancellations=[];
     private readonly HashSet<FileRow> propertyRefreshPending=[];
     private readonly Dictionary<(ListViewBase View,DependencyObject Container),FileRow> visibleContainers=[];
