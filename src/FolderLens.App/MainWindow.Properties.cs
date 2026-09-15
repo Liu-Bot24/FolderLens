@@ -67,11 +67,11 @@ public sealed partial class MainWindow
     private async void ReadCloudFile(object sender,RoutedEventArgs e)
     {
         if(selected?.Item is null)return;var row=selected;long current=selection;
-        try{if(!await EnsureCloudRead(row,current))return;PreparePreview();await RenderSelectedContent(row,current,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}finally{if(current==selection)FinishPreview();}
+        try{if(!await EnsureCloudRead(row,current,force:true))return;PreparePreview();await RenderSelectedContent(row,current,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}finally{if(current==selection)FinishPreview();}
     }
-    private async Task<bool> EnsureCloudRead(FileRow row,long current)
+    private async Task<bool> EnsureCloudRead(FileRow row,long current,bool force=false)
     {
-        if(row.HydrationState!="placeholder"||approvedCloud.Contains(CloudKey(row)))return current==selection;
+        if(!force&&row.HydrationState!="placeholder"||approvedCloud.Contains(CloudKey(row)))return current==selection;
         var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="读取在线文件",Content="云存储提供方可能下载此文件的内容，会使用网络与本地磁盘空间。只读取当前选中的文件。",PrimaryButtonText="读取并预览",CloseButtonText="取消"};
         if(await ShowOwnedDialog(dialog)!=ContentDialogResult.Primary||current!=selection||closing||lifetime.IsCancellationRequested)return false;
         if(approvedCloud.Count>=256)approvedCloud.Clear();approvedCloud.Add(CloudKey(row));cloudPreviewButton!.Visibility=Visibility.Collapsed;return true;

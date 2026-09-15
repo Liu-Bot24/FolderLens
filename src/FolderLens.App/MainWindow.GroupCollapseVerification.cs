@@ -50,6 +50,22 @@ public sealed partial class MainWindow
         UpdateBrowserEmptyState();if(BrowserEmptyState.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("全部折叠时空状态覆盖了分组标题。");
         ToggleFolderGroup(first);ToggleFolderGroup(second);Shell.UpdateLayout();
         if(ActiveBrowser.Items.Count!=source.Count)throw new InvalidOperationException("展开后数量不正确。");
+        foreach(bool details in new[]{false,true})
+        {
+            DetailsMode.IsChecked=details;ToggleView(this,new());
+            ActiveBrowser.DeselectRange(new ItemIndexRange(0,(uint)ActiveBrowser.Items.Count));
+            ActiveBrowser.SelectRange(new ItemIndexRange((int)first.Info.Start,2));
+            var selectedBefore=SelectedOrdinals(ActiveBrowser).ToArray();
+            if(selectedBefore.Sum(r=>r.Count)!=2)throw new InvalidOperationException("测试未建立两个文件的选择。");
+            ToggleFolderGroup(second);
+            if(!selectedBefore.SequenceEqual(SelectedOrdinals(ActiveBrowser)))throw new InvalidOperationException("折叠无关组丢失多选。");
+            ToggleFolderGroup(second);
+            if(!selectedBefore.SequenceEqual(SelectedOrdinals(ActiveBrowser)))throw new InvalidOperationException("展开无关组丢失多选。");
+            ToggleFolderGroup(first);
+            if(SelectedOrdinals(ActiveBrowser).Count!=0)throw new InvalidOperationException("折叠后仍有不可见的操作目标。");
+            ToggleFolderGroup(first);
+        }
+        report["multiSelectionAcrossCollapse"]=true;
         for(int i=0;i<source.Count;i++)if(((FileRow)ActiveBrowser.Items[i]).Ordinal!=i)throw new InvalidOperationException("展开后顺序改变。");
         ToggleFolderGroup(first);
         var priorView=ActiveBrowser.ItemsSource;

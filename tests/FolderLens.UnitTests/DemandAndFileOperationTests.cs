@@ -31,7 +31,7 @@ public sealed class DemandAndFileOperationTests
             await new DirectoryIndexer(catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
             var item=Assert.Single((await catalog.ReadFirstPage(new(){RootId="root",Kinds=[]})).Items);
             var collection=await catalog.CreateCollection("generated");await catalog.ChangeCollectionItems([collection.Id],[item],true);
-            var target=await catalog.ResolveFileOperation(item);
+            var target=await catalog.ResolveFileOperation(item,captureLegacyLinks:true);
             using var lifetime=new CancellationTokenSource();
             await FileOperations.Execute(new(target.Path,target.Stamp,FileOperationKind.Move,destination,target.PhysicalIdentity),lifetime.Token);
             lifetime.Cancel(); // Actual disk action has succeeded; shutdown must not cancel completion.

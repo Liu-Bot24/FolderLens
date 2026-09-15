@@ -16,37 +16,55 @@ public sealed partial class MainWindow
     private readonly Dictionary<string,Task<ShellFileAction>> incomingDropDefaults=new(StringComparer.Ordinal);
     private nint FileOperationOwner=>WinRT.Interop.WindowNative.GetWindowHandle(this);
     private string? FileTransferDirectory=>!closing&&!replacingRoot&&!immersive&&activeCollectionId is null&&!string.IsNullOrWhiteSpace(rootId)?BrowsedDirectory:null;
+    private Func<string,Task>? verifyTransferBarrier;
     private async Task<FileOperationTarget[]> CaptureTransferSelection()
     {
-        using var work=browserWork.Enter();if(work is null||catalog is not {} store)return [];
+        var targets=new List<FileOperationTarget>();
+        await VisitTransferSelection((target,_)=>{targets.Add(target);return Task.CompletedTask;});
+        return targets.ToArray();
+    }
+    private async Task VisitTransferSelection(Func<FileOperationTarget,CancellationToken,Task> receive)
+    {
+        using var work=browserWork.Enter();if(work is null||catalog is not {} store)return;
         var view=ActiveBrowser;var source=view.ItemsSource;var ranges=SelectedOrdinals(view).ToArray();var handle=resultHandle;
         long version=rootChangeVersion;var listed=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
         bool Current()=>!closing&&version==rootChangeVersion&&ReferenceEquals(handle,resultHandle)&&ReferenceEquals(source,view.ItemsSource)&&listed.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)));
-        var items=new List<SnapshotItem>();bool retained=false;
+        long count=ranges.Sum(r=>r.Count);var budget=new FileTransferBudget(count);
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);deadline.CancelAfter(TimeSpan.FromSeconds(30));var token=deadline.Token;
+        void Check(){token.ThrowIfCancellationRequested();if(!Current())throw new OperationCanceledException();}
+        bool retained=false;long processed=0;
+        async Task Accept(SnapshotItem item)
+        {
+            Check();var target=await store.ResolveFileOperation(item,token);Check();budget.Add(target.Path);
+            await receive(target,token);if(verifyTransferBarrier is not null)await verifyTransferBarrier("item");Check();processed++;
+        }
         try
         {
+            Check();
             if(handle is not null)
             {
-                retained=await store.RetainSnapshot(handle.Id,lifetime.Token);if(!retained)throw new IOException("文件列表已变化，请重新选择。");
+                retained=await store.RetainSnapshot(handle.Id,token);Check();if(!retained)throw new IOException("文件列表已变化，请重新选择。");
                 foreach(var range in ranges)for(long offset=range.Start;offset<range.Start+range.Count;)
                 {
-                    var page=await store.ReadPage(handle.Id,offset,(int)Math.Min(256,range.Start+range.Count-offset),lifetime.Token);
-                    if(page.Count==0)throw new IOException("所选文件已变化，请刷新后重试。");items.AddRange(page);offset+=page.Count;
+                    Check();var page=await store.ReadPage(handle.Id,offset,(int)Math.Min(256,range.Start+range.Count-offset),token);
+                    if(verifyTransferBarrier is not null)await verifyTransferBarrier("page");Check();
+                    if(page.Count==0)throw new IOException("所选文件已变化，请刷新后重试。");
+                    foreach(var item in page)await Accept(item);offset+=page.Count;
+                    if(count>256)Status.Text=$"正在准备文件操作：{processed:N0} / {count:N0}；更改选择可取消。";
                 }
             }
             else foreach(var range in ranges)for(long i=range.Start;i<range.Start+range.Count;i++)
-                if(view.Items[(int)i] is FileRow {Item:{} item})items.Add(item);else throw new IOException("文件仍在加载，请稍后重试。");
-            var targets=new List<FileOperationTarget>();
-            foreach(var item in items){if(!Current())throw new OperationCanceledException();targets.Add(await store.ResolveFileOperation(item,lifetime.Token));}
-            if(!Current())throw new OperationCanceledException();return targets.ToArray();
+            {Check();if(view.Items[(int)i] is FileRow {Item:{} item})await Accept(item);else throw new IOException("文件仍在加载，请稍后重试。");}
+            Check();
         }
+        catch(OperationCanceledException) when(deadline.IsCancellationRequested&&!lifetime.IsCancellationRequested)
+        {throw new TimeoutException("准备文件操作超时，请减少选择后重试。");}
         finally{if(retained)await store.ReleaseSnapshot(handle!.Id);}
     }
     private async Task<IStorageItem[]> TransferStorageItems()
     {
-        using var work=browserWork.Enter();if(work is null)return [];
-        var targets=await CaptureTransferSelection();var files=new List<IStorageItem>();
-        foreach(var target in targets){lifetime.Token.ThrowIfCancellationRequested();files.Add(await StorageFile.GetFileFromPathAsync(target.Path));}
+        var files=new List<IStorageItem>();
+        await VisitTransferSelection(async(target,token)=>files.Add(await StorageFile.GetFileFromPathAsync(target.Path).AsTask(token)));
         return files.ToArray();
     }
     private async Task SetFileClipboard(bool cut)

@@ -73,6 +73,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-startup-profile")){await VerifyStartupProfile(source,report);return;}
             if(arguments.Contains("--verify-preview-completion")){await VerifyPreviewCompletion(source,report);return;}
             if(arguments.Contains("--verify-file-transfer")){await VerifyFileTransfer(source,report);return;}
+            if(arguments.Contains("--verify-cache-recovery")){await VerifyCacheRecovery(png,report);return;}
             if(arguments.Contains("--verify-scan-pipeline")){await VerifyScanPipeline(source,report);return;}
             if(arguments.Contains("--verify-demand-audit")||arguments.Contains("--verify-file-operation-close")){await VerifyDemandAudit(source,report);return;}
             if(arguments.Contains("--verify-demand-layout")){await VerifyDemandLayout(source,report);return;}

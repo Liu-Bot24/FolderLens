@@ -86,7 +86,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         // scope lowers CPU, I/O and memory priority without suspending the work.
         using var background=new BackgroundThreadScope();
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA user_version";long version=(long)cmd.ExecuteScalar()!;
-        long supported=name=="catalog"?7:5;
+        long supported=name=="catalog"?8:5;
         if(version>supported)throw new InvalidDataException("数据库由较新版本创建，请使用匹配版本。");
         bool existing=version!=0;
         bool migrating=existing&&version<supported;
@@ -144,7 +144,13 @@ public sealed partial class CatalogStore : IAsyncDisposable
         if(version==3){MigrateCollections(c,name,existing);version=4;}
         if(name=="catalog"&&version==4){MigrateCollectionLocations(c,existing,cancellation,progress);version=7;}
         if(name=="catalog"&&version==5){MigrateCollectionIdentityHistory(c,cancellation,progress);version=7;}
-        if(name=="catalog"&&version==6)MigrateDirectoryLocations(c,existing,cancellation,progress);
+        if(name=="catalog"&&version==6){MigrateDirectoryLocations(c,existing,cancellation,progress);version=7;}
+        if(name=="catalog"&&version==7)
+        {
+            using var migration=c.BeginTransaction();cmd.Transaction=migration;
+            cmd.CommandText="ALTER TABLE Files ADD COLUMN observed_revision INTEGER NOT NULL DEFAULT 0; UPDATE SchemaInfo SET schema_version=8; PRAGMA user_version=8;";
+            cmd.ExecuteNonQuery();migration.Commit();version=8;
+        }
         if(name=="sessions"&&version==4)
         {
             using var t=c.BeginTransaction();cmd.Transaction=t;

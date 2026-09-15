@@ -32,7 +32,7 @@ while(pipe.IsConnected)
         {
         if(request.Operation!="markdownRender")throw new NotSupportedException();
         var input=JsonSerializer.Deserialize<ApprovedInput>(await File.ReadAllTextAsync(Path.Combine(directory,request.FileRef.InputToken+".input.json")),WorkerProtocol.Json)??throw new InvalidDataException();
-        inspectingSource=true;var stat=new FileInfo(input.Path);input=input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;
+        inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);var stat=new FileInfo(input.Path);input=input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;
         if(input.Length>8*1024*1024)throw new InvalidDataException("MarkdownInputLimit");
         using var stream=new FileStream(input.Path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
         if(stream.Length!=input.Length||File.GetLastWriteTimeUtc(input.Path).Ticks!=input.LastWriteTicks)throw new IOException("FileChanged");
@@ -82,6 +82,7 @@ while(pipe.IsConnected)
             InvalidDataException=>ex.Message,
             UnauthorizedAccessException=>"TextAccessDenied",
             FileNotFoundException or DirectoryNotFoundException when inspectingSource=>"SourceMissing",
+            IOException {Message:"CloudReadNotApproved"}=>"CloudReadNotApproved",
             IOException when ContentTextSession.Supports(request.Operation)=>"TextIoError",
             IOException when inspectingSource=>"SourceIoError",
             _=>ContentTextSession.Supports(request.Operation)?"TextFailed":"MarkdownFailed"

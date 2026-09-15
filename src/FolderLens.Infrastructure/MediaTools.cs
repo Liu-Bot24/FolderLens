@@ -45,6 +45,26 @@ public static class BoundedProcess
 }
 public sealed class MediaTools(string ffprobe,string ffmpeg)
 {
+    internal Func<string,Task>? VerificationBarrier {get;set;}
+    public static async Task VerifySource(SourceFileProbe probe,string path,string signature,CancellationToken cancellation,bool allowCloud=false)
+    {
+        var observed=await probe.ReadObservation(path,cancellation,allowCloud).ConfigureAwait(false);
+        if(FileObservationWriter.Signature(observed)!=signature)throw new IOException("FileChanged");
+    }
+    public async Task<MediaMetadata> ReadCover(string path,string destination,string sourceSignature,SourceFileProbe sourceProbe,CancellationToken cancellation,int edge,bool allowCloud=false)
+    {
+        await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
+        var info=await Probe(path,cancellation,WorkerPriority.Visible).ConfigureAwait(false);
+        if(VerificationBarrier is not null)await VerificationBarrier("probe").ConfigureAwait(false);
+        await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
+        if(info.VideoStream is not null||info.HasCover)
+        {
+            await Cover(path,destination,info,cancellation,edge).ConfigureAwait(false);
+            if(VerificationBarrier is not null)await VerificationBarrier("cover").ConfigureAwait(false);
+            await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
+        }
+        return info;
+    }
     public const string CoverStrategyVersion="cover-v2-embedded-first-frame-fallback";
     private const string AllowedFormats="mov,matroska,webm,avi,mpegts,wav,mp3,flac,ogg,aac,asf,gif,apng";
     public async Task<MediaMetadata> Probe(string path,CancellationToken cancellation,WorkerPriority priority=WorkerPriority.Metadata)

@@ -10,9 +10,8 @@ public sealed record FileOperationTarget(SnapshotItem Item,string Path,SourceFil
 public sealed partial class CatalogStore
 {
     // Unlike external launch, mutation never follows a newer path or uses a format whitelist.
-    public Task<FileOperationTarget> ResolveFileOperation(SnapshotItem item,CancellationToken token=default)=>writer.Execute(c=>
+    public Task<FileOperationTarget> ResolveFileOperation(SnapshotItem item,CancellationToken token=default,bool captureLegacyLinks=false)=>writer.Execute(c=>
     {
-        if(File.Exists(CompletionJournal))throw new IOException("上次文件操作的收藏清理尚未完成，请重新打开应用后重试。");
         using var transaction=c.BeginTransaction();using var command=c.CreateCommand();command.Transaction=transaction;
         command.CommandText="SELECT f.file_version,f.path_revision,f.relative_path,f.directory_id,f.root_id,r.display_path,r.root_epoch,b.location_id,b.binding_revision,f.physical_identity,f.logical_bytes,f.mtime_utc_ticks,f.location_key,f.entry_state,f.hydration_state,l.state FROM Files f JOIN Roots r ON r.root_id=f.root_id JOIN DirectoryLocationBindings b ON b.directory_id=f.directory_id JOIN DirectoryLocations l ON l.location_id=b.location_id WHERE f.entry_id=$id";
         command.Parameters.AddWithValue("$id",item.EntryId);
@@ -27,7 +26,7 @@ public sealed partial class CatalogStore
             physical=row.GetString(9);stamp=new(row.GetInt64(10),row.GetInt64(11));key=row.GetString(12);
         }
         var links=new List<OperatedLink>();
-        if(playlistPath is not null)
+        if(captureLegacyLinks&&playlistPath is not null)
         {
             command.CommandText="SELECT p.collection_id,p.anchor,p.directory_identity,p.location_key,p.added_utc_ticks,p.file_identity FROM playlist.SavedLinks p JOIN DirectoryLocations l ON p.anchor=coalesce(l.anchor_locator,'') AND p.directory_identity=coalesce(l.directory_identity,'') WHERE l.location_id=$location AND p.location_key=$key";
             command.Parameters.AddWithValue("$location",item.DirectoryLocationId!);command.Parameters.AddWithValue("$key",key);

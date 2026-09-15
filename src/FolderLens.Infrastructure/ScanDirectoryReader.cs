@@ -9,7 +9,7 @@ namespace FolderLens.Infrastructure;
 public sealed record ScanEntry(string Name,bool Directory,long Bytes,long Modified,long Created,long Attributes,
     string Hydration,string? SkipReason,long? Allocated,string? PhysicalIdentity,long? ChangeTime,string CaseMode="unknown");
 public sealed record ScanDirectoryPacket(string State,ScanEntry[] Entries,string? ErrorCode=null,
-    string? PhysicalIdentity=null,string? VolumeIdentity=null,string CaseMode="unknown",SourceFileStamp? FileStamp=null,string? ResolvedLocation=null);
+    string? PhysicalIdentity=null,string? VolumeIdentity=null,string CaseMode="unknown",SourceFileStamp? FileStamp=null,string? ResolvedLocation=null,ScanEntry? FileObservation=null);
 
 /// <summary>One directory only; its caller owns the persistent disk-backed traversal queue.</summary>
 public static class ScanDirectoryReader

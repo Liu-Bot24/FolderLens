@@ -9,6 +9,7 @@ internal static class LegacyDirectoryLocations
     {
         using var command=c.CreateCommand();
         command.CommandText="""
+            ALTER TABLE Files DROP COLUMN observed_revision;
             DROP TRIGGER IF EXISTS DirectoryLocation_Insert;DROP TRIGGER IF EXISTS DirectoryLocation_Retire;DROP TRIGGER IF EXISTS DirectoryLocation_Retired;
             DROP TRIGGER IF EXISTS CollectionAliases_Invalidate;
             DROP TRIGGER IF EXISTS Files_Location_Insert;DROP TRIGGER IF EXISTS Files_CollectionsMissing;DROP TRIGGER IF EXISTS Files_Location_Update;

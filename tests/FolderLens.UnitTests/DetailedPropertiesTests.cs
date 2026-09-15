@@ -38,7 +38,7 @@ public sealed class DetailedPropertiesTests
         }
         await using(var updated=new CatalogStore(path)){await updated.Initialize();Assert.NotNull(await updated.ReadFileProperties("benchmark","000000000001",1));}
         Assert.Empty(Directory.GetFiles(path,"catalog.sqlite.pre-*.bak"));
-        using var verify=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder{DataSource=Path.Combine(path,"catalog.sqlite"),Mode=Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly}.ToString());verify.Open();using var cmd=verify.CreateCommand();cmd.CommandText="PRAGMA user_version";Assert.Equal(7L,cmd.ExecuteScalar());cmd.CommandText="SELECT count(*) FROM Files";Assert.Equal(1L,cmd.ExecuteScalar());
+        using var verify=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder{DataSource=Path.Combine(path,"catalog.sqlite"),Mode=Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly}.ToString());verify.Open();using var cmd=verify.CreateCommand();cmd.CommandText="PRAGMA user_version";Assert.Equal(8L,cmd.ExecuteScalar());cmd.CommandText="SELECT count(*) FROM Files";Assert.Equal(1L,cmd.ExecuteScalar());
     }
     [Fact]
     public async Task RealSonyArwExifComesFromReadOnlyWorkerProbe()

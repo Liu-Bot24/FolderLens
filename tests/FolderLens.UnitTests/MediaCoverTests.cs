@@ -54,4 +54,24 @@ public sealed class MediaCoverTests
         var next=WorkerResources.Shared.Acquire(WorkerPriority.Foreground,deadline.Token,WorkerLane.VideoCover);Assert.False(next.IsCompleted);
         held.Dispose();using var acquired=await next;Assert.Equal(WorkerLane.VideoCover,acquired.Lane);
     }
+    [Theory]
+    [InlineData("probe")]
+    [InlineData("cover")]
+    public async Task ChangedSourceCannotReturnMetadataOrCoverForPreviousVersion(string stage)
+    {
+        string native=Native(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-versioned-cover",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string source=Path.Combine(directory,"clip.mp4"),output=Path.Combine(directory,"cover.png"),ffmpeg=Path.Combine(native,"ffmpeg.exe");
+        await BoundedProcess.Run(ffmpeg,["-nostdin","-v","error","-f","lavfi","-i","testsrc2=size=32x24:rate=2:duration=1","-c:v","mpeg4","-threads","1",source],TimeSpan.FromSeconds(10),1<<20,CancellationToken.None);
+        string project=Path.GetFullPath(Path.Combine(native,"..",".."));
+        await using var probe=new SourceFileProbe(Path.Combine(project,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe"));
+        string signature=FileObservationWriter.Signature(await probe.ReadObservation(source,CancellationToken.None));
+        var media=new MediaTools(Path.Combine(native,"ffprobe.exe"),ffmpeg);
+        media.VerificationBarrier=at=>{if(at==stage)File.SetLastWriteTimeUtc(source,DateTime.UtcNow.AddSeconds(5));return Task.CompletedTask;};
+        var error=await Assert.ThrowsAsync<IOException>(()=>media.ReadCover(source,output,signature,probe,CancellationToken.None,512));
+        Assert.Equal("FileChanged",error.Message);
+        media.VerificationBarrier=null;
+        signature=FileObservationWriter.Signature(await probe.ReadObservation(source,CancellationToken.None));
+        var info=await media.ReadCover(source,Path.Combine(directory,"current.png"),signature,probe,CancellationToken.None,512);
+        Assert.Equal(32,info.Width);Assert.True(File.Exists(Path.Combine(directory,"current.png")));
+    }
 }

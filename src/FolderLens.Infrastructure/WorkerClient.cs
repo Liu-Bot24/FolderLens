@@ -93,19 +93,20 @@ public sealed class WorkerClient : IAsyncDisposable
         }
         finally{gate.Release();}
     }
-    public Task<ImageReply> Request(string path,string operation,RequestContext context,ImageParameters parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null)=>RequestCore(path,operation,context,parameters,cancellation,sourceStamp,false);
+    private bool currentAllowCloud;
+    public Task<ImageReply> Request(string path,string operation,RequestContext context,ImageParameters parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)=>RequestCore(path,operation,context,parameters,cancellation,sourceStamp,false,allowCloud:allowCloud);
     public async Task<RuntimeCapabilities> GetRuntimeCapabilities(CancellationToken cancellation)
     {
         var reply=await RequestCore(null,"capabilities",new("runtime",1,1,1,1,1),new ImageParameters(),cancellation,null,false,true);
         return reply.Message.Metadata!.Value.GetProperty("capabilities").Deserialize<RuntimeCapabilities>(WorkerProtocol.Json)??throw new InvalidDataException("Invalid capability report.");
     }
-    public Task<ImageReply> RenderMarkdown(string path,RequestContext context,CancellationToken cancellation,string? encoding=null,SourceFileStamp? sourceStamp=null)=>RequestCore(path,"markdownRender",context,new{maxInputBytes=8388608,maxAstNodes=100000,maxHtmlBytes=16777216,encoding},cancellation,sourceStamp,false);
-    public Task<ImageReply> RequestData(string path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null)
+    public Task<ImageReply> RenderMarkdown(string path,RequestContext context,CancellationToken cancellation,string? encoding=null,SourceFileStamp? sourceStamp=null,bool allowCloud=false)=>RequestCore(path,"markdownRender",context,new{maxInputBytes=8388608,maxAstNodes=100000,maxHtmlBytes=16777216,encoding},cancellation,sourceStamp,false,allowCloud:allowCloud);
+    public Task<ImageReply> RequestData(string path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)
     {
         if(operation is not("textWindow" or "textFind" or "textLinePosition" or "textIndexStep"))throw new ArgumentException("未知文本工作进程操作。",nameof(operation));
-        return RequestCore(path,operation,context,parameters,cancellation,sourceStamp,true);
+        return RequestCore(path,operation,context,parameters,cancellation,sourceStamp,true,allowCloud:allowCloud);
     }
-    private async Task<ImageReply> RequestCore(string? path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp,bool dataOnly,bool fileless=false)
+    private async Task<ImageReply> RequestCore(string? path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp,bool dataOnly,bool fileless=false,bool allowCloud=false)
     {
         if(!fileless)path=PathRules.ValidateSource(path!);sourceStamp?.Validate();
         using var linked=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lifetime.Token);cancellation=linked.Token;
@@ -131,12 +132,12 @@ public sealed class WorkerClient : IAsyncDisposable
             },null,TimeSpan.FromMilliseconds(250),TimeSpan.FromMilliseconds(250));
             // Only local approval descriptors are read/written by the host. All
             // source stat calls, including unindexed opens, belong to the worker.
-            if(!fileless&&(dataOnly||currentPath!=path||currentLength!=sourceStamp?.Length||currentWrite!=sourceStamp?.ModifiedUtcTicks||currentVersion!=context.FileVersion))
+            if(!fileless&&(dataOnly||currentAllowCloud!=allowCloud||currentPath!=path||currentLength!=sourceStamp?.Length||currentWrite!=sourceStamp?.ModifiedUtcTicks||currentVersion!=context.FileVersion))
             {
                 if(currentInputFile is {} previous){await Task.Run(()=>{if(File.Exists(previous))ThumbnailCache.DeleteOwned(previous);},token).ConfigureAwait(false);currentInputFile=null;}
-                currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentVersion=context.FileVersion;
+                currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentVersion=context.FileVersion;currentAllowCloud=allowCloud;
                 currentInputFile=Path.Combine(taskDirectory!,currentInput+".input.json");
-                object approved=dataOnly?new{path,expectedLength=sourceStamp?.Length,expectedLastWriteTicks=sourceStamp?.ModifiedUtcTicks}:new ApprovedInput(path!,currentLength,currentWrite);
+                object approved=dataOnly?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud);
                 try{await File.WriteAllTextAsync(currentInputFile,JsonSerializer.Serialize(approved,WorkerProtocol.Json),token).ConfigureAwait(false);}catch{currentPath=null;throw;}
             }
             string requestId=Guid.NewGuid().ToString("N");
@@ -147,6 +148,7 @@ public sealed class WorkerClient : IAsyncDisposable
             if(response.Type!="response"||response.WorkerInstanceId!=instance||response.RequestId!=requestId||response.Context!=context)throw new InvalidDataException("Stale or mismatched worker response.");
             if(response.Status!="ok")
             {
+                if(response.ErrorCode=="CloudReadNotApproved")throw new CloudFileRequiresApprovalException();
                 if(response.ErrorCode=="FileChanged")throw new IOException("FileChanged");
                 if(response.ErrorCode=="SourceMissing")throw new FileNotFoundException("原文件已不存在或目录暂不可用。",path);
                 if(response.ErrorCode is "AccessDenied" or "TextAccessDenied")throw new UnauthorizedAccessException("没有读取原文件的权限。");

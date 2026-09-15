@@ -18,18 +18,17 @@ public sealed partial class MainWindow
         if(option+1>=args.Length||!File.Exists(args[option+1]))throw new InvalidOperationException("需要自有视频样本。");
         File.Copy(args[option+1],Path.Combine(source,"clip.mp4"));
         suppressFilters=true;try{Category.SelectedIndex=1;}finally{suppressFilters=false;}
-        var releaseMetadata=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        verifyVideoMetadataBarrier=token=>releaseMetadata.Task.WaitAsync(token);
-        FileRow earlyVideo;object originalSource;object? originalContainer;ImageSource? earlyCover;
-        try
-        {
-            await OpenRoot(source);
-            await WaitUntil(()=>visible.Any(row=>row.Kind=="video"&&row.Thumbnail is not null),TimeSpan.FromSeconds(20));
-            earlyVideo=visible.First(row=>row.Kind=="video");originalSource=FilesGrid.ItemsSource;originalContainer=FilesGrid.ContainerFromItem(earlyVideo);earlyCover=earlyVideo.Thumbnail;
-            if(earlyVideo.DurationText.Length!=0)throw new InvalidOperationException("反例没有形成封面先完成、时长未知的状态。");
-        }
-        finally{verifyVideoMetadataBarrier=null;releaseMetadata.TrySetResult();}
+        await OpenRoot(source);if(scanTask is not null)await scanTask;await RefreshQuery();
+        await WaitUntil(()=>visible.Any(row=>row.Kind=="video"&&row.Thumbnail is not null&&row.DurationText.Length>0),TimeSpan.FromSeconds(20));
         if(metadataTask is not null)await metadataTask;
+        var earlyVideo=visible.First(row=>row.Kind=="video");
+        object originalSource=FilesGrid.ItemsSource;object? originalContainer=FilesGrid.ContainerFromItem(earlyVideo);var earlyCover=earlyVideo.Thumbnail;
+        var known=(await catalog!.ReadFileProperties(rootId,earlyVideo.Item!.EntryId,earlyVideo.Item.Version))!;
+        // Exercise a retained/cache-hit cover whose row has not yet received its
+        // demanded duration. Cold covers now publish metadata in the same request.
+        earlyVideo.UpdateProperties(known with{DurationMs=null});
+        if(earlyVideo.DurationText.Length!=0)throw new InvalidOperationException("反例没有形成封面已完成、时长未知的状态。");
+        await LoadRowProperties(earlyVideo,refresh:true);
         if(earlyVideo.DurationText.Length==0)throw new InvalidOperationException("封面已完成的可见卡片没有在元数据完成后回填时长。");
         if(!ReferenceEquals(originalSource,FilesGrid.ItemsSource)||!ReferenceEquals(originalContainer,FilesGrid.ContainerFromItem(earlyVideo))||!ReferenceEquals(earlyCover,earlyVideo.Thumbnail))throw new InvalidOperationException("元数据回填替换了原卡片或封面。");
         report["coverBeforeMetadataBackfill"]=true;
