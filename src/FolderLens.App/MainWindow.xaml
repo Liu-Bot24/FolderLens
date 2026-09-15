@@ -27,10 +27,11 @@
                 <FontIcon Glyph="&#xE783;" FontSize="22" Foreground="{ThemeResource BrowserWarningBrush}" />
                 <TextBlock Text="{x:Bind ThumbnailErrorLabel, Mode=OneWay}" FontSize="11" />
               </StackPanel>
-              <Border Visibility="{x:Bind VideoBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4" Padding="6,3" CornerRadius="4" Background="{ThemeResource MediaBadgeBackgroundBrush}" ToolTipService.ToolTip="{x:Bind VideoDescription, Mode=OneWay}" AutomationProperties.Name="{x:Bind VideoDescription, Mode=OneWay}">
-                <Grid ColumnSpacing="5"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                  <FontIcon Glyph="&#xE768;" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
-                  <TextBlock x:Name="VideoDurationLabel" Grid.Column="1" Text="{x:Bind VideoDurationText, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" TextTrimming="CharacterEllipsis" />
+              <Border Visibility="{x:Bind VideoBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="4" Padding="4,4" CornerRadius="4" Background="{ThemeResource MediaBadgeBackgroundBrush}" ToolTipService.ToolTip="{x:Bind VideoDescription, Mode=OneWay}" AutomationProperties.Name="{x:Bind VideoDescription, Mode=OneWay}">
+                <Grid ColumnSpacing="4"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                  <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xE768;" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
+                  <TextBlock x:Name="VideoTypeLabel" Grid.Column="1" Text="视频" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
+                  <TextBlock x:Name="VideoDurationLabel" Grid.Column="2" Text="{x:Bind VideoDurationText, Mode=OneWay}" FontSize="10" TextAlignment="Right" Foreground="{ThemeResource MediaBadgeForegroundBrush}" TextTrimming="CharacterEllipsis" />
                 </Grid>
               </Border>
               <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Width="28" Height="28" MinWidth="0" MinHeight="0" Padding="5" CornerRadius="4" BorderThickness="1" Opacity="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" PointerEntered="QuickCollectPointerEntered" PointerExited="QuickCollectPointerExited" GotFocus="QuickCollectFocusChanged" LostFocus="QuickCollectFocusChanged" Unloaded="QuickCollectUnloaded" Click="QuickCollectClicked" DoubleTapped="QuickCollectDoubleTapped" IsEnabled="{x:Bind QuickCollectEnabled, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind CollectionHint, Mode=OneWay}" AutomationProperties.Name="{x:Bind CollectionHint, Mode=OneWay}">
