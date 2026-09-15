@@ -2,6 +2,12 @@ namespace FolderLens.Infrastructure;
 
 public static class RootTaskRetirement
 {
+    public static async Task<CancellationTokenSource> ResumeForNavigation(CancellationTokenSource stopped,Task? scan,Task? metadata,CancellationToken lifetime)
+    {
+        if(!stopped.IsCancellationRequested)return stopped;
+        await Wait(scan,metadata,stopped.Token,lifetime).ConfigureAwait(false);
+        return CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+    }
     public static async Task Wait(Task? scan,Task? metadata,CancellationToken retiredRoot,CancellationToken lifetime)
     {
         foreach(var task in new[]{scan,metadata})

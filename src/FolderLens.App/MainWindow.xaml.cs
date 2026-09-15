@@ -192,7 +192,8 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception error){ShowError(error);}
     }
-    private void CancelScan(object sender,RoutedEventArgs e){activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";}
+    private long scanCancelRevision;
+    private void CancelScan(object sender,RoutedEventArgs e){scanCancelRevision++;activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";}
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
@@ -213,6 +214,10 @@ public sealed partial class MainWindow : Window
                 path=covering.Path;preserveDirectoryScope=true;
             }
         }
+        // Refuse a scan that cannot start before cancelling the current view or
+        // clearing its rows. Existing scope queries remain available at the limit.
+        if(!path.StartsWith("collection:",StringComparison.Ordinal))await catalog.EnsureBrowsingBudget(lifetime.Token);
+        if(closing||navigation!=directoryNavigationRequest)return;
         }
         catch(OperationCanceledException){return;}
         catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
@@ -228,7 +233,7 @@ public sealed partial class MainWindow : Window
             activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
             if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
             RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):path;if(!collectionScope)ShowTreeRoot(path);else activeTreeRoot=null;UpdateNavigationButtons();
-            browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
+            browserRootReady=false;browserScanError=null;browserEmptyError=null;replacingRoot=true;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
             firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
@@ -258,6 +263,7 @@ public sealed partial class MainWindow : Window
                 {reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;}
                 if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=reusable;
             }
+            browserRootReady=true;
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
             var oldHandle=resultHandle;resultHandle=null;
@@ -375,7 +381,7 @@ public sealed partial class MainWindow : Window
     private async Task RefreshQuery(bool preserveViewport=false,bool scanPreview=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
-        if(browserScanError is not null&&!string.Equals(root,RootPath.Text,StringComparison.Ordinal))return;
+        if(!browserRootReady)return;
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;

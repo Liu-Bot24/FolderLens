@@ -7,6 +7,9 @@ public sealed partial class MainWindow
 {
     private string? browserEmptyError;
     private string? browserScanError;
+    // Root identity has been accepted for this view. The address text may be an
+    // editable child path; it cannot determine whether the current query is safe.
+    private bool browserRootReady;
     private void ShowScanError(Exception error)
     {
         browserScanError=UserMessages.Error(error);reconcilePending=false;ShowBrowserError(error);

@@ -10,6 +10,7 @@ public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorker
     public async Task<OpenedRoot> Open(string path,CancellationToken cancellation=default,(string RootId,long Epoch)? ongoingScan=null)
     {
         path=PathRules.ValidateSource(path);
+        await catalog.EnsureBrowsingBudget(cancellation).ConfigureAwait(false);
         var previous=await catalog.Read(c=>
         {
             using var cmd=c.CreateCommand();cmd.CommandText="SELECT root_id,volume_identity,cloud_policy FROM Roots WHERE display_path=$path ORDER BY last_checked_utc_ticks DESC,root_epoch DESC LIMIT 1";cmd.Parameters.AddWithValue("$path",path);
@@ -36,6 +37,8 @@ public sealed class RootIdentityResolver(CatalogStore catalog,string? scanWorker
         // No source identity could be observed while offline. Reopen the last known index, never invent a volume ID.
         return await catalog.Write(c=>
         {
+            if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
+            CompactBrowsingCatalog.EnsureWriteHeadroom(c,64L<<10);
             using var transaction=c.BeginTransaction();ScanRecovery.Recover(c,transaction);string? id=null;bool changed=false,hasIndex=false;
             if(physical is not null)
             {

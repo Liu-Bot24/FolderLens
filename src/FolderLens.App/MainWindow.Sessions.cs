@@ -1,4 +1,5 @@
 using FolderLens.Core;
+using FolderLens.Infrastructure;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -52,13 +53,25 @@ public sealed partial class MainWindow
     {
         saved.Filter.Validate();saved=saved with{Filter=saved.Filter.ForBrowserView()};
         var previous=rootId.Length>0?CaptureView():null;
-        bool sameRoot=previous is not null&&!replacingRoot&&string.Equals(root,saved.Root,StringComparison.Ordinal)&&previous.Filter.HasSameScanPolicy(saved.Filter);
+        bool sameRoot=previous is not null&&browserRootReady&&!replacingRoot&&string.Equals(root,saved.Root,StringComparison.Ordinal)&&previous.Filter.HasSameScanPolicy(saved.Filter);
         restoringView=true;long revision=++viewRestoreRevision,requestedRoot=rootChangeVersion+(sameRoot?0:1);
         pendingViewRestore=new(saved,revision,requestedRoot);
         try
         {
             if(sameRoot&&activeCollectionId is null&&(recheckDirectory||previous!.Filter.DirectoryScope!=saved.Filter.DirectoryScope))
             {
+                if(scanStop.IsCancellationRequested&&!catalog!.BrowsingBudgetReached)
+                {
+                    // Stop remains stopped until explicit directory navigation.
+                    // Retire its work before giving this scope a fresh token; the
+                    // accepted root/epoch and the visible rows stay unchanged.
+                    var stopped=scanStop;
+                    long cancelRevision=scanCancelRevision;
+                    var resumed=await RootTaskRetirement.ResumeForNavigation(stopped,scanTask,metadataTask,lifetime.Token);
+                    if(closing||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion||cancelRevision!=scanCancelRevision||!ReferenceEquals(scanStop,stopped)){resumed.Dispose();return;}
+                    scanStop=resumed;
+                    stopped.Dispose();
+                }
                 await new FolderLens.Infrastructure.ScanDirtyDirectories(catalog!).Mark(rootId,epoch,[new(saved.Filter.DirectoryScope,"BrowseNavigation",true)],lifetime.Token);
                 if(closing||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion)return;
                 reconcilePending=true;PreferScanDirectory(rootId,saved.Filter.DirectoryScope);

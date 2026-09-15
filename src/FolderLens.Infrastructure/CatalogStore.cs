@@ -50,7 +50,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private int browsingBudgetReached;
     public bool BrowsingBudgetReached=>Volatile.Read(ref browsingBudgetReached)!=0;
     internal void MarkBrowsingBudgetReached()=>Volatile.Write(ref browsingBudgetReached,1);
-    internal async Task EnsureBrowsingBudget(CancellationToken cancellation)
+    public async Task EnsureBrowsingBudget(CancellationToken cancellation)
     {
         if(BrowsingBudgetReached)throw new BrowsingBudgetException();
         try{await Write(c=>{CompactBrowsingCatalog.EnsureWriteHeadroom(c,64L<<10);return true;},cancellation).ConfigureAwait(false);}
@@ -249,9 +249,9 @@ public sealed partial class CatalogStore : IAsyncDisposable
         await snapshotGate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
-            // Fixture seeding may leave a large reusable WAL. Release it before starting
-            // the measured read lease; growth under this lease is the actual hazard.
-            await CheckpointCatalog(true,cancellation).ConfigureAwait(false);
+            // Capacity readers may retain an older WAL frame. Never wait for them
+            // on the scan writer's queue just to prepare a new browsing snapshot.
+            await CheckpointCatalog(false,cancellation).ConfigureAwait(false);
             return await reader.Execute(c=>BuildSnapshot(c,filter,epoch,generation,cancellation),cancellation).ConfigureAwait(false);
         }
         finally { Volatile.Write(ref snapshotUnderPressure,0);snapshotGate.Release(); }
