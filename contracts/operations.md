@@ -7,7 +7,7 @@
 | operation | parameters必需字段与限制 | ok响应载荷 |
 |---|---|---|
 | capabilities | 无fileRef，parameters为空ImageParameters默认值；deadline≤30s；使用同一worker预算 | isFinal、RuntimeCapabilities，实际版本、每格式providerAvailable/basicDecodeStatus/fixtureSha256/fullMatrixStatus；加载或基础样本通过不等于完整格式兼容 |
-| probe | fieldGroups：从FieldStates允许组中选；不得为空 | metadata仅对应已请求组；每组state/providerVersion/sourceVersion与可空字段 |
+| probe | readDetails 布尔值，默认 true；false 只读取尺寸、格式、动图与页数，true 额外读取 EXIF/色彩等详细信息 | 基础 metadata 始终返回；readDetails=false 不读取、不返回 details，也不把未请求的信息标记为失败 |
 | thumbnail / fit | targetWidth/targetHeight正整数；frameIndex≥0；fit只contain，不隐式crop | quality、surface或assetToken二选一；actual尺寸/原始尺寸/方向/Provider |
 | fullTile | level≥0，tileX/tileY≥0，tileSize=约定等级（初始1024），pageIndex≥0；动画使用frameIndex≥0且pageIndex=0；静态frameIndex=0；范围实际验证 | 全分辨率层或已标明level的surface；源坐标和边界裁剪；动画返回合成后指定帧及frameIndex，不推进播放游标 |
 | rawEmbedded | targetWidth/targetHeight正整数 | quality=rawEmbedded；实际预览尺寸，不能报告rawDeveloped |

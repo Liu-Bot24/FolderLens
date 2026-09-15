@@ -12,3 +12,7 @@ public sealed class ResizeDivider : Grid
 {
     public ResizeDivider()=>ProtectedCursor=InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
 }
+public sealed class VerticalResizeDivider : Grid
+{
+    public VerticalResizeDivider()=>ProtectedCursor=InputSystemCursor.Create(InputSystemCursorShape.SizeNorthSouth);
+}

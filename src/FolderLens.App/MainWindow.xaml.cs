@@ -432,7 +432,7 @@ public sealed partial class MainWindow : Window
         browserEmptyError=null;UpdateBrowserEmptyState();
         try
         {
-            FilterSpec filter=CurrentFilter();if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
+            FilterSpec filter=CurrentFilter();if(!scanPreview){metadataDemandStop.Cancel();metadataDemandStop.Dispose();metadataDemandStop=new();_=StartMetadataRefresh();}if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
             var activeList=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
             int firstVisible=activeList.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
             string? viewportPath=preserveViewport&&firstVisible>=0&&firstVisible<activeList.Items.Count?BrowserPath(activeList.Items[firstVisible] as FileRow):null;
@@ -918,6 +918,7 @@ public sealed partial class MainWindow : Window
                 if(publicationRows?.Contains(old)!=true)
                 {
                     if(thumbnailRequests.Remove(old,out var request)){request.Cancel();request.Dispose();}
+                    if(propertyCancellations.TryGetValue(old,out var propertyCancellation))propertyCancellation.Cancel();
                     old.Thumbnail=null;
                 }
             }
@@ -960,7 +961,7 @@ public sealed partial class MainWindow : Window
             cacheLease=await thumbnailCache!.TryGet(cacheKey,token);Mark("cacheLookup");
             if(cacheLease is not null)
             {
-                using var stream=cacheLease.OpenRead();var cached=new BitmapImage();await cached.SetSourceAsync(stream.AsRandomAccessStream());if(OwnsRow())row.Thumbnail=cached;return;
+                using var stream=cacheLease.OpenRead();var cached=new BitmapImage();await cached.SetSourceAsync(stream.AsRandomAccessStream());if(OwnsRow()){row.Thumbnail=cached;await ReadDemandedMetadata(row,token,decoder:decoder);if(OwnsRow())await ResolveRow(row,activeId,token);}return;
             }
             if(properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))return;
             if(kind=="image")
@@ -970,7 +971,7 @@ public sealed partial class MainWindow : Window
             }
             else if(kind is "video" or "audio")
             {
-                var info=await media!.Probe(source,token,WorkerPriority.Visible);if(kind=="audio"&&!info.HasCover)return;string directory=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");await media.Cover(source,asset,info,token,edge);
+                var info=await media!.Probe(source,token,WorkerPriority.Visible);await catalog!.ApplyMediaMetadata(row.Item.EntryId,row.Item.Version,SourceRootId(row),SourceRootEpoch(row),info,"ffprobe-v1",token);if(info.Details is {} mediaDetails)await catalog.ApplyFileDetails(row.Item.EntryId,row.Item.Version,SourceRootId(row),SourceRootEpoch(row),mediaDetails,"ffprobe-v1",token);await ResolveRow(row,activeId,token);if(kind=="audio"&&!info.HasCover)return;string directory=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(directory);asset=coverAsset=Path.Combine(directory,Guid.NewGuid().ToString("N")+".png");await media.Cover(source,asset,info,token,edge);
             }
             else return;
             var cacheWrite=await thumbnailCache.StoreOptional(cacheKey,asset,token);cacheLease=cacheWrite.Lease;Mark("cacheStore");
@@ -997,7 +998,8 @@ public sealed partial class MainWindow : Window
         if(operation is null||closing||results is not {} source)return;
         if(refresh)propertyRefreshPending.Add(row);
         if(!propertyRequests.Add(row))return;
-        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token,scanStop.Token);
+        propertyCancellations[row]=request;
         var token=request.Token;string id=rootId;bool slot=false;
         try
         {
@@ -1017,13 +1019,15 @@ public sealed partial class MainWindow : Window
                 propertyRefreshPending.Remove(row);
                 if(!visible.Contains(row)||id!=rootId||results?.Contains(row)!=true)break;
                 token.ThrowIfCancellationRequested();
+                var decoder=thumbnailPool.Dequeue();
+                try{await ReadDemandedMetadata(row,token,decoder:decoder);}finally{thumbnailPool.Enqueue(decoder);}
                 await ResolveRow(row,id,token);
                 if(verifyVideoPropertiesRead is not null)await verifyVideoPropertiesRead(token);
             }while(propertyRefreshPending.Contains(row));
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(!token.IsCancellationRequested)ShowError(ex);}
-        finally{propertyRequests.Remove(row);propertyRefreshPending.Remove(row);if(slot)thumbnailSlots.Release();}
+        finally{propertyCancellations.Remove(row);propertyRequests.Remove(row);propertyRefreshPending.Remove(row);if(slot)thumbnailSlots.Release();}
     }
     private void CancelObsoleteThumbnails(VirtualResults next)
     {
@@ -1209,7 +1213,7 @@ public sealed partial class MainWindow : Window
             foreach(Action action in new Action[]{()=>lifetime.Cancel(),()=>scanStop.Cancel(),()=>queryStop.Cancel(),()=>selectionStop.Cancel(),()=>prefetchStop.Cancel(),()=>physicalTreeStop.Cancel(),()=>ResetViewerGesture(),()=>fitResizeTimer?.Stop(),()=>viewerIdleTimer?.Stop(),()=>viewerGroupTimer?.Stop(),CancelThumbnails,()=>searchTimer?.Stop(),()=>slideTimer?.Stop(),()=>monitor?.Dispose(),()=>animationTimer?.Stop(),StopAudio})
                 await Cleanup(()=>{action();return Task.CompletedTask;});
             await Cleanup(CloseCapacityWindow);
-            if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true)));
+            if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true,treeFraction)));
             await Cleanup(()=>retired);
             await Cleanup(RetireBackgroundScans);if(scanLog is not null)await Cleanup(()=>scanLog.DisposeAsync().AsTask());
             await Cleanup(DisposeMarkdownView);await Cleanup(DisposeTextSession);

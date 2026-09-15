@@ -109,8 +109,9 @@ public sealed class QueryDifferentialTests
         }
         Known(r.Present);Known(f.Recursive||!r.Path.Contains('\\'));Known(f.ShowHidden||!r.Hidden);Known(f.Kinds.Length==0||f.Kinds.Contains(r.Kind));
         if(f.Formats.Length>0)Test("format",v=>f.Formats.Contains((string)v),"identity");
-        if(f.Raw=="only"){Known(r.Kind=="image");Test("raw",v=>(bool)v,"identity");}
-        if(f.Raw=="exclude"&&r.Kind=="image")Test("raw",v=>!(bool)v,"identity");
+        bool raw=r.Fields["raw"] is bool confirmed?confirmed:FileKinds.Raw.Contains(System.IO.Path.GetExtension(r.Path));
+        if(f.Raw=="only")Known(r.Kind=="image"&&raw);
+        if(f.Raw=="exclude"&&r.Kind=="image")Known(!raw);
         if(f.Animation!="any"){Known(r.Kind=="image");Test("animation",v=>(bool)v==(f.Animation=="animated"),"animation");}
         bool GeometryApplicable()=>r.Kind is "image" or "video";
         foreach(var range in f.Ranges)

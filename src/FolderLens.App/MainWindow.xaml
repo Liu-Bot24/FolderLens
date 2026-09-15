@@ -121,10 +121,14 @@
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Reveal}" Tag="Reveal" Click="Reveal" />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.ExternalOpen}" Tag="ExternalOpen" Click="ExternalOpen" />
         <MenuFlyoutItem Text="{x:Bind local:FileCommandLabels.Properties}" Tag="ShowProperties" Click="ShowProperties" />
-      </MenuBarItem>
+              <MenuFlyoutSeparator />
+        <MenuFlyoutItem Text="重命名…  F2" Tag="RenameFile" Click="RenameFile" />
+        <MenuFlyoutItem Text="移动到…" Tag="MoveFile" Click="MoveFile" />
+        <MenuFlyoutItem Text="删除…  Delete" Tag="DeleteFile" Click="DeleteFile" /></MenuBarItem>
       <MenuBarItem Title="查看">
         <MenuFlyoutItem Text="窗口预览 / 返回列表" Tag="TogglePreview" Click="TogglePreview" />
         <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Tag="ToggleFullScreen" Click="ToggleFullScreen" />
+        <MenuFlyoutItem Text="幻灯片设置…" Click="ConfigureSlideshow" />
         <MenuFlyoutItem Text="幻灯片  Ctrl+Space" Tag="ToggleSlideshow" Click="ToggleSlideshow" />
         <MenuFlyoutSeparator />
         <MenuFlyoutItem Text="适应屏幕" Tag="Fit" Click="Fit" />
@@ -190,8 +194,9 @@
     </Grid>
     <Grid x:Name="BodyGrid" Grid.Row="2">
       <Grid.RowDefinitions>
-        <RowDefinition Height="3*" />
-        <RowDefinition Height="2*" />
+        <RowDefinition x:Name="TreeRow" Height="3*" />
+        <RowDefinition Height="6" />
+        <RowDefinition x:Name="PreviewRow" Height="2*" />
       </Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition x:Name="PreviewColumn" Width="300" MinWidth="220" />
@@ -217,10 +222,10 @@
           </DataTemplate></TreeView.ItemTemplate>
         </TreeView>
       </Grid>
-      <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="2" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
+      <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="3" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
         <Border Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
       </local:ResizeDivider>
-      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="2" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="8" Margin="2,0,8,0">
+      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="8" Margin="2,0,8,0">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -384,7 +389,10 @@
           <Slider x:Name="ThumbnailSize" Grid.Column="2" Minimum="100" Maximum="240" Value="144" StepFrequency="8" ValueChanged="ThumbnailSizeChanged" ToolTipService.ToolTip="缩略图大小" />
         </Grid>
       </Grid>
-      <Grid x:Name="PreviewPane" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource BrowserChromeBrush}" Grid.Row="1">
+      <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
+        <Border Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
+      </local:VerticalResizeDivider>
+      <Grid x:Name="PreviewPane" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource BrowserChromeBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />

@@ -40,14 +40,17 @@ public sealed partial class MainWindow
     }
     private async void FillMetadata(object sender,RoutedEventArgs e)
     {
-        try{await StartMetadataRefresh();await RefreshQuery();}
+        try{await StartMetadataRefresh(explicitRequest:true);await RefreshQuery();}
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
     }
     private bool metadataRefreshPending;
-    private Task StartMetadataRefresh()
+    private CancellationTokenSource metadataDemandStop=new();
+    private bool explicitMetadataPending;
+    private Task StartMetadataRefresh(bool explicitRequest=false)
     {
         if(closing||scanStop.IsCancellationRequested)return Task.CompletedTask;
-        metadataRefreshPending=true;
+        if(!explicitRequest&&!MetadataDemand.ForQuery(CurrentFilter())){if(!explicitMetadataPending)metadataRefreshPending=false;return Task.CompletedTask;}
+        explicitMetadataPending|=explicitRequest;metadataRefreshPending=true;
         return metadataTask is {IsCompleted:false}?metadataTask:metadataTask=DrainMetadataRefresh();
     }
     private async Task DrainMetadataRefresh()
@@ -56,18 +59,21 @@ public sealed partial class MainWindow
         long revision=rootChangeVersion;var token=scanStop.Token;
         while(metadataRefreshPending&&!closing&&!token.IsCancellationRequested&&revision==rootChangeVersion)
         {
-            metadataRefreshPending=false;await FillCurrentMetadata();
+            bool all=explicitMetadataPending;explicitMetadataPending=false;
+            metadataRefreshPending=false;await FillCurrentMetadata(all);
         }
     }
-    private async Task FillCurrentMetadata()
+    private async Task FillCurrentMetadata(bool explicitRequest=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(catalog is null||catalog.BrowsingBudgetReached||metadataWorker is null||media is null||rootId.Length==0)return;string activeId=rootId;long revision=rootChangeVersion;var token=scanStop.Token;
+        using var demand=CancellationTokenSource.CreateLinkedTokenSource(token,metadataDemandStop.Token);token=demand.Token;
+        var filter=CurrentFilter();if(!explicitRequest&&!MetadataDemand.ForQuery(filter))return;
         bool Current()=>activeId==rootId&&revision==rootChangeVersion&&!closing&&!token.IsCancellationRequested;
         try
         {
             if(verifyVideoMetadataBarrier is not null)await verifyVideoMetadataBarrier(token);
-            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,null,token,activeCollectionId,observedOnly:true);
+            await new FolderLens.Infrastructure.MetadataPump(catalog,metadataWorker,media).FillAll(activeId,root,epoch,null,token,activeCollectionId,observedOnly:true,filter:filter,readDetails:explicitRequest||filter.Sort.Field=="captured"||filter.Dates.Any(date=>date.Field=="captured"));
             if(Current())
             {
                 // Cover readiness does not imply that catalog metadata was ready when

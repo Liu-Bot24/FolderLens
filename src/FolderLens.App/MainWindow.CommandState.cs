@@ -19,11 +19,13 @@ public sealed partial class MainWindow
     }
     private void UpdateCommandAvailability()
     {
+        UpdateSlideshowCommands();
         bool file=selected?.Item is not null,folder=!string.IsNullOrEmpty(rootId)&&!replacingRoot;
         foreach(var item in MainMenu.Items.SelectMany(menu=>menu.Items).OfType<MenuFlyoutItem>())
         {
             bool? enabled=(item.Tag as string) switch
             {
+                "RenameFile" or "MoveFile" or "DeleteFile"=>file&&!fileOperationBusy,
                 "CopyPath" or "CopyFileReference" or "Reveal" or "ExternalOpen" or "ShowProperties"=>file,
                 "RefreshRoot" or "AdvancedFilters" or "FillMetadata" or "SaveView"=>folder,
                 "ShowCapacity"=>folder&&activeCollectionId is null,

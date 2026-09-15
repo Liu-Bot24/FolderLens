@@ -75,7 +75,7 @@ internal static class WorkerServer
                     var actual=request.Operation=="probe"?(decoder!.Width,decoder.Height,"fit"):decoder!.Render(Path.Combine(taskDirectory,token+".png"),parameters.TargetWidth,parameters.TargetHeight,request.Operation=="fullTile",parameters.TileX,parameters.TileY,request.Operation=="rawEmbedded",thumbnail:request.Operation=="thumbnail");
                     CheckSource();
                     if(request.Operation!="probe" && new FileInfo(Path.Combine(taskDirectory,token+".png")).Length>budget.MaxOutputBytes)throw new InvalidDataException("Output budget exceeded.");
-                    response=response with{Status="ok",Quality=actual.Item3,AssetToken=request.Operation=="probe"?null:token,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,width=actual.Item1,height=actual.Item2,format=decoder.Format,isRaw=decoder.IsRaw,isAnimated=decoder.Animated,pages=decoder.Pages,provider=decoder.Provider,details=request.Operation=="probe"?decoder.ReadDetails():null},WorkerProtocol.Json)};
+                    response=response with{Status="ok",Quality=actual.Item3,AssetToken=request.Operation=="probe"?null:token,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,width=actual.Item1,height=actual.Item2,format=decoder.Format,isRaw=decoder.IsRaw,isAnimated=decoder.Animated,pages=decoder.Pages,provider=decoder.Provider,details=request.Operation=="probe"&&parameters.ReadDetails?decoder.ReadDetails():null},WorkerProtocol.Json)};
                 }
                 catch(Exception ex)
                 {

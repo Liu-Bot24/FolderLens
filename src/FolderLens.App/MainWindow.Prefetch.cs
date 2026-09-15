@@ -143,9 +143,9 @@ public sealed partial class MainWindow
         using var work=browserWork.Enter();if(work is null||closing)return;
         if(selected is null||results is null||prefetchWorker is null||WorkerResources.Shared.Snapshot.UnderPressure)return;
         var sourceResults=results;long ordinal=selected.Ordinal;string sourceRoot=root,sourceRootId=rootId;long sourceEpoch=epoch,sourceGeneration=generation;
-        // A sidebar-sized preload is insufficient when the next action opens full screen.
-        int width=Math.Max(256,(int)(Shell.ActualWidth*Shell.XamlRoot.RasterizationScale)),height=Math.Max(256,(int)(Shell.ActualHeight*Shell.XamlRoot.RasterizationScale));
-        var detailTargets=new List<(FileRow Row,int Width,int Height)>();
+        // Prefetch for the current display size; enlarging the viewer requests more pixels on demand.
+        int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*Shell.XamlRoot.RasterizationScale)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*Shell.XamlRoot.RasterizationScale));
+
         try
         {
             foreach(long index in new[]{ordinal+prefetchDirection,ordinal-prefetchDirection})
@@ -158,7 +158,7 @@ public sealed partial class MainWindow
                 if(properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))continue;
                 if(Stamp(row) is not {} expectedStamp)continue;
                 if(await FindPrefetched(row,width,height,token) is {} ready)
-                {await PreparePrefetchedImage(ready,token);detailTargets.Add((row,ready.Message.Metadata!.Value.GetProperty("width").GetInt32(),ready.Message.Metadata.Value.GetProperty("height").GetInt32()));continue;}
+                {await PreparePrefetchedImage(ready,token);continue;}
                 string path=SourcePath(row);ImageReply? reply=null;
                 var pending=new PendingImagePrefetch(row,sourceRootId,sourceEpoch,sourceGeneration,width,height,token);pendingImagePrefetch=pending;
                 try
@@ -181,21 +181,13 @@ public sealed partial class MainWindow
                     if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView($"Prefetch ready ordinal={row.Ordinal} resolvedMissingProperties={missingProperties}");
                     while(prefetched.Count>2||prefetchBytes>32L*1024*1024)RemovePrefetchedImage(prefetched.Last!.Value);
                     await PreparePrefetchedImage(cached,token);
-                    if(!raw)detailTargets.Add((row,reply.Message.Metadata.Value.GetProperty("width").GetInt32(),reply.Message.Metadata.Value.GetProperty("height").GetInt32()));
+
                 }
                 finally
                 {
                     try{if(reply is not null)await prefetchWorker.ReleaseAsset(reply);}
                     finally{if(ReferenceEquals(pendingImagePrefetch,pending))pendingImagePrefetch=null;pending.Completed.TrySetResult();}
                 }
-            }
-            // Adjacent fit previews get priority. Then warm a bounded central detail region.
-            if(current==selection&&selected is {} active&&AnimationButton.Visibility!=Visibility.Visible&&imagePage==0&&!rawPreviewOnly)
-                detailTargets.Insert(0,(active,(int)sourceWidth,(int)sourceHeight));
-            foreach(var target in detailTargets)
-            {
-                token.ThrowIfCancellationRequested();if(current!=selection||sourceResults!=results)return;
-                await WarmPressDetails(target.Row,target.Width,target.Height,current,token);
             }
         }
         catch(OperationCanceledException){}

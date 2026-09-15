@@ -6,12 +6,12 @@ using FolderLens.Core;
 namespace FolderLens.Infrastructure;
 
 /// <summary>One sequential metadata producer with a bounded, keyset-paged candidate list.</summary>
-public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaTools? media=null,string? scanExecutable=null)
+public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaTools? media=null,string? scanExecutable=null,WorkerPriority priority=WorkerPriority.Metadata)
 {
     private readonly SemaphoreSlim runGate=new(1,1);
     public Task FillGeometry(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation)=>Fill(rootId,root,epoch,progress,false,cancellation);
-    public Task FillAll(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false)=>Fill(rootId,root,epoch,progress,true,cancellation,collectionId,observedOnly);
-    private async Task Fill(string rootId,string root,long epoch,IProgress<long>? progress,bool includeMedia,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false)
+    public Task FillAll(string rootId,string root,long epoch,IProgress<long>? progress,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false,FilterSpec? filter=null,string? entryId=null,bool readDetails=true)=>Fill(rootId,root,epoch,progress,true,cancellation,collectionId,observedOnly,filter,entryId,readDetails);
+    private async Task Fill(string rootId,string root,long epoch,IProgress<long>? progress,bool includeMedia,CancellationToken cancellation,string? collectionId=null,bool observedOnly=false,FilterSpec? filter=null,string? entryId=null,bool readDetails=true)
     {
         if(includeMedia && media is null)throw new InvalidOperationException("视频与音频信息组件尚未配置。");
         await runGate.WaitAsync(cancellation).ConfigureAwait(false);
@@ -47,6 +47,23 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                     cmd.Parameters.AddWithValue("$observed",observedOnly&&collectionId is null?1:0);cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$epoch",epoch);cmd.Parameters.AddWithValue("$after",after);cmd.Parameters.AddWithValue("$media",includeMedia?1:0);cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);
                     cmd.Parameters.AddWithValue("$collection",collectionId??(object)DBNull.Value);
                     if(collectionId is not null)cmd.CommandText=cmd.CommandText.Replace("WHERE root_id=$root","WHERE ((SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id),location_key) IN(SELECT directory_location_id,location_key FROM CollectionMembers WHERE collection_id=$collection)").Replace("AND r.root_epoch=$epoch","");
+                    if(!readDetails)
+                    {
+                        // Basic probes must not be repeated because EXIF/color were not requested.
+                        cmd.CommandText=cmd.CommandText.Replace("fs.field_group='captureTime'","fs.field_group=CASE WHEN f.kind='image' THEN 'imageGeometry' ELSE 'captureTime' END")
+                            .Replace("fs.field_group='imageColor'","fs.field_group='imageGeometry'");
+                    }
+                    if(filter is not null)
+                    {
+                        CatalogStore.RegisterFunctions(c);var query=FilterSql.Build(filter);
+                        cmd.CommandText=cmd.CommandText.Replace("ORDER BY entry_id LIMIT 256",$"AND ({query.CandidateExpression}) AND ({query.StateExpression})<>'NoMatch' ORDER BY entry_id LIMIT 256");
+                        foreach(var parameter in query.Parameters)cmd.Parameters.AddWithValue(parameter.Key,parameter.Value);
+                    }
+                    if(entryId is not null)
+                    {
+                        cmd.CommandText=cmd.CommandText.Replace("ORDER BY entry_id LIMIT 256","AND f.entry_id=$requestedEntry ORDER BY entry_id LIMIT 256");
+                        cmd.Parameters.AddWithValue("$requestedEntry",entryId);
+                    }
                     using var rows=cmd.ExecuteReader();var entries=new List<(string Id,string Path,long Version,string Kind,long Length,long Modified,string RootId,string Root,long Epoch)>();
                     while(rows.Read())entries.Add((rows.GetString(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetInt64(4),rows.GetInt64(5),rows.GetString(6),rows.GetString(7),rows.GetInt64(8)));return entries;
                 },cancellation).ConfigureAwait(false);
@@ -71,16 +88,15 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                         if(await sourceProbe.Read(path,cancellation).ConfigureAwait(false)!=before)throw new IOException("FileChanged");
                         if(entry.Kind=="image")
                         {
-                            var reply=await worker.Request(path,"probe",new(entry.RootId,entry.Epoch,1,1,entry.Version,1),new(),cancellation,before).ConfigureAwait(false);
+                            var reply=await worker.Request(path,"probe",new(entry.RootId,entry.Epoch,1,1,entry.Version,1),new(ReadDetails:readDetails),cancellation,before).ConfigureAwait(false);
                             var metadata=reply.Message.Metadata?.ValueKind==System.Text.Json.JsonValueKind.Object?reply.Message.Metadata.Value:throw new InvalidDataException("ProbeFailed");
                             if(await sourceProbe.Read(path,cancellation).ConfigureAwait(false)!=before)throw new IOException("FileChanged");
                             await catalog.ApplyImageMetadata(entry.Id,entry.Version,entry.RootId,entry.Epoch,metadata.GetProperty("width").GetInt32(),metadata.GetProperty("height").GetInt32(),metadata.GetProperty("format").GetString()!,metadata.GetProperty("isRaw").GetBoolean(),metadata.GetProperty("isAnimated").GetBoolean(),metadata.GetProperty("provider").GetString()!,cancellation,metadata.GetProperty("pages").GetInt32()).ConfigureAwait(false);
-                            var details=metadata.GetProperty("details").Deserialize<ContentMetadataDetails>(WorkerProtocol.Json)??throw new InvalidDataException("MetadataDetailsMissing");
-                            await catalog.ApplyFileDetails(entry.Id,entry.Version,entry.RootId,entry.Epoch,details,metadata.GetProperty("provider").GetString()!,cancellation).ConfigureAwait(false);
+                            if(readDetails){var details=metadata.GetProperty("details").Deserialize<ContentMetadataDetails>(WorkerProtocol.Json)??throw new InvalidDataException("MetadataDetailsMissing");await catalog.ApplyFileDetails(entry.Id,entry.Version,entry.RootId,entry.Epoch,details,metadata.GetProperty("provider").GetString()!,cancellation).ConfigureAwait(false);}
                         }
                         else
                         {
-                            var metadata=await media!.Probe(path,cancellation).ConfigureAwait(false);
+                            var metadata=await media!.Probe(path,cancellation,priority).ConfigureAwait(false);
                             if(await sourceProbe.Read(path,cancellation).ConfigureAwait(false)!=before)throw new IOException("FileChanged");
                             await catalog.ApplyMediaMetadata(entry.Id,entry.Version,entry.RootId,entry.Epoch,metadata,"ffprobe-v1",cancellation).ConfigureAwait(false);
                             if(metadata.Details is {} details)await catalog.ApplyFileDetails(entry.Id,entry.Version,entry.RootId,entry.Epoch,details,"ffprobe-v1",cancellation).ConfigureAwait(false);
@@ -96,7 +112,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                     catch(Exception ex) when(ex is not OperationCanceledException)
                     {
                         string error=ex is TimeoutException or InvalidDataException {Message:"Timeout"}?"Timeout":ex is UnauthorizedAccessException?"AccessDenied":ex is IOException {Message:"FileChanged"} or InvalidDataException {Message:"FileChanged"}?"FileChanged":ex is FileNotFoundException?"NotFound":ex is InvalidDataException {Message:"UnsupportedCodec"}?"UnsupportedCodec":"ProbeFailed";
-                        await catalog.MarkMetadataFailure(entry.Id,entry.Version,entry.RootId,entry.Epoch,entry.Kind=="image"?["identity","imageGeometry","animation","captureTime","imageColor"]:["identity","media","imageGeometry","captureTime"],error,error=="UnsupportedCodec",cancellation).ConfigureAwait(false);
+                        await catalog.MarkMetadataFailure(entry.Id,entry.Version,entry.RootId,entry.Epoch,entry.Kind=="image"?(readDetails?["identity","imageGeometry","animation","captureTime","imageColor"]:["identity","imageGeometry","animation"]):["identity","media","imageGeometry","captureTime"],error,error=="UnsupportedCodec",cancellation).ConfigureAwait(false);
                     }
                     progress?.Report(++completed);
                 }
