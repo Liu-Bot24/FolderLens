@@ -10,6 +10,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private Func<CancellationToken,Task>? verifyMediaCoverBarrier;
     private async Task VerifyPreviewCompletion(string source,Dictionary<string,object> report)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -64,11 +65,17 @@ public sealed partial class MainWindow
             if(view.SelectedRanges.Sum(r=>(long)r.Length)!=2)throw new InvalidOperationException("追加框选未保留原选择。");
             marqueeBox!.Visibility=Visibility.Collapsed;report[details?"detailsMarquee":"thumbnailMarquee"]=true;
         }
-        await Choose("generated.mp4");if(videoPlayer is not null)throw new InvalidOperationException("选择视频自动创建了播放器。");
+        var coverEntered=new TaskCompletionSource();var coverRelease=new TaskCompletionSource();
+        verifyMediaCoverBarrier=async token=>{coverEntered.TrySetResult();await coverRelease.Task;throw new InvalidDataException("Generated delayed cover failure");};
+        var choosingVideo=Choose("generated.mp4");await coverEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        if(videoPlayer is not null)throw new InvalidOperationException("选择视频自动创建了播放器。");
         var clock=Stopwatch.StartNew();await PlayVideoCore();
         await WaitUntil(()=>videoPlayer?.PlaybackSession.Position>TimeSpan.FromMilliseconds(300),TimeSpan.FromSeconds(12));
         var player=videoPlayer!;if(player.PlaybackSession.NaturalVideoWidth==0||VideoHost.Visibility!=Visibility.Visible)throw new InvalidOperationException("视频没有产生有效画面尺寸。");
         report["videoFirstPlaybackMs"]=clock.Elapsed.TotalMilliseconds;
+        coverRelease.TrySetResult();await choosingVideo;verifyMediaCoverBarrier=null;
+        if(previewFailure is not null||loadingBadge!.Visibility!=Visibility.Collapsed||QualityLabel.Text!="视频预览")throw new InvalidOperationException("迟到的封面失败覆盖了正在播放的视频状态："+QualityLabel.Text);
+        report["lateCoverCannotOverwritePlayback"]=true;
         await SetImmersive(true);if(!ReferenceEquals(player,videoPlayer))throw new InvalidOperationException("窗口预览重复创建播放器。");await ReturnToBrowser();
         player.Pause();await Task.Delay(120);double paused=player.PlaybackSession.Position.TotalMilliseconds;await Task.Delay(200);
         if(Math.Abs(player.PlaybackSession.Position.TotalMilliseconds-paused)>120)throw new InvalidOperationException("暂停没有停止播放。");

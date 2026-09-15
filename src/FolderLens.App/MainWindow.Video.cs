@@ -12,6 +12,7 @@ public sealed partial class MainWindow
     private MediaPlayerElement? videoElement;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? videoOpenTimer;
     private bool videoStarting;
+    private CancellationTokenSource? mediaCoverStop;
 
     private void StopVideo()
     {
@@ -44,6 +45,7 @@ public sealed partial class MainWindow
             }
             var target=await ExternalFileLaunch.Resolve(catalog!,prefetchSourceProbe,SourceRootPath(row),SourceRootId(row),row.Item!.EntryId,row.Item.Version,approvedCloud.Contains(CloudKey(row)),selectionStop.Token);
             if(current!=selection||closing)return;
+            mediaCoverStop?.Cancel();
             StopAudio();
             var player=new MediaPlayer{AutoPlay=false,Volume=.5};videoPlayer=player;
             player.CommandManager.IsEnabled=false;
