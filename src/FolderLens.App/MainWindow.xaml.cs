@@ -99,6 +99,7 @@ public sealed partial class MainWindow : Window
         animationTimer=DispatcherQueue.CreateTimer();animationTimer.IsRepeating=false;animationTimer.Tick+=async(_,_)=>await AdvanceAnimation(false);
         AppWindow.Changed+=(_,_)=>{if(!AppWindow.IsVisible||AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter {State:Microsoft.UI.Windowing.OverlappedPresenterState.Minimized})PauseAnimationForDetail();};
         InitializeAudio();
+        InitializeMarquee();
         WorkerResources.Shared.MemoryPressure+=OnPrefetchMemoryPressure;
         StartupStage("constructWindow");
     }
@@ -402,7 +403,7 @@ public sealed partial class MainWindow : Window
             if(force&&report.State=="ready")ClearScanError();
             if(report.State is "ready" or "missing" or "partial")
             {
-                await RefreshQuery(preserveViewport:true);
+                await RefreshQuery(preserveViewport:true,scanPreview:!force);
                 if(rootVersion!=rootChangeVersion||closing||rootToken.IsCancellationRequested)return;
                 if(report.State=="missing"){ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
             }
@@ -617,7 +618,7 @@ public sealed partial class MainWindow : Window
         AnimationButton.Visibility=ReplayAnimationButton.Visibility=Visibility.Collapsed;
         pendingAnimationBitmap?.Dispose();pendingAnimationBitmap=null;animationFrameIndex=animationNextFrame=0;animationNeedsOpen=true;animationDeadline=0;animationCompletedLoops=0;animationCompleted=false;animationRevision++;
         if(selected is {} previous&&previous.Ordinal!=row.Ordinal)prefetchDirection=row.Ordinal>previous.Ordinal?1:-1;
-        if(!CanAdoptPrefetch(row))prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
+        if(!CanAdoptPrefetch(row))prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopVideo();StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
         MarkdownHost.Visibility=Visibility.Collapsed;markdownImages.Clear();
         selected=row;requestedImagePage=null;selectionStop.Cancel();selectionStop.Dispose();selectionStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var token=selectionStop.Token;long current=++selection;PreparePreview();FileTitle.Text=row.Name;QualityLabel.Text="正在读取…";
         UpdateViewerInformation();BeginPreviewDiagnostics(current);
@@ -653,6 +654,7 @@ public sealed partial class MainWindow : Window
         }
         else if(kind is "text" or "markdown")
         {
+            RecordPreviewStage(current,"textRead");
             if(bookmark is not null)
             {
                 restoringTextEncoding=true;
@@ -996,11 +998,14 @@ public sealed partial class MainWindow : Window
     {
         using var operation=browserWork.Enter();
         if(operation is null||closing||results is not {} source)return;
+        string id=rootId;long requestedRoot=rootChangeVersion;
+        do
+        {
         if(refresh)propertyRefreshPending.Add(row);
         if(!propertyRequests.Add(row)){if(propertyCancellations.TryGetValue(row,out var pending)&&pending.IsCancellationRequested)propertyRetryPending.Add(row);return;}
         using var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         propertyCancellations[row]=request;
-        var token=request.Token;string id=rootId;long requestedRoot=rootChangeVersion;bool slot=false;
+        var token=request.Token;bool slot=false;
         try
         {
             while(true)
@@ -1030,10 +1035,12 @@ public sealed partial class MainWindow : Window
         finally
         {
             propertyCancellations.Remove(row);propertyRequests.Remove(row);propertyRefreshPending.Remove(row);if(slot)thumbnailSlots.Release();
-            bool retry=propertyRetryPending.Remove(row);
-            if(retry&&!closing&&requestedRoot==rootChangeVersion&&id==rootId&&visible.Contains(row)&&results?.Contains(row)==true)
-                await LoadRowProperties(row,true);
+            refresh=propertyRetryPending.Remove(row);
         }
+        // The per-attempt CTS leaves scope before another attempt starts. One
+        // owned operation covers the loop and shutdown waits for that owner.
+        }
+        while(refresh&&!closing&&requestedRoot==rootChangeVersion&&id==rootId&&visible.Contains(row)&&results is {} next&&next.Contains(row)&&(source=next) is not null);
     }
     private void CancelObsoleteThumbnails(VirtualResults next)
     {
@@ -1075,6 +1082,8 @@ public sealed partial class MainWindow : Window
         textWindowStop.Cancel();textWindowStop.Dispose();textWindowStop=CancellationTokenSource.CreateLinkedTokenSource(cancellation,textSessionStop.Token);var token=textWindowStop.Token;
         var page=await CurrentTextClient().ReadWindow(offset,32*1024,token);
         if(current!=selection||sessionVersion!=textSessionGeneration||windowVersion!=textWindowGeneration||token.IsCancellationRequested)return;previousSearch=null;displayedText=page;textStart=page.Start;textNext=page.Next;TextContent.Text=page.Text;MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;TextOffset.Value=page.Start;TextScroll.ChangeView(0,0,null,true);QualityLabel.Text=$"{page.Encoding} · 字节 {page.Start:N0}–{page.Next:N0} / {page.Length:N0}";UpdateReaderControls();
+        previewFailure=null;if(!previewLoading&&loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;
+        RecordPreviewStage(current,"textPresented");scanLog?.Write("text-window",new{request=current,encoding=page.Encoding,page.Start,page.Next,page.Length});
     }
     private async void TextNext(object sender,RoutedEventArgs e){try{await LoadText(textNext,selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}}
     private async void TextPrevious(object sender,RoutedEventArgs e){try{await LoadText(Math.Max(0,textStart-32*1024),selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}}
@@ -1178,7 +1187,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception ex){if(current==selection&&!closing)ShowError(ex);}
     }
-    private async void OpenSelected(object sender,DoubleTappedRoutedEventArgs e){if(selected is null)return;if(selected.Kind=="image")await EnterFullScreen();else if(selected.Kind is "text" or "markdown")await SetImmersive(true);else if(selected.Kind=="audio")PlayAudio(sender,new());else ExternalOpen(sender,new RoutedEventArgs());}
+    private async void OpenSelected(object sender,DoubleTappedRoutedEventArgs e){if(selected is null)return;if(selected.Kind=="image")await EnterFullScreen();else if(selected.Kind is "text" or "markdown")await SetImmersive(true);else if(selected.Kind=="audio")PlayAudio(sender,new());else if(selected.Kind=="video"&&internalVideoByDefault){await SetImmersive(true);await PlayVideoCore();}else ExternalOpen(sender,new RoutedEventArgs());}
     private async void SaveView(object sender,RoutedEventArgs e)
     {
         try
@@ -1217,7 +1226,7 @@ public sealed partial class MainWindow : Window
         try
         {
             SavedView? lastSession=null;await Cleanup(()=>{lastSession=CaptureClosingView();return Task.CompletedTask;});
-            foreach(Action action in new Action[]{()=>lifetime.Cancel(),()=>scanStop.Cancel(),()=>queryStop.Cancel(),()=>selectionStop.Cancel(),()=>prefetchStop.Cancel(),()=>physicalTreeStop.Cancel(),()=>ResetViewerGesture(),()=>fitResizeTimer?.Stop(),()=>viewerIdleTimer?.Stop(),()=>viewerGroupTimer?.Stop(),CancelThumbnails,()=>searchTimer?.Stop(),()=>slideTimer?.Stop(),()=>monitor?.Dispose(),()=>animationTimer?.Stop(),StopAudio})
+            foreach(Action action in new Action[]{()=>lifetime.Cancel(),()=>scanStop.Cancel(),()=>queryStop.Cancel(),()=>selectionStop.Cancel(),()=>prefetchStop.Cancel(),()=>physicalTreeStop.Cancel(),()=>ResetViewerGesture(),()=>fitResizeTimer?.Stop(),()=>viewerIdleTimer?.Stop(),()=>viewerGroupTimer?.Stop(),CancelThumbnails,()=>searchTimer?.Stop(),()=>slideTimer?.Stop(),()=>monitor?.Dispose(),()=>animationTimer?.Stop(),StopVideo,StopAudio})
                 await Cleanup(()=>{action();return Task.CompletedTask;});
             await Cleanup(CloseCapacityWindow);
             if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true,treeFraction)));

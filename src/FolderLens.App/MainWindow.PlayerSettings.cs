@@ -5,6 +5,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private bool internalVideoByDefault;
     private async Task RestorePlayerPreferences()
     {
         var current = await settings!.Load<PlayerPreferences>("player-preferences.json")
@@ -16,6 +17,7 @@ public sealed partial class MainWindow
     {
         playerExecutable = string.IsNullOrWhiteSpace(value.Executable) ? null : value.Executable;
         playerSupportsPlaylists = playerExecutable is not null && value.SupportsPlaylists;
+        internalVideoByDefault=value.InternalVideo;
         UpdatePlaylistCommand();
     }
 
@@ -28,7 +30,7 @@ public sealed partial class MainWindow
     private async void ConfigurePlayer(object sender, RoutedEventArgs e)
     {
         using var operation = browserWork.Enter(); if (operation is null || closing) return;
-        var dialog = new PlayerSettingsDialog(new(playerExecutable, playerSupportsPlaylists), async () =>
+        var dialog = new PlayerSettingsDialog(new(playerExecutable, playerSupportsPlaylists,internalVideoByDefault), async () =>
         {
             var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".exe");
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));

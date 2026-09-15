@@ -58,18 +58,31 @@ public sealed partial class MainWindow
         if(reads!=1)throw new InvalidOperationException("停止扫描阻止属性读取。");
         report["propertiesAfterStop"]=true;
         Stage("properties-recycle");CancelThumbnails();var container=new GridViewItem();BindVisibleContainer(FilesGrid,container,row);
-        var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var released=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);reads=0;
-        verifyVideoPropertiesRead=async _=>{if(++reads==1){entered.TrySetResult();await released.Task;}};
+        var entered=Enumerable.Range(0,4).Select(_=>new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var released=Enumerable.Range(0,4).Select(_=>new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var retiredRequests=new List<CancellationTokenSource>();reads=0;
+        verifyVideoPropertiesRead=async _=>{int index=reads++;entered[index].TrySetResult();await released[index].Task;};
         var loading=LoadRowProperties(row);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            BindVisibleContainer(FilesGrid,container,null);BindVisibleContainer(FilesGrid,container,row);
-            await LoadRowProperties(row);if(reads!=1)throw new InvalidOperationException("旧请求退出前启动了并发属性生产者。");
+            for(int index=0;index<4;index++)
+            {
+                await entered[index].Task.WaitAsync(TimeSpan.FromSeconds(5));
+                foreach(var retiredRequest in retiredRequests)
+                {
+                    bool disposed=false;try{_ = retiredRequest.Token;}catch(ObjectDisposedException){disposed=true;}
+                    if(!disposed)throw new InvalidOperationException("后继属性请求运行时，旧 CTS 仍未释放。");
+                }
+                if(index==3)break;
+                retiredRequests.Add(propertyCancellations[row]);
+                BindVisibleContainer(FilesGrid,container,null);BindVisibleContainer(FilesGrid,container,row);
+                await LoadRowProperties(row);if(reads!=index+1)throw new InvalidOperationException("旧请求退出前启动了并发属性生产者。");
+                released[index].TrySetResult();
+            }
         }
-        finally{released.TrySetResult();}
+        finally{foreach(var releaseRequest in released)releaseRequest.TrySetResult();}
         await loading.WaitAsync(TimeSpan.FromSeconds(5));verifyVideoPropertiesRead=null;
-        if(reads!=2||propertyRequests.Count!=0||propertyCancellations.Count!=0||propertyRetryPending.Count!=0)throw new InvalidOperationException("重现行的属性请求未接续或未退场。");
+        if(reads!=4||propertyRequests.Count!=0||propertyCancellations.Count!=0||propertyRetryPending.Count!=0)throw new InvalidOperationException("重现行的属性请求未接续或未退场。");
         report["recycledRowSingleSuccessor"]=true;
         // Actual dialog Save button, deliberately blocked settings destination.
         Stage("settings-dialog");Directory.CreateDirectory(Path.Combine(dataDirectory,"config","slideshow.json"));var before=slideshowPreferences;

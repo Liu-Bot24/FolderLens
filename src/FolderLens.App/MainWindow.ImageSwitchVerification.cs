@@ -123,7 +123,8 @@ public sealed partial class MainWindow
         if(results is null||results.Count<12)throw new InvalidOperationException("切图验证需要至少十二张图片。");
         // The real viewer entry requires a selected file. An empty selection silently
         // stays in the sidebar and must never masquerade as a large-view benchmark.
-        await SelectPreview((FileRow)results[0]!);await SetImmersive(true);Shell.UpdateLayout();
+        if(!await SelectBrowserOrdinal(results,0,lifetime.Token))throw new InvalidOperationException("切图验证选择被取消。");await SetImmersive(true);Shell.UpdateLayout();
+        report["entryViewport"]=new{immersive,selected=selected?.Kind,width=ImageCanvas.ActualWidth,height=ImageCanvas.ActualHeight,shellWidth=Shell.ActualWidth,shellHeight=Shell.ActualHeight,quality=QualityLabel.Text};
         if(!immersive||ImageCanvas.ActualWidth<Shell.ActualWidth*.8||ImageCanvas.ActualHeight<Shell.ActualHeight*.6)
             throw new InvalidOperationException("切图测试未进入实际大图查看布局。");
         prefetchStop.Cancel();if(prefetchTask is not null)await prefetchTask;ClearPrefetchedImages();ClearImage();

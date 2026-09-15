@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace FolderLens.App;
 
-internal sealed record PlayerPreferences(string? Executable = null, bool SupportsPlaylists = false);
+internal sealed record PlayerPreferences(string? Executable = null, bool SupportsPlaylists = false, bool InternalVideo = false);
 
 internal sealed partial class PlayerSettingsDialog : ContentDialog
 {
@@ -13,6 +13,7 @@ internal sealed partial class PlayerSettingsDialog : ContentDialog
     internal readonly ComboBox Mode = new() { Header = "打开视频的方式", ItemsSource = new[] { "系统默认播放器", "指定播放器" }, HorizontalAlignment = HorizontalAlignment.Stretch };
     internal readonly TextBox PathInput = new() { Header = "播放器程序", PlaceholderText = "选择播放器的 .exe 文件" };
     internal readonly CheckBox Playlists = new() { Content = "此播放器支持 M3U8 播放列表" };
+    internal readonly CheckBox InternalVideo = new() { Content = "双击视频时使用内置播放" };
     internal readonly InfoBar Error = new() { Severity = InfoBarSeverity.Error, IsClosable = false };
     private readonly StackPanel custom = new() { Spacing = 12 };
     private readonly Button choose = new() { Content = "浏览…", HorizontalAlignment = HorizontalAlignment.Right };
@@ -30,7 +31,8 @@ internal sealed partial class PlayerSettingsDialog : ContentDialog
         this.save = save; stop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Title = "视频播放器"; PrimaryButtonText = "保存"; CloseButtonText = "取消"; DefaultButton = ContentDialogButton.Primary;
         var panel = new StackPanel { Spacing = 20, MaxWidth = 480, HorizontalAlignment = HorizontalAlignment.Stretch };
-        panel.Children.Add(new TextBlock { Text = "在 FolderLens 中查看视频封面，使用本地播放器播放。", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "左下角的播放按钮始终使用内置预览。双击视频默认使用外部播放器，也可在下方改为内置播放。", TextWrapping = TextWrapping.Wrap });
+        InternalVideo.IsChecked=current.InternalVideo;panel.Children.Add(InternalVideo);
         panel.Children.Add(Mode);
         detected.Children.Add(discoveryState); panel.Children.Add(detected);
         custom.Children.Add(PathInput); custom.Children.Add(choose); custom.Children.Add(Playlists); panel.Children.Add(custom);
@@ -78,7 +80,7 @@ internal sealed partial class PlayerSettingsDialog : ContentDialog
             if (path is not null && (!System.IO.Path.IsPathFullyQualified(path) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !await Exists(path, stop.Token)))
                 throw new InvalidDataException("请选择存在的播放器 EXE 文件，或切换为系统默认播放器。");
             stop.Token.ThrowIfCancellationRequested();
-            await save(new(path, path is not null && Playlists.IsChecked == true), stop.Token);
+            await save(new(path, path is not null && Playlists.IsChecked == true, InternalVideo.IsChecked == true), stop.Token);
             if (closed) return false;
             Error.IsOpen = false; return true;
         }

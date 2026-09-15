@@ -95,6 +95,7 @@ public sealed partial class MainWindow
     }
     private async void ViewerKeyDown(object sender,KeyRoutedEventArgs e)
     {
+        if(e.Key==VirtualKey.Escape&&marqueeView is not null){EndMarquee(true);e.Handled=true;return;}
         if(e.Handled)return;var modifiers=ViewerModifiers();var binding=ViewerBindings.FirstOrDefault(b=>b.Key==e.Key&&b.Modifiers==modifiers);
         if(binding is null||!CanRunViewerBinding(binding,e.OriginalSource as DependencyObject))return;
         e.Handled=true;await RunViewerAction(binding.Action);
@@ -340,7 +341,7 @@ public sealed partial class MainWindow
         else if(completed==ViewerGesture.Dragging)await RefreshViewerPixels();
     }
     private async void ViewerDoubleTapped(object sender,DoubleTappedRoutedEventArgs e)
-    {if(selected?.Kind=="video"){e.Handled=true;ExternalOpen(sender,new());return;}if(!immersive&&!fullScreen)return;e.Handled=true;ResetViewerGesture();await RunViewerAction(ViewerAction.ReturnBrowser);}
+    {if(selected?.Kind=="video"){e.Handled=true;await PlayVideoCore();return;}if(!immersive&&!fullScreen)return;e.Handled=true;ResetViewerGesture();await RunViewerAction(ViewerAction.ReturnBrowser);}
     private void ViewerRightTapped(object sender,RightTappedRoutedEventArgs e)
     {if(selected is null)return;e.Handled=true;ResetViewerGesture();ShowViewerContextMenu(e.GetPosition(ImageCanvas));}
     private void ResetViewerGesture(bool cancelTap=true,bool keepDetails=false)

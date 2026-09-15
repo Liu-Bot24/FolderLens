@@ -44,7 +44,7 @@ public sealed partial class MainWindow
     private Task ResetTextSession()
     {
         textSessionStop.Cancel();textSessionStop.Dispose();textSessionStop=CancellationTokenSource.CreateLinkedTokenSource(selectionStop.Token,lifetime.Token);textSessionGeneration++;
-        textWindowStop.Cancel();textSearchStop.Cancel();textSearchGeneration++;textSearchRunning=false;previousSearch=null;displayedText=null;remoteText=null;TextLineStatus.Text="正在读取文本…";
+        textWindowStop.Cancel();textSearchStop.Cancel();textSearchGeneration++;textSearchRunning=false;previousSearch=null;displayedText=null;remoteText=null;TextContent.Text="";TextLineStatus.Text="正在读取文本…";
         textCopyStop?.Cancel();textCopyGeneration++;wholeTextSelected=false;TextSelectionStatus.Text="";ClearTextSearchResults();
         return Task.CompletedTask;
     }

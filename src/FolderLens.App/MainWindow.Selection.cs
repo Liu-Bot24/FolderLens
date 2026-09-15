@@ -30,6 +30,7 @@ public sealed partial class MainWindow
     private HashSet<FileRow> firstPageRows=[];
     private void AttachBrowserView(object? source)
     {
+        EndMarquee(false);
         // A collapsed ListView still receives every notification and may build a
         // nonvirtual item cache. Only the displayed view owns a source subscription.
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
