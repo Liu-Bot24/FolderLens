@@ -72,7 +72,7 @@ public sealed partial class MainWindow
     {
         if(row.HydrationState!="placeholder"||approvedCloud.Contains(CloudKey(row)))return current==selection;
         var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="读取在线文件",Content="云存储提供方可能下载此文件的内容，会使用网络与本地磁盘空间。只读取当前选中的文件。",PrimaryButtonText="读取并预览",CloseButtonText="取消"};
-        if(await dialog.ShowAsync()!=ContentDialogResult.Primary||current!=selection)return false;
+        if(await ShowOwnedDialog(dialog)!=ContentDialogResult.Primary||current!=selection||closing||lifetime.IsCancellationRequested)return false;
         if(approvedCloud.Count>=256)approvedCloud.Clear();approvedCloud.Add(CloudKey(row));cloudPreviewButton!.Visibility=Visibility.Collapsed;return true;
     }
     private static bool IsSourceUnavailable(Exception error)=>error is System.ComponentModel.Win32Exception win32

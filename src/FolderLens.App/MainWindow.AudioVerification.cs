@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         try
         {
             PlayAudio(this,new RoutedEventArgs());
-            await WaitUntil(()=>audio is null&&AudioState.Text.Contains("失败"),TimeSpan.FromSeconds(8));
+            await WaitUntil(()=>audio is null&&AudioState.Text.Contains("无法播放此音频"),TimeSpan.FromSeconds(8));
             if(audioTimer!.IsRunning||AudioPosition.IsEnabled||AudioPlayButton.Content as string!="播放")throw new InvalidOperationException("失败后试听控件未复位。");
             report["nativeMediaFailureRecovered"]=true;
 

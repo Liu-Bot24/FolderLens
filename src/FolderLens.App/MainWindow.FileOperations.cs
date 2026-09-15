@@ -9,6 +9,7 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private bool fileOperationBusy;
+    private FileRow? CurrentFileOperationSelection()=>ActiveBrowser.SelectedRanges.Sum(range=>(long)range.Length)==1?SelectionPreview(ActiveBrowser):null;
     private async void RenameFile(object sender,RoutedEventArgs e)=>await OperateFile(FileOperationKind.Rename);
     private async void MoveFile(object sender,RoutedEventArgs e)=>await OperateFile(FileOperationKind.Move);
     private async void DeleteFile(object sender,RoutedEventArgs e)=>await OperateFile(FileOperationKind.Recycle);
@@ -21,7 +22,8 @@ public sealed partial class MainWindow
         bool filesystemCompleted=false;
         bool OwnsOperation()
         {
-            bool owns=!closing&&rootVersion==rootChangeVersion&&selected?.Item is {} current&&SameCollectionObservation(current,item);
+            bool owns=!closing&&rootVersion==rootChangeVersion&&selected?.Item is {} current&&SameCollectionObservation(current,item)&&
+                CurrentFileOperationSelection()?.Item is {} listed&&SameCollectionObservation(listed,item);
             if(!owns)RecordWebView($"FileOperation superseded closing={closing} root={rootVersion}/{rootChangeVersion} selected={selected?.Item?.EntryId} expected={item.EntryId}");
             return owns;
         }
@@ -31,6 +33,7 @@ public sealed partial class MainWindow
             {
                 await ShowOwnedDialog(new ContentDialog{XamlRoot=Shell.XamlRoot,Title="请选择一个文件",Content="重命名、移动和删除目前每次操作一个文件。",CloseButtonText="关闭"});return;
             }
+            if(!OwnsOperation()){Status.Text="选择已变化，请重新选择要操作的文件。";return;}
             var target=await store.ResolveFileOperation(item,lifetime.Token);
             source=target.Path;
             if(!OwnsOperation())return;
