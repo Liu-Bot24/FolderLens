@@ -6,6 +6,27 @@ namespace FolderLens.UnitTests;
 public sealed class RawPreviewTests
 {
     [Fact]
+    public async Task SameRawCanResizeEmbeddedPreviewWithoutReopeningOrDeveloping()
+    {
+        var project=new DirectoryInfo(AppContext.BaseDirectory);
+        while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;
+        Assert.NotNull(project);
+        string input=Path.Combine(project.FullName,"fixtures","public","sony-a7r4a-14bit.ARW");
+        string exe=Path.Combine(project.FullName,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
+        await using var worker=new WorkerClient(exe,Path.Combine(Path.GetTempPath(),"FolderLens-raw-preview",Guid.NewGuid().ToString("N")));
+        string? resizedHash=null;
+        foreach(int edge in new[]{320,3840,800,4096})
+        {
+            var reply=await worker.Request(input,"rawEmbedded",new("fixture",1,1,1,1,1),new(edge,edge),CancellationToken.None);
+            try{Assert.Equal("rawEmbedded",reply.Message.Quality);Assert.True(new FileInfo(reply.AssetPath!).Length>0);if(edge==4096)resizedHash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(reply.AssetPath!)));}
+            finally{await worker.ReleaseAsset(reply);}
+        }
+        // Compare the complete encoded pixels with a freshly opened decoder, not just a successful status.
+        var fresh=await worker.Request(input,"rawEmbedded",new("fixture",1,1,2,2,1),new(4096,4096),CancellationToken.None);
+        try{Assert.Equal(resizedHash,Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(fresh.AssetPath!))));}
+        finally{await worker.ReleaseAsset(fresh);}
+    }
+    [Fact]
     public async Task RealWorkerAcceptsEmbeddedBitmapAndJpegAndRejectsTruncation()
     {
         var project=new DirectoryInfo(AppContext.BaseDirectory);

@@ -7,7 +7,7 @@ public sealed class UserMessagesTests
 {
     [Theory]
     [InlineData("FileChanged", "文件已更改")]
-    [InlineData("DecodeFailed", "无法读取")]
+    [InlineData("DecodeFailed", "未能读取")]
     [InlineData("UnsupportedCodec", "不支持")]
     public void ProtocolErrorsAreExplainedWithoutChangingTheException(string code,string expected)
     {
@@ -15,6 +15,7 @@ public sealed class UserMessagesTests
         Assert.Contains(expected,UserMessages.Error(error));
         Assert.DoesNotContain(code,UserMessages.Error(error));
         Assert.Equal(code,error.Message);
+        Assert.DoesNotContain("损坏",UserMessages.Error(error));
     }
     [Fact]
     public void ActionableValidationIsKeptButTechnicalDetailsAreNot()

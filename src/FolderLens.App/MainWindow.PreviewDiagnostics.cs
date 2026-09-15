@@ -11,6 +11,8 @@ public sealed partial class MainWindow
     private void BeginPreviewDiagnostics(long current)
     {
         previewDiagnosticSelection=current;previewStartedAt=previewStageStartedAt=Stopwatch.GetTimestamp();
+        scanLog?.Write("preview-request",new{request=current,path=selected is null?null:SourcePath(selected),kind=selected?.Kind,
+            version=selected?.Item?.Version,root,fullScreen,immersive});
         RecordPreviewStage(current,"selected");
     }
     private void RecordPreviewStage(long current,string stage)
@@ -34,8 +36,9 @@ public sealed partial class MainWindow
     }
     private void RecordPreviewFailure(Exception error)
     {
-        scanLog?.Write("preview-error",new{request=selection,stage=previewStage,type=error.GetType().FullName,error.HResult,
-            // Only code symbols; do not persist source paths, file names or exception messages.
+        scanLog?.Write("preview-error",new{request=selection,path=selected is null?null:SourcePath(selected),stage=previewStage,type=error.GetType().FullName,error.HResult,
+            message=error.Message[..Math.Min(error.Message.Length,1024)],worker=error.Data["WorkerDiagnostic"],
+            // Local-only debugging details requested by the user; never included in review uploads.
             frames=new StackTrace(error,false).GetFrames().Take(12).Select(frame=>frame.GetMethod()).Select(method=>method?.DeclaringType?.FullName+"."+method?.Name).ToArray()});
         RecordPreviewStage(selection,"failed");
     }

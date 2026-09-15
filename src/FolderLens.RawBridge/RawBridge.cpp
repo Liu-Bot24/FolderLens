@@ -8,6 +8,7 @@ struct RawSession {
     LibRaw raw;
     std::atomic<bool> cancelled{false};
     libraw_processed_image_t* image{nullptr};
+    bool thumbnail_unpacked{false};
     ~RawSession() { if(image) LibRaw::dcraw_clear_mem(image); }
 };
 struct RawInfo { uint32_t width,height,thumb_width,thumb_height; int32_t flip; };
@@ -41,7 +42,13 @@ EXPORT int fl_raw_pixels(RawSession* session,int develop,RawPixels* output) noex
             error=session->raw.dcraw_process();if(error)return error;
             session->image=session->raw.dcraw_make_mem_image(&error);
         } else {
-            error=session->raw.unpack_thumb();if(error)return error;
+            // LibRaw's unpack step is ordered and may only run once per open.
+            // The unpacked thumbnail remains owned by LibRaw; output buffers are
+            // independent and may be recreated for subsequent preview sizes.
+            if(!session->thumbnail_unpacked){
+                error=session->raw.unpack_thumb();if(error)return error;
+                session->thumbnail_unpacked=true;
+            }
             session->image=session->raw.dcraw_make_mem_thumb(&error);
         }
         if(!session->image)return error?error:-10002;

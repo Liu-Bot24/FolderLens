@@ -321,7 +321,11 @@
           </Button>
           <ToggleButton Grid.Column="5" x:Name="DetailsMode" Content="详情" Click="ToggleView" ToolTipService.ToolTip="切换缩略图网格 / 文件详情列表" />
         </Grid>
-        <StackPanel Grid.Row="1">
+          <StackPanel Grid.Row="1">
+          <StackPanel x:Name="BrowserLoadingState" Orientation="Horizontal" Spacing="10" Margin="12,8" Visibility="Collapsed">
+            <ProgressRing x:Name="BrowserLoadingRing" Width="18" Height="18" IsActive="False" />
+            <TextBlock x:Name="BrowserLoadingText" VerticalAlignment="Center" Text="正在加载文件…" />
+          </StackPanel>
         <InfoBar x:Name="BrowserScanErrorBar" Title="文件夹扫描未完成" Severity="Error" IsOpen="False" IsClosable="False" AutomationProperties.AutomationId="BrowserScanError">
           <InfoBar.ActionButton><Button Content="重新扫描" Click="RefreshRoot" /></InfoBar.ActionButton>
         </InfoBar>
