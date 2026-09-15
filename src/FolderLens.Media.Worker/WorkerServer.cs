@@ -85,7 +85,7 @@ internal static class WorkerServer
                         FileNotFoundException or DirectoryNotFoundException when inspectingSource=>"SourceMissing",IOException {Message:"FileChanged"}=>"FileChanged",
                         IOException when inspectingSource=>"SourceIoError",_=>"DecodeFailed"
                     };
-                    response=response with{Status=ex is TimeoutException?"timeout":ex is NotSupportedException?"unsupported":error=="FileChanged"?"stale":"failed",ErrorCode=error,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0})};
+                    response=response with{Status=ex is TimeoutException?"timeout":ex is NotSupportedException?"unsupported":error=="FileChanged"?"stale":"failed",ErrorCode=error,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,errorType=ex.GetType().FullName,detail=ex.Message[..Math.Min(ex.Message.Length,1024)]})};
                 }
                 await WorkerProtocol.Write(pipe,response);
             }

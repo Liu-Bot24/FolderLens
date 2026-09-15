@@ -2,6 +2,7 @@ namespace FolderLens.Core;
 
 public sealed class ScanPreviewRefresh
 {
+    public static bool DeferFirstBatch(int matchedFiles,bool scanning)=>scanning&&matchedFiles<32;
     public static bool SequenceLocked(bool hasResults,bool hasSelection,bool immersive,bool fullScreen,bool slideshow)
         =>hasResults&&(immersive||fullScreen||slideshow);
     private TimeSpan next;

@@ -4,7 +4,8 @@ using System.Threading.Channels;
 namespace FolderLens.Infrastructure;
 
 /// <summary>Non-blocking, bounded local diagnostic events. Callers pass identifiers
-/// and counters, never source paths, file names, exception messages or media.</summary>
+/// and counters. Explicit local development diagnostics may contain source paths
+/// and errors; never include media or credentials, or upload these logs.</summary>
 public sealed class BoundedDiagnosticLog : IAsyncDisposable
 {
     private readonly Channel<object> events=Channel.CreateBounded<object>(new BoundedChannelOptions(128){FullMode=BoundedChannelFullMode.DropOldest,SingleReader=true});

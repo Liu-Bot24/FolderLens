@@ -32,6 +32,14 @@ public sealed partial class MainWindow
         BrowserScanErrorBar.Message=browserScanError??"";
         BrowserScanErrorBar.IsOpen=browserScanError is not null;
         string? error=browserScanError??browserEmptyError;
+        bool scanning=scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested;
+        bool loading=error is null&&(replacingRoot||queryBusy||scanning);
+        BrowserLoadingState.Visibility=loading?Visibility.Visible:Visibility.Collapsed;
+        BrowserLoadingRing.IsActive=loading;
+        long displayed=resultHandle?.Count??firstPageSequence.Length;
+        BrowserLoadingText.Text=scanning
+            ?displayed==0?"正在加载首批文件…":"正在继续扫描文件夹，已显示 "+displayed.ToString("N0")+" 个文件…"
+            :"正在整理文件列表…";
         // Observe the displayed controls, including the first page before a complete
         // snapshot exists. This presentation never binds or clears the result source.
         if(FilesGrid.Items.Count>0||FilesList.Items.Count>0||browserGroups is {Count:>0}&&groupedBrowserSource?.View is {} grouped&&ReferenceEquals(ActiveBrowser.ItemsSource,grouped))
@@ -55,7 +63,7 @@ public sealed partial class MainWindow
         else if(replacingRoot||queryBusy||scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested)
         {
             BrowserEmptyTitle.Text=activeBackgroundScan is {} currentScan&&scanScheduler.IsWaiting(currentScan.RootId)?"正在安排此文件夹的扫描":replacingRoot?"正在打开文件夹":scanTask is {IsCompleted:false}?"正在扫描子文件夹":"正在查找符合条件的文件";
-            BrowserEmptyDescription.Text="发现符合条件的文件后会自动显示，无需手动刷新。";
+            BrowserEmptyDescription.Text="首批文件准备好后会自动显示，随后继续加载。";
             BrowserEmptyDetail.Text=ScanStatusDescription();
         }
         else

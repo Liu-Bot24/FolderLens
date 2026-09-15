@@ -13,7 +13,7 @@ public static class UserMessages
         {
             "FileChanged"=>"文件已更改，请刷新后重试。",
             "UnsupportedCodec"=>"暂不支持此文件的编码，可用其他应用打开。",
-            "DecodeFailed" or "ProbeFailed"=>"无法读取文件内容，文件可能损坏或格式不受支持。",
+            "DecodeFailed" or "ProbeFailed"=>"此次未能读取文件内容，请重新打开重试。",
             "Timeout"=>"读取超时，请稍后重试。",
             "ResourceLimit" or "OutOfMemory"=>"可用资源不足，请关闭不需要的预览后重试。",
             "DeferredOffline" or "SourceIoError"=>"文件暂时无法访问，请检查磁盘或网络连接后重试。",
@@ -42,7 +42,7 @@ public static class UserMessages
         return error switch
         {
             ArgumentException or FormatException or OverflowException=>"输入内容无效，请检查填写的条件后重试。",
-            InvalidDataException=>"无法读取此内容，文件可能损坏或格式不受支持。",
+            InvalidDataException=>"此次未能读取文件内容，请重新打开重试。",
             IOException=>"读写失败，请检查文件是否可访问以及磁盘空间是否充足。",
             _=>"操作未能完成，请重试；若仍失败，请重新打开应用。"
         };

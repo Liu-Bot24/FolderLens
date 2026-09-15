@@ -151,7 +151,9 @@ public sealed class WorkerClient : IAsyncDisposable
                 if(response.ErrorCode=="SourceMissing")throw new FileNotFoundException("原文件已不存在或目录暂不可用。",path);
                 if(response.ErrorCode is "AccessDenied" or "TextAccessDenied")throw new UnauthorizedAccessException("没有读取原文件的权限。");
                 if(response.ErrorCode=="SourceIoError")throw new IOException("原文件读取失败，目录可能已离线。");
-                throw new InvalidDataException(response.ErrorCode??"DecodeFailed");
+                var failure=new InvalidDataException(response.ErrorCode??"DecodeFailed");
+                failure.Data["WorkerDiagnostic"]=new{operation,requestId,worker=instance,diagnostic=response.Metadata};
+                throw failure;
             }
             if((dataOnly||fileless)&&response.AssetToken is not null)throw new InvalidDataException("数据响应不得包含文件资产。");
             string? asset=null;

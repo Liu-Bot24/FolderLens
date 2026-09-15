@@ -397,9 +397,9 @@ public sealed partial class MainWindow : Window
                 var first=await catalog.ReadFirstPage(filter,queryToken);if(!IsCurrent()||closing||PreviewInterrupted())return;
                 // A root can contain only non-images while its descendants are
                 // still queued. Do not freeze that temporary empty result.
-                if(first.Items.Count==0&&scanTask is {IsCompleted:false})
+                if(ScanPreviewRefresh.DeferFirstBatch(first.Items.Count,scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested))
                 {
-                    ResultSummary.Text="正在子文件夹中查找符合条件的文件…";
+                    ResultSummary.Text="正在加载首批文件…";
                     return;
                 }
                 PublishFirstPage(filter,first.Items);

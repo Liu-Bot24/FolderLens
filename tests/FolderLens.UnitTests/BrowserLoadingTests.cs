@@ -6,6 +6,14 @@ namespace FolderLens.UnitTests;
 
 public sealed class BrowserLoadingTests
 {
+    [Theory]
+    [InlineData(2,true,true)]
+    [InlineData(31,true,true)]
+    [InlineData(32,true,false)]
+    [InlineData(2,false,false)]
+    [InlineData(0,false,false)]
+    public void FirstBatchWaitsForUsefulCountButSmallCompletedFoldersAreShown(int count,bool scanning,bool deferred)
+        =>Assert.Equal(deferred,ScanPreviewRefresh.DeferFirstBatch(count,scanning));
     [Fact]
     public async Task SubsequentScanBatchPublishesWithoutManualRefreshButViewerKeepsItsSequence()
     {
