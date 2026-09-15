@@ -222,6 +222,17 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var cmd=c.CreateCommand();cmd.CommandText=sql;foreach(var value in values)cmd.Parameters.AddWithValue(value.Name,value.Value);return cmd.ExecuteNonQuery();
     }
     public Task<WalCheckpoint> CheckpointCatalog(bool truncate=false,CancellationToken cancellation=default)=>writer.Execute(c=>Checkpoint(c,catalogPath,truncate),cancellation);
+    internal Task<WalCheckpoint> PrepareSnapshotWal(CancellationToken cancellation=default)=>writer.Execute(c=>
+    {
+        var checkpoint=Checkpoint(c,catalogPath,false);
+        if(checkpoint.Bytes<limits.CatalogWalBytes*3/4)return checkpoint;
+        // PASSIVE can leave a fully checkpointed physical file behind. At the
+        // high-water mark, try recycling it without waiting on a reader. Keep
+        // the size guard when busy; the next snapshot retries this maintenance.
+        long timeout=Scalar(c,"PRAGMA busy_timeout");
+        try{Execute(c,"PRAGMA busy_timeout=0");return Checkpoint(c,catalogPath,true);}
+        finally{Execute(c,$"PRAGMA busy_timeout={timeout}");}
+    },cancellation);
     private static WalCheckpoint Checkpoint(SqliteConnection c,string path,bool truncate)
     {
         using var cmd=c.CreateCommand();cmd.CommandText=truncate?"PRAGMA wal_checkpoint(TRUNCATE)":"PRAGMA wal_checkpoint(PASSIVE)";
@@ -251,7 +262,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         {
             // Capacity readers may retain an older WAL frame. Never wait for them
             // on the scan writer's queue just to prepare a new browsing snapshot.
-            await CheckpointCatalog(false,cancellation).ConfigureAwait(false);
+            await PrepareSnapshotWal(cancellation).ConfigureAwait(false);
             return await reader.Execute(c=>BuildSnapshot(c,filter,epoch,generation,cancellation),cancellation).ConfigureAwait(false);
         }
         finally { Volatile.Write(ref snapshotUnderPressure,0);snapshotGate.Release(); }

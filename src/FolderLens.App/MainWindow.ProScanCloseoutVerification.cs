@@ -5,6 +5,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private Func<CancellationToken,Task>? verifyRootAdmissionBarrier;
     private async Task VerifyProScanCloseout(string source,Dictionary<string,object> report)
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;
@@ -33,6 +34,21 @@ public sealed partial class MainWindow
         if(scanStop.IsCancellationRequested||rootId!=id||epoch!=observedEpoch||resultHandle?.Count!=13)
             throw new InvalidOperationException("Explicit child navigation after Stop failed to re-enumerate the scope.");
         report["stopThenNavigateRechecksSameEpoch"]=true;
+        // Reject after the UI preflight, precisely where the old implementation
+        // had already disposed its accepted list. Leave this last: budget latches.
+        var retained=results;var handle=resultHandle;long oldEpoch=epoch;
+        verifyRootAdmissionBarrier=_=>
+        {
+            typeof(CatalogStore).GetMethod("MarkBrowsingBudgetReached",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.Invoke(catalog,null);
+            return Task.CompletedTask;
+        };
+        try{await RefreshCurrentRoot();}
+        finally{verifyRootAdmissionBarrier=null;}
+        if(!ReferenceEquals(results,retained)||resultHandle!=handle||epoch!=oldEpoch||!browserRootReady||replacingRoot)
+            throw new InvalidOperationException("Late admission refusal destroyed the accepted view.");
+        Search.Text="after-stop";searchTimer?.Stop();await RefreshQuery();
+        if(resultHandle?.Count!=1||epoch!=oldEpoch)throw new InvalidOperationException("A rejected refresh disabled filtering of committed files.");
+        report["lateBudgetRefusalPreservesRowsAndFiltering"]=true;
         report["status"]="PASS";
     }
 }
