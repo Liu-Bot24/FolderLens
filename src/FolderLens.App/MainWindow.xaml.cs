@@ -483,6 +483,9 @@ public sealed partial class MainWindow : Window
                 if(!IsCurrent()||closing)return;
                 previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             }
+            // Restore the pre-drag selection while the old ordinals still refer
+            // to the old files. Incremental publication may reuse ItemsSource.
+            CancelMarquee();previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             var nextResults=new VirtualResults(catalog,handle,DispatcherQueue);nextResults.SetPresentation(GridCardWidth,gridShowPaths);
             bool adopted=false;
             activeList=ActiveBrowser;
@@ -795,6 +798,7 @@ public sealed partial class MainWindow : Window
     private async void NextImagePage(object sender,RoutedEventArgs e)=>await ImagePage(1);
     private async Task LoadMedia(string path,string kind,long current,CancellationToken token)
     {
+        if(kind=="video"&&videoPresentationSelection==current)return;
         using var request=CancellationTokenSource.CreateLinkedTokenSource(token);
         mediaCoverStop=request;token=request.Token;
         try

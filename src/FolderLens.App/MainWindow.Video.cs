@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? videoOpenTimer;
     private bool videoStarting;
     private CancellationTokenSource? mediaCoverStop;
+    private long videoPresentationSelection=-1;
 
     private void StopVideo()
     {
@@ -43,9 +44,9 @@ public sealed partial class MainWindow
                 if(playing.PlaybackSession.PlaybackState==MediaPlaybackState.Playing)playing.Pause();else playing.Play();
                 return;
             }
+            videoPresentationSelection=current;mediaCoverStop?.Cancel();
             var target=await ExternalFileLaunch.Resolve(catalog!,prefetchSourceProbe,SourceRootPath(row),SourceRootId(row),row.Item!.EntryId,row.Item.Version,approvedCloud.Contains(CloudKey(row)),selectionStop.Token);
             if(current!=selection||closing)return;
-            mediaCoverStop?.Cancel();
             StopAudio();
             var player=new MediaPlayer{AutoPlay=false,Volume=.5};videoPlayer=player;
             player.CommandManager.IsEnabled=false;

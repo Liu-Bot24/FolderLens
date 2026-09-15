@@ -18,7 +18,9 @@ public sealed partial class MainWindow
         {
             var counts=scanScheduler.Counts;
             var scans=backgroundScans.OrderByDescending(s=>s.RootId==rootId).Take(32).Select(scan=>new{root=scan.RootId,current=scan.RootId==rootId,waiting=scanScheduler.IsWaiting(scan.RootId),complete=scan.Completion.IsCompleted,cancelled=scan.Cancelled,files=scanProgress.TryGetValue(scan.RootId,out var p)?p.Progress.Files:0,secondsSinceProgress=scanProgress.TryGetValue(scan.RootId,out p)?(DateTimeOffset.UtcNow-p.At).TotalSeconds:(double?)null}).ToArray();
-            scanLog.Write("scan-status",new{root,scope=CurrentFilter().DirectoryScope,counts.Active,counts.Waiting,scans,queryBusy,
+            // Diagnostics observe state, including the initial screen and an
+            // unfinished filter edit. They must not validate a new query.
+            scanLog.Write("scan-status",new{root,scope=advanced?.DirectoryScope??"",counts.Active,counts.Waiting,scans,queryBusy,
                 displayed=resultHandle?.Count??firstPageSequence.Length,preview=PreviewDiagnosticState(),slowOperation=Volatile.Read(ref slowDatabaseOperation),slowMilliseconds=Volatile.Read(ref slowDatabaseMilliseconds)});
             if(!closing&&!replacingRoot&&browserScanError is null&&scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested&&FilesGrid.Items.Count==0&&FilesList.Items.Count==0)Status.Text=ScanStatusDescription();
             UpdateBrowserEmptyState();

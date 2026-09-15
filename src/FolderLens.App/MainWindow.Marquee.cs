@@ -31,8 +31,8 @@ public sealed partial class MainWindow
             view.AddHandler(UIElement.PointerPressedEvent,new PointerEventHandler(MarqueePressed),true);
             view.AddHandler(UIElement.PointerMovedEvent,new PointerEventHandler(MarqueeMoved),true);
             view.AddHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(MarqueeReleased),true);
-            view.PointerCaptureLost+=(_,e)=>{if(ReferenceEquals(e.OriginalSource,view))EndMarquee(false);};
-            view.AddHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler((_,_)=>EndMarquee(false)),true);
+            view.PointerCaptureLost+=(_,e)=>{if(ReferenceEquals(e.OriginalSource,view))CancelMarquee();};
+            view.AddHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler((_,_)=>CancelMarquee()),true);
         }
     }
     private void MarqueePressed(object sender,PointerRoutedEventArgs e)
@@ -44,7 +44,7 @@ public sealed partial class MainWindow
         {
             if(node is ButtonBase or ScrollBar or TextBox)return;
         }
-        EndMarquee(false);
+        CancelMarquee();
         marqueeView=view;marqueeSource=view.ItemsSource;marqueeStart=e.GetCurrentPoint(view).Position;marqueePointer=e.Pointer.PointerId;
         marqueeAdditive=(Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)&CoreVirtualKeyStates.Down)!=0||
             (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)&CoreVirtualKeyStates.Down)!=0;
@@ -54,11 +54,11 @@ public sealed partial class MainWindow
     {
         if(marqueeView is not {} view||!ReferenceEquals(sender,view)||e.Pointer.PointerId!=marqueePointer)return;
         var point=e.GetCurrentPoint(view);
-        if(!point.Properties.IsLeftButtonPressed||!ReferenceEquals(view.ItemsSource,marqueeSource)){EndMarquee(false);return;}
+        if(!point.Properties.IsLeftButtonPressed||!ReferenceEquals(view.ItemsSource,marqueeSource)){CancelMarquee();return;}
         if(!marqueeDragging)
         {
             if(Math.Abs(point.Position.X-marqueeStart.X)<5&&Math.Abs(point.Position.Y-marqueeStart.Y)<5)return;
-            if(!view.CapturePointer(e.Pointer)){EndMarquee(false);return;}
+            if(!view.CapturePointer(e.Pointer)){CancelMarquee();return;}
             marqueeDragging=true;
         }
         e.Handled=true;ApplyMarquee(view,point.Position);
@@ -97,8 +97,8 @@ public sealed partial class MainWindow
     }
     private void EndMarquee(bool restore)
     {
-        var view=marqueeView;bool dragged=marqueeDragging;marqueeView=null;marqueeDragging=false;
-        if(restore&&dragged&&view is not null&&ReferenceEquals(view.ItemsSource,marqueeSource))
+        var view=marqueeView;bool dragged=marqueeDragging;bool canRestore=restore&&dragged&&view is not null&&ReferenceEquals(view.ItemsSource,marqueeSource);marqueeView=null;marqueeDragging=false;
+        if(canRestore&&view is not null)
         {
             bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
             try{foreach(var range in view.SelectedRanges.ToArray())view.DeselectRange(range);foreach(var range in marqueeBaseline)view.SelectRange(new ItemIndexRange((int)range.Start,(uint)range.Count));}
@@ -106,5 +106,17 @@ public sealed partial class MainWindow
         }
         marqueeSource=null;marqueeBaseline=[];if(marqueeBox is not null)marqueeBox.Visibility=Visibility.Collapsed;
         if(dragged)view?.ReleasePointerCaptures();
+        if(canRestore)SyncMarqueeSelection(view!);
+    }
+    private void CancelMarquee()=>EndMarquee(true);
+    private async void SyncMarqueeSelection(ListViewBase view)
+    {
+        if(closing||!ReferenceEquals(view,ActiveBrowser))return;
+        try
+        {
+            if(SelectionPreview(view) is {} row){if(!ReferenceEquals(row,selected))await SelectPreview(row);}
+            else ClearResultSelection();
+        }
+        catch(Exception error){if(!closing)ShowError(error);}
     }
 }

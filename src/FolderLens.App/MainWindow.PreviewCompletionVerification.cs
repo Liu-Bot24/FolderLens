@@ -5,6 +5,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
 using Windows.Media.Playback;
+using FolderLens.Infrastructure;
+using System.Text.Json;
 
 namespace FolderLens.App;
 
@@ -22,6 +24,7 @@ public sealed partial class MainWindow
         await File.WriteAllBytesAsync(Path.Combine(source,"unsupported.mp4"),[1,2,3,4]);
         suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;
         await OpenRoot(source);if(scanTask is not null)await scanTask;await RefreshQuery();
+        monitor?.Dispose();monitor=null;
         async Task<FileRow> Row(string name)
         {
             long index=(await catalog!.FindOrdinal(resultHandle!.Id,name))??throw new InvalidOperationException("Missing fixture "+name);
@@ -64,6 +67,23 @@ public sealed partial class MainWindow
             marqueeBaseline=[new(rectangles[2].Index,1)];marqueeAdditive=true;ApplyMarquee(view,new Point(first.Right-1,first.Bottom-1));
             if(view.SelectedRanges.Sum(r=>(long)r.Length)!=2)throw new InvalidOperationException("追加框选未保留原选择。");
             marqueeBox!.Visibility=Visibility.Collapsed;report[details?"detailsMarquee":"thumbnailMarquee"]=true;
+            await SelectBrowserOrdinal(results!,rectangles[0].Index,lifetime.Token);var original=selected!;
+            void BeginTestDrag()
+            {
+                marqueeView=view;marqueeSource=view.ItemsSource;marqueeDragging=true;
+                marqueeBaseline=view.SelectedRanges.Select(r=>new OrdinalRange(r.FirstIndex,r.Length)).ToArray();
+                syncingBrowserSelection=true;
+                try{foreach(var r in view.SelectedRanges.ToArray())view.DeselectRange(r);view.SelectRange(new Microsoft.UI.Xaml.Data.ItemIndexRange(rectangles[1].Index,1));}
+                finally{syncingBrowserSelection=false;}
+            }
+            BeginTestDrag();CancelMarquee();
+            if(CurrentFileOperationSelection()?.Item?.EntryId!=original.Item!.EntryId||selected?.Item?.EntryId!=original.Item.EntryId)throw new InvalidOperationException("框选中断后命令目标与选择不一致。");
+            BeginTestDrag();object? sameSource=view.ItemsSource;
+            string added=Path.Combine(source,"000-new-"+details+".txt");await File.WriteAllTextAsync(added,"generated");
+            await new DirectoryIndexer(catalog!,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)){Scheduler=scanScheduler}.Scan(rootId,source,epoch,true,ScanExclusions(),null,lifetime.Token);
+            await RefreshQuery(scanPreview:true);
+            if(marqueeView is not null||!ReferenceEquals(sameSource,view.ItemsSource)||CurrentFileOperationSelection()?.Item?.EntryId!=original.Item.EntryId)throw new InvalidOperationException("增量发布前没有安全取消旧索引框选。");
+            report[details?"detailsMarqueeInterruptedAndPublished":"thumbnailMarqueeInterruptedAndPublished"]=true;
         }
         var coverEntered=new TaskCompletionSource();var coverRelease=new TaskCompletionSource();
         verifyMediaCoverBarrier=async token=>{coverEntered.TrySetResult();await coverRelease.Task;throw new InvalidDataException("Generated delayed cover failure");};
@@ -84,9 +104,30 @@ public sealed partial class MainWindow
         await Choose("chinese.txt");
         if(videoPlayer is not null||videoElement is not null||VideoHost.Content is not null||videoOpenTimer is not null)throw new InvalidOperationException("切换文件未释放视频资源。");
         using(var stream=new FileStream(video,FileMode.Open,FileAccess.ReadWrite,FileShare.None)){}
-        await Choose("unsupported.mp4");await PlayVideoCore();
+        var previewEntered=new TaskCompletionSource();var previewRelease=new TaskCompletionSource();
+        verifyPreviewBarrier=async token=>{previewEntered.TrySetResult();await previewRelease.Task.WaitAsync(token);};
+        var earlyVideo=Choose("generated.mp4");await previewEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));await PlayVideoCore();
+        await WaitUntil(()=>videoPlayer?.PlaybackSession.Position>TimeSpan.FromMilliseconds(100),TimeSpan.FromSeconds(8));
+        previewRelease.TrySetResult();await earlyVideo;verifyPreviewBarrier=null;
+        if(QualityLabel.Text!="视频预览")throw new InvalidOperationException("较晚进入的封面覆盖了先开始的播放。");
+        await Choose("chinese.txt");
+        coverEntered=new TaskCompletionSource();coverRelease=new TaskCompletionSource();
+        verifyMediaCoverBarrier=async token=>{coverEntered.TrySetResult();await coverRelease.Task;};
+        var invalidVideo=Choose("unsupported.mp4");await coverEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));await PlayVideoCore();
         await WaitUntil(()=>videoPlayer is null,TimeSpan.FromSeconds(17));
+        coverRelease.TrySetResult();await invalidVideo;verifyMediaCoverBarrier=null;
         if(!QualityLabel.Text.Contains("外部播放"))throw new InvalidOperationException("不支持视频未提供外部播放提示。");
-        report["videoPlayPauseSeekSwitchReleaseUnsupported"]=true;report["status"]="PASS";
+        report["videoPlayPauseSeekSwitchReleaseUnsupported"]=true;
+        var cloudRow=await Row("generated.mp4");var properties=await ResolveRow(cloudRow,rootId,lifetime.Token);
+        cloudRow.UpdateProperties(properties with{HydrationState="placeholder"});selected=cloudRow;selection++;
+        var opened=new TaskCompletionSource();verifyOwnedDialogOpened=_=>opened.TrySetResult();int approvalCount=approvedCloud.Count;
+        var cloudPlay=PlayVideoCore();await opened.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        verifyClosingState=async()=>
+        {
+            bool pass=cloudPlay.IsCompletedSuccessfully&&approvedCloud.Count==approvalCount&&videoPlayer is null;
+            await File.WriteAllTextAsync(Path.Combine(dataDirectory,"native-close.json"),JsonSerializer.Serialize(new{status=pass?"PASS":"FAIL",cloudVideoDialogClosedWithoutApproval=pass}));
+            if(!pass)Environment.ExitCode=1;
+        };
+        report["status"]="CLOSE_PENDING";
     }
 }
