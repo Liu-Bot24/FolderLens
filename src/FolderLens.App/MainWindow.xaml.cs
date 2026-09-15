@@ -576,13 +576,14 @@ public sealed partial class MainWindow : Window
         if(!CanAdoptPrefetch(row))prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
         MarkdownHost.Visibility=Visibility.Collapsed;markdownImages.Clear();
         selected=row;requestedImagePage=null;selectionStop.Cancel();selectionStop.Dispose();selectionStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var token=selectionStop.Token;long current=++selection;PreparePreview();FileTitle.Text=row.Name;QualityLabel.Text="正在读取…";
-        UpdateViewerInformation();
+        UpdateViewerInformation();BeginPreviewDiagnostics(current);
         try
         {
             if(verifyPreviewBarrier is not null)await verifyPreviewBarrier(token);
             if(animationIdle is {} retiringAnimation)await retiringAnimation.Task.WaitAsync(token);
             var rowSource=results;await ResetTextSession();verifyPreviewStage?.Invoke("resetText");if(row.Item is null)await (rowSource??throw new InvalidOperationException("当前结果已关闭。")).EnsureLoaded(row,token);if(current!=selection)return;
             UpdateViewerInformation();
+            RecordPreviewStage(current,"properties");
             var properties=await ResolveRow(row,rootId,token);if(current!=selection)return;selectedProperties=properties;FileTitle.Text=row.Name;offlinePreview=false;
             verifyPreviewStage?.Invoke("properties");
             bool cloud=selectedProperties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row));cloudPreviewButton!.Visibility=cloud?Visibility.Visible:Visibility.Collapsed;
@@ -591,9 +592,9 @@ public sealed partial class MainWindow : Window
             UpdateViewerInformation();
             if(slideShow&&current==selection&&row.Kind=="image")slideTimer?.Start();
         }
-        catch(OperationCanceledException){}
+        catch(OperationCanceledException){RecordPreviewStage(current,"cancelled");}
         catch(Exception ex){if(current==selection&&!closing){ClearImage();ShowPreviewError(ex);}}
-        finally{if(current==selection&&!closing){FinishPreview();verifyPreviewStage?.Invoke("finished");}}
+        finally{if(current==selection&&!closing){FinishPreview();if(previewStage is not ("failed" or "cancelled"))RecordPreviewStage(current,"finished");verifyPreviewStage?.Invoke("finished");}}
         if(current==selection&&!closing&&!offlinePreview&&row.Kind=="image")await LoadSelectedExif(row,current,token);
     }
     private async Task RenderSelectedContent(FileRow row,long current,CancellationToken token)
@@ -627,12 +628,14 @@ public sealed partial class MainWindow : Window
     private async Task LoadImage(FileRow row,long current,CancellationToken cancellation)
     {
         string path=SourcePath(row);int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*Shell.XamlRoot.RasterizationScale)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*Shell.XamlRoot.RasterizationScale));
+        RecordPreviewStage(current,"prefetch");
         bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));var cached=await FindPrefetched(row,width,height,cancellation);WorkerEnvelope? message=null;
         verifyPreviewStage?.Invoke(cached is null?"prefetchMiss":"prefetchHit");
         if(current!=selection||cancellation.IsCancellationRequested)return;
         if(cached is not null){await PresentPrefetched(cached,current,cancellation);if(current!=selection||cancellation.IsCancellationRequested)return;message=cached.Message;}
         if(cached is null)
         {
+            RecordPreviewStage(current,"decode");
             var reply=raw
                 ?await RawPreview.Open(operation=>previewWorker!.Request(path,operation,Context(row,current),new(width,height),cancellation,Stamp(row)))
                 :await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row));
@@ -793,8 +796,10 @@ public sealed partial class MainWindow : Window
     private async Task PresentFit(ImageReply reply,long current,CancellationToken cancellation)
     {
         if(current!=selection||cancellation.IsCancellationRequested){await previewWorker!.ReleaseAsset(reply);cancellation.ThrowIfCancellationRequested();return;}
+        RecordPreviewStage(current,"bitmap");
         var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || cancellation.IsCancellationRequested){bitmap.Dispose();return;}
         fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";ImageCanvas.Opacity=1;ApplyViewerSizing();
+        RecordPreviewStage(current,"presented");
     }
     private void DrawImage(CanvasControl sender,CanvasDrawEventArgs args)
     {
@@ -804,6 +809,7 @@ public sealed partial class MainWindow : Window
         args.DrawingSession.DrawImage(fitBitmap,new Rect(origin.X,origin.Y,sourceWidth*scale,sourceHeight*scale));
         foreach(var pair in tiles){var size=pair.Value.SizeInPixels;args.DrawingSession.DrawImage(pair.Value,new Rect(origin.X+pair.Key.Item1*1024*scale,origin.Y+pair.Key.Item2*1024*scale,size.Width*scale,size.Height*scale));}
         args.DrawingSession.Transform=Matrix3x2.Identity;
+        RecordPreviewDraw();
         if(verifyBitmapSelection==selection)verifyImageDrawn?.Invoke(selection);
     }
     private double EffectiveScale()
@@ -1134,7 +1140,14 @@ public sealed partial class MainWindow : Window
     private static void SelectTag(ComboBox box,string tag){foreach(ComboBoxItem item in box.Items)if(item.Tag.ToString()==tag){box.SelectedItem=item;break;}}
     public sealed record SavedView(string Root,FilterSpec Filter,string? SelectedPath=null,double ScrollOffset=0,bool Details=false,string? ScrollAnchorPath=null,PreviewBookmark? Preview=null);
     private void ShowError(Exception ex){if(!closing)Status.Text=$"操作未完成：{UserMessages.Error(ex)}";}
-    private void ShowPreviewError(Exception ex){if(!closing&&ReportDeviceLoss(ex))return;if(!closing)QualityLabel.Text=$"无法预览：{UserMessages.Error(ex)}";if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView("PreviewError "+ex);}
+    private void ShowPreviewError(Exception ex)
+    {
+        RecordPreviewFailure(ex);
+        if(!closing&&ReportDeviceLoss(ex))return;
+        if(closing)return;
+        previewFailure=$"无法预览：{UserMessages.Error(ex)}";QualityLabel.Text=previewFailure;
+        if(loadingBadge is not null){loadingText!.Text=previewFailure;loadingBadge.Visibility=Visibility.Visible;}
+    }
     private bool finalWindowClose;
     private Task? shutdownTask;
     private void OnClosing(Microsoft.UI.Windowing.AppWindow sender,Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
