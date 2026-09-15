@@ -68,8 +68,12 @@ public static class FilterSql
             Known(filter.CollectionId is null?$"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))":$"f.directory_id IN(SELECT d.directory_id FROM Directories d WHERE d.directory_id IN(SELECT source.directory_id FROM CollectionMembers member JOIN Files source ON source.location_key=member.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=source.directory_id)=member.directory_location_id WHERE member.collection_id={Param(filter.CollectionId)}) AND lens_directory_visible(d.relative_path,{rules}))");
         }
         Set("f.format_id",filter.Formats,"identity");
-        if (filter.Raw == "only") { Known("f.kind='image'"); Nullable("f.is_raw","f.is_raw=1","identity"); }
-        if (filter.Raw == "exclude") Nullable("f.is_raw","(f.kind<>'image' OR f.is_raw=0)","identity");
+        if(filter.Raw!="any")
+        {
+            string extensionRaw=$"lower(f.extension) IN ({string.Join(',',FileKinds.Raw.OrderBy(value=>value).Select(value=>Param(value.ToLowerInvariant())))})";
+            Known(filter.Raw=="only"?$"f.kind='image' AND COALESCE(f.is_raw,{extensionRaw})=1":$"f.kind<>'image' OR COALESCE(f.is_raw,{extensionRaw})=0");
+        }
+
         if (filter.Animation != "any") { Known("f.kind='image'"); Nullable("f.is_animated",$"f.is_animated={(filter.Animation == "animated" ? 1 : 0)}","animation"); }
         foreach(var range in filter.Ranges)
         {

@@ -16,7 +16,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
-    private enum ViewerAction { Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
+    private enum ViewerAction { RenameFile,DeleteFile, Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
     private enum ViewerSizing { Automatic,Locked }
     private enum ViewerScaleIntent { Default,Fit,Width,Height,Custom }
     private enum ViewerGesture { None,Pressed,Dragging,Magnifier }
@@ -25,6 +25,7 @@ public sealed partial class MainWindow
     [
         new(VirtualKey.Left,VirtualKeyModifiers.Menu,ViewerAction.BackFolder),new(VirtualKey.Right,VirtualKeyModifiers.Menu,ViewerAction.ForwardFolder),new(VirtualKey.Up,VirtualKeyModifiers.Menu,ViewerAction.ParentFolder),
         new(VirtualKey.F,VirtualKeyModifiers.Control,ViewerAction.Find),new(VirtualKey.O,VirtualKeyModifiers.Control,ViewerAction.OpenFolder),new(VirtualKey.L,VirtualKeyModifiers.Control,ViewerAction.FocusPath),new(VirtualKey.F5,0,ViewerAction.Refresh),new(VirtualKey.Space,VirtualKeyModifiers.Control,ViewerAction.Slideshow),
+        new(VirtualKey.F2,0,ViewerAction.RenameFile),new(VirtualKey.Delete,0,ViewerAction.DeleteFile),
         new(VirtualKey.F11,0,ViewerAction.ToggleFullScreen),new(VirtualKey.Escape,0,ViewerAction.ReturnBrowser),new(VirtualKey.Enter,0,ViewerAction.ToggleBrowser),
         new(VirtualKey.Left,0,ViewerAction.Left),new(VirtualKey.Right,0,ViewerAction.Right),new(VirtualKey.Up,0,ViewerAction.Up),new(VirtualKey.Down,0,ViewerAction.Down),
         new(VirtualKey.PageDown,0,ViewerAction.Next),new(VirtualKey.Space,0,ViewerAction.Next),new(VirtualKey.PageUp,0,ViewerAction.Previous),new(VirtualKey.Back,0,ViewerAction.Previous),
@@ -114,6 +115,7 @@ public sealed partial class MainWindow
         }
         if(binding.Action is ViewerAction.ToggleBrowser)return selected is not null||results?.Count>0;
         if(selected is null)return false;
+        if(binding.Action is ViewerAction.RenameFile or ViewerAction.DeleteFile)return selected.Item is not null&&!fileOperationBusy&&(immersive||fullScreen||IsInFileList(source)||IsInViewerSurface(source));
         if(binding.Action==ViewerAction.CopyFilePath)return selected.Item is not null;
         if(selected.Kind=="video")return binding.Action is ViewerAction.Previous or ViewerAction.Next or ViewerAction.First or ViewerAction.Last or ViewerAction.Left or ViewerAction.Right or ViewerAction.ContextMenu;
         if(selected.Kind!="image")return false;
@@ -156,6 +158,8 @@ public sealed partial class MainWindow
             ResetViewerGesture();
             switch(action)
             {
+                case ViewerAction.RenameFile: await OperateFile(FolderLens.Infrastructure.FileOperationKind.Rename);return;
+                case ViewerAction.DeleteFile: await OperateFile(FolderLens.Infrastructure.FileOperationKind.Recycle);return;
                 case ViewerAction.Help: await ShowLocalHelp();return;
                 case ViewerAction.CopyFilePath: CopyPath(this,new());return;
                 case ViewerAction.Find:

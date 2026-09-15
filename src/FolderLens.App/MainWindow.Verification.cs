@@ -72,6 +72,7 @@ public sealed partial class MainWindow
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
             if(arguments.Contains("--verify-startup-profile")){await VerifyStartupProfile(source,report);return;}
             if(arguments.Contains("--verify-scan-pipeline")){await VerifyScanPipeline(source,report);return;}
+            if(arguments.Contains("--verify-demand-layout")){await VerifyDemandLayout(source,report);return;}
             if(arguments.Contains("--verify-pro-scan-closeout")){await VerifyProScanCloseout(source,report);return;}
             if(arguments.Contains("--verify-format-choices")){await VerifyFormatChoices(source,report);return;}
             if(arguments.Contains("--verify-navigation-roots")){await VerifyNavigationRoots(source,report);return;}

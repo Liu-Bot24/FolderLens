@@ -22,7 +22,7 @@ public sealed partial class MainWindow
         {
             var menu=new MenuFlyout();void Add(string title,RoutedEventHandler action){var item=new MenuFlyoutItem{Text=title};item.Click+=action;menu.Items.Add(item);}
             Add("收藏所选文件…",CollectSelected);menu.Items.Add(new MenuFlyoutSeparator());
-            Add(FileCommandLabels.Properties,ShowProperties);Add(FileCommandLabels.CopyPath,CopyPath);Add(FileCommandLabels.CopyFileReference,CopyFileReference);Add(FileCommandLabels.Reveal,Reveal);Add(FileCommandLabels.ExternalOpen,ExternalOpen);list.ContextFlyout=menu;
+            Add(FileCommandLabels.Properties,ShowProperties);Add(FileCommandLabels.CopyPath,CopyPath);Add(FileCommandLabels.CopyFileReference,CopyFileReference);Add(FileCommandLabels.Reveal,Reveal);Add(FileCommandLabels.ExternalOpen,ExternalOpen);menu.Items.Add(new MenuFlyoutSeparator());Add("重命名…  F2",RenameFile);Add("移动到…",MoveFile);Add("删除…  Delete",DeleteFile);list.ContextFlyout=menu;
             list.RightTapped+=(_,e)=>
             {
                 if((e.OriginalSource as FrameworkElement)?.DataContext is not FileRow row)return;
@@ -42,7 +42,8 @@ public sealed partial class MainWindow
         if(selected?.Item is null||catalog is null)return;
         try
         {
-            var file=await ResolveRow(selected,rootId,selectionStop.Token);selectedProperties=file;var panel=new StackPanel{Spacing=8,MinWidth=460,MaxWidth=680};
+            var currentRow=selected;long currentSelection=selection;await ReadDemandedMetadata(currentRow,selectionStop.Token,readDetails:true);if(currentSelection!=selection)return;
+            var file=await ResolveRow(currentRow,rootId,selectionStop.Token);selectedProperties=file;var panel=new StackPanel{Spacing=8,MinWidth=460,MaxWidth=680};
             void Row(string name,string? value){if(string.IsNullOrWhiteSpace(value))value="未知";var line=new Grid{ColumnSpacing=16};line.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(110)});line.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});line.Children.Add(new TextBlock{Text=name,Opacity=.65});var text=new TextBlock{Text=value,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true};Grid.SetColumn(text,1);line.Children.Add(text);panel.Children.Add(line);}
             string Date(long? ticks,bool utc)=>ticks is {} value?new DateTime(value,utc?DateTimeKind.Utc:DateTimeKind.Unspecified).ToString("yyyy-MM-dd HH:mm:ss",CultureInfo.InvariantCulture):"未知";
             Row("名称",file.Name);Row("相对路径",file.RelativePath);Row("格式",file.Format);Row("大小",FileRow.FormatBytes(file.LogicalBytes));Row("占用空间",file.AllocatedBytes is {} allocated?FileRow.FormatBytes(allocated):"未知");

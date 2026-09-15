@@ -20,6 +20,7 @@ public sealed partial class MainWindow
     private bool playerSupportsPlaylists;
     private readonly Dictionary<FileRow,CancellationTokenSource> thumbnailRequests=[];
     private readonly HashSet<FileRow> propertyRequests=[];
+    private readonly Dictionary<FileRow,CancellationTokenSource> propertyCancellations=[];
     private readonly HashSet<FileRow> propertyRefreshPending=[];
     private readonly Dictionary<(ListViewBase View,DependencyObject Container),FileRow> visibleContainers=[];
     private readonly Dictionary<FileRow,int> visibleConsumerCounts=[];
@@ -36,7 +37,7 @@ public sealed partial class MainWindow
         public string NavigationGlyph=>Icon??(PageOffset is not null?"\uE8AB":"\uE8B7");
         public override string ToString()=>Label;
     }
-    private sealed record DesktopState(double ThumbnailSize=144,bool ShowPaths=false,double SidebarWidth=300,bool Details=false);
+    private sealed record DesktopState(double ThumbnailSize=144,bool ShowPaths=false,double SidebarWidth=300,bool Details=false,double TreeFraction=.6);
     private bool gridShowPaths;
     private void UpdatePathPresentationControl()
     {
@@ -68,12 +69,12 @@ public sealed partial class MainWindow
                     if(source is not null)await source.EnsureLoaded(row,token);
                     if(!IsCurrent())throw new OperationCanceledException();
                     return row.Kind=="image";
-                },tick.Token);
-                if(next is {} index&&IsCurrent()){Navigate(checked(index-(int)origin.Ordinal));return;}
+                },tick.Token,slideshowPreferences.Repeat);
+                if(next is {} index&&IsCurrent()){if(index!=(int)origin.Ordinal)Navigate(checked(index-(int)origin.Ordinal));return;}
                 if(IsCurrent()){slideShow=false;Status.Text="幻灯片已到末尾。";}
             }
             catch(OperationCanceledException){}catch(Exception ex){if(IsCurrent()){ShowError(ex);slideShow=false;}else RecordWebView("Retired slideshow tick failed: "+ex.GetType().Name);}
-            finally{if(ReferenceEquals(slideTickStop,tick))slideTickStop=null;if(slideShow&&!closing&&selected?.Kind=="image"&&!previewLoading)slideTimer.Start();verifySlideTickCompleted?.Invoke();}
+            finally{if(ReferenceEquals(slideTickStop,tick))slideTickStop=null;if(slideShow&&!closing&&selected?.Kind=="image"&&!previewLoading)slideTimer.Start();UpdateSlideshowCommands();verifySlideTickCompleted?.Invoke();}
         };
         ImageCanvas.SizeChanged+=(_,_)=>ImageCanvas.Invalidate();
         FilesGrid.SizeChanged+=(_,_)=>UpdateGridPresentation();
@@ -112,7 +113,7 @@ public sealed partial class MainWindow
         if(await settings.Load<DesktopState>("desktop.json") is {} state)
         {
             ThumbnailSize.Value=Math.Clamp(state.ThumbnailSize,100,240);gridShowPaths=state.ShowPaths;UpdatePathPresentationControl();
-            PreviewColumn.Width=new GridLength(Math.Clamp(state.SidebarWidth,220,650));DetailsMode.IsChecked=state.Details;ToggleView(this,new());
+            SetPreviewSplit(state.TreeFraction);PreviewColumn.Width=new GridLength(double.IsFinite(state.SidebarWidth)?Math.Clamp(state.SidebarWidth,220,650):300);DetailsMode.IsChecked=state.Details;ToggleView(this,new());
         }
         await RestorePlayerPreferences();
         try
@@ -123,6 +124,8 @@ public sealed partial class MainWindow
         catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
         catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){RecordWebView($"Playlist cleanup failed: {ex.GetType().Name}");}
         await RestoreViewerPreferences();
+        if(settings is not null&&await settings.Load<SlideshowPreferences>("slideshow.json") is {} slides)slideshowPreferences=new(double.IsFinite(slides.Seconds)?Math.Clamp(slides.Seconds,1,60):5,slides.Repeat);
+        slideTimer!.Interval=TimeSpan.FromSeconds(slideshowPreferences.Seconds);
     }
     private readonly Dictionary<string,bool> categoryDetailViews=[];
     private async void QuickFilterChanged(object sender,SelectionChangedEventArgs e)
@@ -201,8 +204,8 @@ public sealed partial class MainWindow
     private async Task SetImmersive(bool enabled)
     {
         if(enabled&&selected is null||!enabled&&!immersive)return;if(enabled&&!immersive)CaptureBrowserPosition();immersive=enabled;
-        TreePane.Visibility=BrowserPane.Visibility=PaneDivider.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
-        Grid.SetRow(PreviewPane,enabled?0:1);Grid.SetRowSpan(PreviewPane,enabled?2:1);Grid.SetColumnSpan(PreviewPane,enabled?3:1);
+        TreePane.Visibility=BrowserPane.Visibility=PaneDivider.Visibility=PreviewHeightDivider.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
+        Grid.SetRow(PreviewPane,enabled?0:2);Grid.SetRowSpan(PreviewPane,enabled?3:1);Grid.SetColumnSpan(PreviewPane,enabled?3:1);
         UpdateViewerInformation();PreviewPane.UpdateLayout();ImageCanvas.Invalidate();
         if(!enabled){RestoreBrowserPosition();return;}
         if(selected is not null&&!previewLoading&&selected.Kind=="image")
@@ -216,7 +219,7 @@ public sealed partial class MainWindow
     }
     private async void ToggleSlideshow(object sender,RoutedEventArgs e)
     {
-        try{await ToggleSlideshowCore();}finally{verifySlideEventCompleted?.Invoke();}
+        try{await ToggleSlideshowCore();}finally{UpdateSlideshowCommands();verifySlideEventCompleted?.Invoke();}
     }
     private long slideRequest;
     private async Task ToggleSlideshowCore()
@@ -231,7 +234,7 @@ public sealed partial class MainWindow
         if(selected is null||selected.Kind!="image"){slideShow=false;Status.Text="请选择一张图片开始幻灯片。";return;}
         await SetImmersive(true);
         if(request!=slideRequest||closing||!slideShow)return;
-        slideTimer?.Start();Status.Text="幻灯片 · 每张图片停留 5 秒 · Ctrl+Space 暂停";
+        if(!previewLoading)slideTimer?.Start();Status.Text=$"幻灯片 · 每张图片停留 {slideshowPreferences.Seconds:0.#} 秒 · Ctrl+Space 暂停";
         }
         catch(OperationCanceledException){if(request==slideRequest){slideShow=false;slideTimer?.Stop();}}
         catch(Exception error)
@@ -317,7 +320,7 @@ public sealed partial class MainWindow
     private async void ShowDiagnostics(object sender,RoutedEventArgs e)
     {
         var statistics=thumbnailCache is null?null:await thumbnailCache.GetStatistics(lifetime.Token);
-        var text=new TextBlock{Text=$"数据位置：{dataDirectory}\n{Environment.Version} · Windows x64\n当前目录：{root}\n当前结果：{resultHandle?.Count??0:N0}\n缩略图缓存：{FileRow.FormatBytes(statistics?.TotalDiskBytes??0)} · {statistics?.DiskEntries??0:N0} 项\n清理缓存不会更改原文件。",TextWrapping=TextWrapping.Wrap,MaxWidth=560};
+        var text=new TextBlock{Text=$"数据位置：{dataDirectory}\n{Environment.Version} · Windows x64\n当前目录：{root}\n当前结果：{resultHandle?.Count??0:N0}\n缩略图缓存：{FileRow.FormatBytes(statistics?.TotalDiskBytes??0)} · {statistics?.DiskEntries??0:N0} 项\n缓存上限：256 MiB；超过 7 天未使用的缩略图会自动清理。\n文件列表每次打开重新扫描；缓存只用于加快缩略图显示。\n清理缓存不会更改原文件。",TextWrapping=TextWrapping.Wrap,MaxWidth=560};
         var open=new Button{Content="打开数据文件夹"};open.Click+=(_,_)=>Process.Start(new ProcessStartInfo(dataDirectory){UseShellExecute=true});var panel=new StackPanel{Spacing=12};panel.Children.Add(text);panel.Children.Add(open);
         var capabilityText=new TextBlock{Text=capabilityStatus,TextWrapping=TextWrapping.Wrap,MaxWidth=560};var refreshCapabilities=new Button{Content="重新检测媒体组件"};
         refreshCapabilities.Click+=async(_,_)=>{refreshCapabilities.IsEnabled=false;try{if(capabilityTask is not null)await capabilityTask;capabilityTask=ReadRuntimeCapabilities();await capabilityTask;capabilityText.Text=capabilityStatus;}finally{refreshCapabilities.IsEnabled=true;}};

@@ -204,7 +204,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND (snapshot_relative_path=$path OR lens_location(source_root_path,snapshot_relative_path,'sensitive')=$path) ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
     },cancellation);
 
-    private static void RegisterFunctions(SqliteConnection connection)
+    internal static void RegisterFunctions(SqliteConnection connection)
     {
         connection.CreateFunction("lens_fold",(string value)=>value.ToUpperInvariant(),true);
         string? previous=null;DirectoryRuleSet? compiled=null;
