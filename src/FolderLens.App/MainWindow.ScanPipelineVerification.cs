@@ -31,6 +31,7 @@ public sealed partial class MainWindow
             string target=test.EndsWith("r4-empty")?Path.Combine(source,"B"):source;
             await OpenRoot(target);if(metadataTask is not null)await metadataTask;await RefreshQuery();
             const string failure="Injected scan component failure";
+            string presentedFailure=UserMessages.Error(new ScanWorkerUnavailableException(failure));
             ShowScanError(new ScanWorkerUnavailableException(failure));
             if(test.EndsWith("r3"))
             {
@@ -42,8 +43,8 @@ public sealed partial class MainWindow
                 finally{release.TrySetResult();verifyCandidateBarrier=null;}
                 await query;await StartMetadataRefresh();
                 Shell.UpdateLayout();
-                bool visible=Status.Text.Contains(failure)||ResultSummary.Text.Contains(failure)||BrowserEmptyState.Visibility==Microsoft.UI.Xaml.Visibility.Visible&&BrowserEmptyDescription.Text.Contains(failure);
-                if(Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar)visible|=bar.IsOpen&&bar.Message.Contains(failure);
+                bool visible=Status.Text.Contains(presentedFailure)||ResultSummary.Text.Contains(presentedFailure)||BrowserEmptyState.Visibility==Microsoft.UI.Xaml.Visibility.Visible&&BrowserEmptyDescription.Text.Contains(presentedFailure);
+                if(Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar)visible|=bar.IsOpen&&bar.Message.Contains(presentedFailure);
                 report["items"]=FilesGrid.Items.Count;report["visibleError"]=visible;
                 if(FilesGrid.Items.Count!=12||!visible)throw new InvalidOperationException("Scan error disappeared while partial results and metadata progress remained visible.");
             }
@@ -71,7 +72,9 @@ public sealed partial class MainWindow
                 report["scanErrorAfterF5"]=browserScanError??"";
                 report["queryErrorAfterF5"]=browserEmptyError??"";
                 report["scanActiveAfterF5"]=scanTask is {IsCompleted:false};
-                if(rootId!=id||epoch!=revision)throw new InvalidOperationException("Test reopened the root instead of using F5 reconciliation.");
+                report["previousEpoch"]=revision;report["refreshedEpoch"]=epoch;
+                if(rootId!=id||BrowsedDirectory!=target||RootPath.Text!=target||epoch<=revision)throw new InvalidOperationException("F5 did not recheck the same browsing directory with a fresh epoch.");
+                if(resultHandle?.Count!=(test.EndsWith("empty")?0:12))throw new InvalidOperationException("F5 lost unchanged directory contents.");
                 if(!test.EndsWith("empty")){Search.Text="no-such-fixture-file";searchTimer?.Stop();await RefreshQuery();}
                 Shell.UpdateLayout();
                 if(browserScanError is not null||BrowserEmptyTitle.Text=="暂时无法显示浏览结果")throw new InvalidOperationException("Successful same-root F5 retained the old scan failure.");

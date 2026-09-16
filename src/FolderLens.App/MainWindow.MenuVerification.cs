@@ -31,6 +31,7 @@ public sealed partial class MainWindow
         await ReturnToBrowser();
         await SelectBrowserOrdinal(results!,results!.Count-1,lifetime.Token);BuildViewerContextMenu();
         Check(!viewerContextMenu.Items.OfType<MenuFlyoutItem>().Single(item=>item.Text.StartsWith("下一张")).IsEnabled,"last file: next disabled");
+        folderGrouping=new(false);UpdateGroupingButton();
         await ResetFirstPageFixture();
         verifyCandidateBarrier=_=>throw new IOException("Menu first-page fixture: full snapshot unavailable");
         try{await RefreshQuery();}finally{verifyCandidateBarrier=null;}

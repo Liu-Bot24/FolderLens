@@ -10,8 +10,7 @@ public sealed partial class MainWindow
         string sample=Directory.EnumerateFiles(source,"*.png",SearchOption.AllDirectories).First();
         for(int i=0;i<12;i++)File.Copy(sample,Path.Combine(source,$"first-page-{i:D2}.png"),true);
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
-        CancelThumbnails();AttachBrowserView(null);results?.Dispose();results=null;
-        if(resultHandle is not null)await catalog!.ReleaseSnapshot(resultHandle.Id);resultHandle=null;
+        await ResetFirstPageFixture();
         object? binding=null;FileRow[] rows=[];object?[] images=[],containers=[];int publications=0;
         verifyFirstPageBarrier=async token=>
         {
@@ -35,7 +34,7 @@ public sealed partial class MainWindow
             verifyCandidateBarrier=_=>throw new IOException("InjectedSnapshotFailure");
             await RefreshQuery();AssertRetained("第一次失败");
             await RefreshQuery(scanPreview:true);AssertRetained("第二次失败");
-            string diagnostic=await File.ReadAllTextAsync(Path.Combine(dataDirectory,"query-failures.jsonl"));
+            string diagnostic=await File.ReadAllTextAsync(Path.Combine(RuntimeDataDirectory,"query-failures.jsonl"));
             if(diagnostic.Split('\n').Count(line=>line.Contains("\"errorType\":\"IOException\""))<2||diagnostic.Contains(source,StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("查询失败历史未保留，或记录了源文件夹完整路径。");
             report["failureHistoryRetainedWithoutSourcePaths"]=true;
@@ -43,6 +42,9 @@ public sealed partial class MainWindow
             FileRow? chosen=null;Task? coalesced=null;
             verifyCandidateBarrier=async token=>
             {
+                // Inject one coalesced refresh. Reinjecting on its follow-up
+                // snapshot creates an endless stream of test-generated refreshes.
+                verifyCandidateBarrier=null;
                 FilesGrid.SelectedItem=rows[0];await WaitUntil(()=>ReferenceEquals(selected,rows[0]),TimeSpan.FromSeconds(3));
                 Navigate(1);chosen=rows[1];await WaitUntil(()=>ReferenceEquals(selected,chosen),TimeSpan.FromSeconds(3));
                 long request=queryRequest;coalesced=RefreshQuery(scanPreview:true);await Task.Yield();

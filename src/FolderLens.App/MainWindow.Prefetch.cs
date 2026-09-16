@@ -44,9 +44,9 @@ public sealed partial class MainWindow
             finally{Volatile.Write(ref prefetchPressurePending,0);}
         }))Volatile.Write(ref prefetchPressurePending,0);
     }
-    private sealed record PrefetchedDetail(string Root,long Epoch,string Path,long Version,long Modified,long Length,int X,int Y,byte[] Png);
+    private sealed record PrefetchedDetail(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int X,int Y,byte[] Png);
     private readonly SourceFileProbe prefetchSourceProbe=new();
-    private sealed record PrefetchedImage(string Root,long Epoch,string Path,long Version,long Modified,long Length,int TargetWidth,int TargetHeight,byte[] Png,WorkerEnvelope Message)
+    private sealed record PrefetchedImage(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int TargetWidth,int TargetHeight,byte[] Png,WorkerEnvelope Message)
     {
         public CanvasBitmap? Bitmap;
         public long DeviceRevision;
@@ -109,7 +109,7 @@ public sealed partial class MainWindow
             return null;
         }
         var stat=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
-        bool current=stat.Length==cached.Length&&stat.ModifiedUtcTicks==cached.Modified;
+        bool current=stat==cached.Stamp;
         if(!current){RemovePrefetchedImage(cached);return null;}
         if(prefetched.Remove(cached))prefetched.AddFirst(cached);
         if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView($"Prefetch hit ordinal={row.Ordinal}");
@@ -157,6 +157,8 @@ public sealed partial class MainWindow
                 if(current!=selection||sourceRootId!=rootId||sourceEpoch!=epoch||sourceGeneration!=generation||sourceResults!=results||token.IsCancellationRequested)return;
                 if(properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))continue;
                 if(Stamp(row) is not {} expectedStamp)continue;
+                var observation=row.Item!;
+                bool RowStillCurrent()=>sourceResults==results||results?.IndexOf(row)>=0&&row.Item is {} item&&SameCollectionObservation(item,observation);
                 if(await FindPrefetched(row,width,height,token) is {} ready)
                 {await PreparePrefetchedImage(ready,token);continue;}
                 string path=SourcePath(row);ImageReply? reply=null;
@@ -166,7 +168,7 @@ public sealed partial class MainWindow
                     // Start the isolated source probe while the image is still background work.
                     // Selection validates again: this warm-up does not authorize stale pixels.
                     var sourceStat=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
-                    if(sourceStat.Length!=expectedStamp.Length||sourceStat.ModifiedUtcTicks!=expectedStamp.ModifiedUtcTicks)continue;
+                    if(sourceStat!=expectedStamp)continue;
                     bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));reply=await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",new(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1),new(width,height),token,expectedStamp,approvedCloud.Contains(CloudKey(row)));
                     pending.PixelsDecoded=true;
                     if(verifyPrefetchBarrier is not null)await verifyPrefetchBarrier(row,token);
@@ -175,8 +177,8 @@ public sealed partial class MainWindow
                     var metadata=reply.Message.Metadata!.Value;
                     if(metadata.GetProperty("pages").GetInt32()>1&&!metadata.GetProperty("isAnimated").GetBoolean()&&!metadata.GetProperty("isRaw").GetBoolean())continue;
                     byte[] png=await File.ReadAllBytesAsync(reply.AssetPath!,token);
-                    if((current!=selection&&!ReferenceEquals(row,selected))||sourceRootId!=rootId||sourceEpoch!=epoch||sourceGeneration!=generation||sourceResults!=results||token.IsCancellationRequested)return;
-                    var cached=new PrefetchedImage(sourceRootId,sourceEpoch,path,row.Item.Version,expectedStamp.ModifiedUtcTicks,expectedStamp.Length,width,height,png,reply.Message);
+                    if((current!=selection&&!ReferenceEquals(row,selected))||sourceRootId!=rootId||sourceEpoch!=epoch||sourceGeneration!=generation||!RowStillCurrent()||token.IsCancellationRequested)return;
+                    var cached=new PrefetchedImage(sourceRootId,sourceEpoch,path,row.Item.Version,expectedStamp,width,height,png,reply.Message);
                     prefetched.AddFirst(cached);prefetchBytes+=png.Length;
                     if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView($"Prefetch ready ordinal={row.Ordinal} resolvedMissingProperties={missingProperties}");
                     while(prefetched.Count>2||prefetchBytes>32L*1024*1024)RemovePrefetchedImage(prefetched.Last!.Value);
@@ -188,6 +190,9 @@ public sealed partial class MainWindow
                     try{if(reply is not null)await prefetchWorker.ReleaseAsset(reply);}
                     finally{if(ReferenceEquals(pendingImagePrefetch,pending))pendingImagePrefetch=null;pending.Completed.TrySetResult();}
                 }
+                // An incremental publication can retain this row, but its old
+                // ordinal sequence must not be used to prefetch another neighbour.
+                if(sourceResults!=results)return;
             }
         }
         catch(OperationCanceledException){}
@@ -200,7 +205,7 @@ public sealed partial class MainWindow
         for(int y=Math.Max(0,height/2-512)/1024;y<=Math.Min(height-1,height/2+511)/1024;y++)
         for(int x=Math.Max(0,width/2-512)/1024;x<=Math.Min(width-1,width/2+511)/1024;x++)
         {
-            if(prefetchedDetails.Any(item=>item.Root==id&&item.Epoch==activeEpoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Modified==stamp.ModifiedUtcTicks&&item.Length==stamp.Length&&item.X==x&&item.Y==y))continue;
+            if(prefetchedDetails.Any(item=>item.Root==id&&item.Epoch==activeEpoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Stamp==stamp&&item.X==x&&item.Y==y))continue;
             ImageReply? reply=null;
             try
             {
@@ -208,7 +213,7 @@ public sealed partial class MainWindow
                 if(new FileInfo(reply.AssetPath!).Length>8L*1024*1024)continue;
                 byte[] bytes=await File.ReadAllBytesAsync(reply.AssetPath!,token);
                 if(current!=selection||rootId!=id||epoch!=activeEpoch||token.IsCancellationRequested)return;
-                prefetchedDetails.AddFirst(new PrefetchedDetail(id,activeEpoch,path,row.Item.Version,stamp.ModifiedUtcTicks,stamp.Length,x,y,bytes));prefetchedDetailBytes+=bytes.Length;
+                prefetchedDetails.AddFirst(new PrefetchedDetail(id,activeEpoch,path,row.Item.Version,stamp,x,y,bytes));prefetchedDetailBytes+=bytes.Length;
                 while(prefetchedDetails.Count>12||prefetchedDetailBytes>32L*1024*1024){prefetchedDetailBytes-=prefetchedDetails.Last!.Value.Png.Length;prefetchedDetails.RemoveLast();}
             }
             finally{if(reply is not null)await prefetchWorker!.ReleaseAsset(reply);}
@@ -217,8 +222,10 @@ public sealed partial class MainWindow
     private async Task<CanvasBitmap?> ReadPrefetchedDetail(FileRow row,(int X,int Y) key,CancellationToken token)
     {
         if(Stamp(row) is not {} stamp)return null;string path=SourcePath(row);
-        var cached=prefetchedDetails.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Modified==stamp.ModifiedUtcTicks&&item.Length==stamp.Length&&item.X==key.X&&item.Y==key.Y);
+        var cached=prefetchedDetails.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Stamp==stamp&&item.X==key.X&&item.Y==key.Y);
         if(cached is null)return null;token.ThrowIfCancellationRequested();
+        if(await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)))!=cached.Stamp)
+        {prefetchedDetails.Remove(cached);prefetchedDetailBytes-=cached.Png.Length;return null;}
         using var stream=new MemoryStream(cached.Png,false);using var random=stream.AsRandomAccessStream();
         return await CanvasBitmap.LoadAsync(ImageCanvas,random);
     }

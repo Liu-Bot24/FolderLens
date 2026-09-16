@@ -42,13 +42,13 @@ public sealed partial class MainWindow
         await ExpandFolderNode(parent);
         var sibling=parent.Children.Single(node=>node.Content is FolderNode folder&&folder.Path==Path.Combine(source,"B"));
         await NavigateFolder((FolderNode)sibling.Content);
-        if(root!=Path.Combine(source,"B")||!FolderTree.RootNodes.SequenceEqual(roots))throw new InvalidOperationException("直接目录导航失败或重建了固定入口。");
+        if(BrowsedDirectory!=Path.Combine(source,"B")||RootPath.Text!=BrowsedDirectory||!FolderTree.RootNodes.SequenceEqual(roots))throw new InvalidOperationException("直接目录导航失败或重建了固定入口。");
         await NavigateFolder((FolderNode)parent.Content);
         if(physicalTreeTask is not null)await physicalTreeTask;
         await ExpandFolderNode(activeTreeRoot!);
         var child=activeTreeRoot!.Children.Single(node=>node.Content is FolderNode folder&&folder.Path==Path.Combine(source,"A"));
         await NavigateFolder((FolderNode)child.Content);
-        if(root!=Path.Combine(source,"A")||!FolderTree.RootNodes.SequenceEqual(roots))throw new InvalidOperationException("逐层展开进入目录失败。");
+        if(BrowsedDirectory!=Path.Combine(source,"A")||RootPath.Text!=BrowsedDirectory||!FolderTree.RootNodes.SequenceEqual(roots))throw new InvalidOperationException("逐层展开进入目录失败。");
         report["persistentPlacesAndDrives"]=true;report["directSiblingParentChildNavigation"]=true;report["status"]="PASS";
     }
 }

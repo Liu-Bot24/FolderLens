@@ -6,6 +6,8 @@ public sealed partial class MainWindow
 {
     private async Task ResetFirstPageFixture()
     {
+        monitor?.Dispose();monitor=null;reconcilePending=false;
+        if(scanTask is {} scan)await scan;
         if(queryBusy)await queryCompletion;
         ClearResultSelection();CancelThumbnails();AttachBrowserView(null);results?.Dispose();results=null;
         if(resultHandle is not null)await catalog!.ReleaseSnapshot(resultHandle.Id);resultHandle=null;

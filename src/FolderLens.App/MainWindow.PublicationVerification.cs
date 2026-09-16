@@ -9,6 +9,7 @@ public sealed partial class MainWindow
     private async Task VerifyRangePublicationCost(Dictionary<string,object> report)
     {
         const int initial=1000,added=20000;
+        FilesGrid.Visibility=Visibility.Visible;FilesList.Visibility=BrowserEmptyState.Visibility=Visibility.Collapsed;
         var samples=new List<object>();report["samples"]=samples;
         bool excessAllocation=false;
         foreach(string mode in new[]{"unbound","view","grid"})
@@ -28,15 +29,20 @@ public sealed partial class MainWindow
                 var view=cvs.View;if(mode=="grid")FilesGrid.ItemsSource=view;
             }
             Shell.UpdateLayout();await Task.Delay(30);
+            if(mode=="grid")await WaitUntil(()=>FilesGrid.ContainerFromIndex(0) is not null,TimeSpan.FromSeconds(3));
             var before=FilesGrid.ContainerFromIndex(0);
+            items.UpdateRanges([new(initial,0,100)],i=>rows[i],Locate);Shell.UpdateLayout();
+            bool smallRetained=mode!="grid"||before is not null&&ReferenceEquals(before,FilesGrid.ContainerFromIndex(0));
+            if(!smallRetained)throw new InvalidOperationException("小范围通知清除了未变化的可见容器。");
+            int resets=0;items.CollectionChanged+=(_,args)=>{if(args.Action==System.Collections.Specialized.NotifyCollectionChangedAction.Reset)resets++;};
             long allocated=GC.GetAllocatedBytesForCurrentThread();var timer=System.Diagnostics.Stopwatch.StartNew();
-            items.UpdateRanges([new(initial,0,added)],i=>rows[i],Locate);
+            items.UpdateRanges([new(initial+100,0,added-100)],i=>rows[i],Locate);
             timer.Stop();long bytes=GC.GetAllocatedBytesForCurrentThread()-allocated;
             if(mode=="unbound"&&bytes>added*180L)excessAllocation=true;
             Shell.UpdateLayout();
             bool containerRetained=mode!="grid"||before is not null&&ReferenceEquals(before,FilesGrid.ContainerFromIndex(0));
-            samples.Add(new{mode,milliseconds=timer.Elapsed.TotalMilliseconds,allocatedBytes=bytes,bytesPerItem=bytes/(double)added,rowAllocationBytes=rowAllocation,rowBytesPerItem=rowAllocation/(double)rows.Length,containerRetained,viewCount=cvs?.View.Count});
-            if(items.Count!=rows.Length||cvs is not null&&cvs.View.Count!=rows.Length||!containerRetained)throw new InvalidOperationException("通知后真实视图数量或原可见容器不一致。");
+            samples.Add(new{mode,milliseconds=timer.Elapsed.TotalMilliseconds,allocatedBytes=bytes,bytesPerItem=bytes/(double)added,rowAllocationBytes=rowAllocation,rowBytesPerItem=rowAllocation/(double)rows.Length,smallRetained,containerRetained,bulkResets=resets,viewCount=cvs?.View.Count});
+            if(items.Count!=rows.Length||cvs is not null&&cvs.View.Count!=rows.Length||resets!=1)throw new InvalidOperationException("大批量有界重置后真实视图数量不一致。");
             if(!ReferenceEquals(items[0],rows[0])||!ReferenceEquals(items[items.Count-1],rows[^1]))throw new InvalidOperationException("更新后索引内容不一致。");
             FilesGrid.ItemsSource=null;if(cvs is not null)cvs.Source=null;
         }
@@ -44,7 +50,7 @@ public sealed partial class MainWindow
         using var failedSource=new VirtualResults(1,(_,_)=>throw new IOException("Fixture page failure"));
         var failedRow=(FileRow)failedSource[0]!;bool propagated=false;
         try{await failedSource.EnsureLoaded(failedRow,CancellationToken.None);}catch(IOException){propagated=true;}
-        if(!propagated||failedRow.Name!="加载失败"||failedRow.Detail!="Fixture page failure")throw new InvalidOperationException("移除未使用任务后加载失败没有保留错误。");
+        if(!propagated||failedRow.Name!="加载失败"||failedRow.Detail!=UserMessages.Error(new IOException("Fixture page failure")))throw new InvalidOperationException("移除未使用任务后加载失败没有保留错误。");
         failedSource.Dispose();bool canceled=false;
         try{await failedSource.EnsureLoaded((FileRow)failedSource[0]!,CancellationToken.None);}catch(OperationCanceledException){canceled=true;}
         if(!canceled)throw new InvalidOperationException("退役源仍允许读取占位行。");

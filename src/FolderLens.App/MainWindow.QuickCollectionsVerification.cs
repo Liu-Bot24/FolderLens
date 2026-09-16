@@ -133,12 +133,14 @@ public sealed partial class MainWindow
         if(!second.IsCollected||(await catalog.ReadCollections()).Single(c=>c.Id==staleTarget).Count!=1)throw new InvalidOperationException("拒绝失效选择后正常快捷收藏不可用。");
         report["staleQuickSelectionRejectedWithoutFalseStar"]=true;
         monitor?.Dispose();monitor=null;
+        await SelectBrowserOrdinal(results!,1,lifetime.Token);await SetImmersive(true);
         string? frozenSession=resultHandle?.Id;
         string original=Path.Combine(root,second.Item!.RelativePath);
         File.Move(original,original+".renamed");
         report["scanWasBusyBeforeRefreshVerification"]=scanTask is {IsCompleted:false};
         while(scanTask is {IsCompleted:false} activeScan)await activeScan.WaitAsync(TimeSpan.FromSeconds(10));
-        reconcilePending=true;await Reconcile(force:true);
+        await new FolderLens.Infrastructure.ScanDirtyDirectories(catalog).Mark(rootId,epoch,[new("","VerificationChange",true)]);
+        reconcilePending=true;await Reconcile();
         if((await catalog.ReadCollections()).Single(c=>c.Id==staleTarget).Count!=0)throw new InvalidOperationException("收藏刷新验证的扫描尚未清除数据库归属。");
         if(fileCollections.Single(c=>c.Id==staleTarget).Count!=0)throw new InvalidOperationException("扫描清除归属后收藏树计数未自动刷新。");
         for(int i=0;i<100&&second.IsCollected;i++)await Task.Delay(20);

@@ -43,7 +43,9 @@ public sealed partial class MainWindow
         if(results?.Count!=12)throw new InvalidOperationException("窗口不在前台时扫描没有完成。");
         var row=(FileRow)results[0]!;await results.EnsureLoaded(row,lifetime.Token);await SelectPreview(row);
         Stage("selectPreview");report["backgroundWorkStagesMs"]=workStages;
-        if(fitBitmap is null||selectedProperties?.Width!=64||WindowFocus.IsForeground(this))throw new InvalidOperationException("后台元数据或预览未完成，或窗口抢占了前台。");
+        await ReadDemandedMetadata(row,lifetime.Token);selectedProperties=await ResolveRow(row,rootId,lifetime.Token);
+        if(selectedProperties.Width!=64)throw new InvalidOperationException("选中文件的按需元数据不正确。");
+        if(fitBitmap is null||sourceWidth!=64||sourceHeight!=48||WindowFocus.IsForeground(this))throw new InvalidOperationException("后台元数据或预览未完成，或窗口抢占了前台。");
         startupHeartbeat?.Stop();using var process=Process.GetCurrentProcess();
         report["initializationUiGapMaxMs"]=initializeGaps.DefaultIfEmpty().Max();
         report["shellLoadedAtMs"]=startupShellLoadedAt;

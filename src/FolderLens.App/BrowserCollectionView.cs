@@ -87,6 +87,14 @@ internal sealed class BrowserCollectionView:BrowserVector,ICollectionView,IColle
     public ICollectionView View=>this;
     public ICollectionView CreateView()=>this;
     public IObservableVector<object> CollectionGroups=>groups;
+    internal void ResetSource(ObservableCollection<BrowserFileGroup> next)
+    {
+        Dispose();state.Groups.Clear();source=next;
+        foreach(var group in next)state.Groups.Add(new(group,OnItemsChanged));
+        state.Count=state.Groups.Sum(group=>group.GroupItems.Count);
+        source.CollectionChanged+=OnGroupsChanged;UpdateCurrency();
+        groups.Changed(CollectionChange.Reset,0);Changed(CollectionChange.Reset,0);
+    }
     private void OnItemsChanged(GroupView group,NotifyCollectionChangedEventArgs args)
     {
         if(args.Action==NotifyCollectionChangedAction.Reset)

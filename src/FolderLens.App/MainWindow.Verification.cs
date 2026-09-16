@@ -76,6 +76,7 @@ public sealed partial class MainWindow
             byte[] pixels=new byte[64*48*4];for(int index=0;index<pixels.Length;index+=4){pixels[index]=40;pixels[index+1]=100;pixels[index+2]=200;pixels[index+3]=255;}
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,pixels);await encoder.FlushAsync();stream.Seek(0);byte[] png=new byte[checked((int)stream.Size)];await stream.ReadAsync(png.AsBuffer(),(uint)png.Length,InputStreamOptions.None);
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
+            if(arguments.Contains("--verify-soak")||arguments.Contains("--verify-soak-smoke")){await VerifySoak(source,report);return;}
             if(arguments.Contains("--verify-startup-profile")){await VerifyStartupProfile(source,report);return;}
             if(arguments.Contains("--verify-preview-completion")){await VerifyPreviewCompletion(source,report);return;}
             if(arguments.Contains("--verify-file-transfer")){await VerifyFileTransfer(source,report);return;}
@@ -256,12 +257,22 @@ public sealed partial class MainWindow
             await RestoreImageDevice(Shell.XamlRoot.RasterizationScale,Shell.XamlRoot.RasterizationScale);
             if(imagePage!=0||rotation!=1||viewerScaleIntent!=ViewerScaleIntent.Custom||viewerCustomPhysicalScale!=2.5)throw new InvalidOperationException("图片设备恢复丢失旋转或自定义倍率。");
             report["imageDeviceStateRestored"]=true;ClearResultSelection();
-            string displayedId=resultHandle!.Id;long displayedCount=resultHandle.Count;
-            for(int iteration=0;iteration<4;iteration++)
+            // Keep the displayed lease fixed while constructing discarded
+            // candidates. A legitimate concurrent publication releases its predecessor.
+            bool playingBeforeLeaseCheck=slideShow;slideShow=true;
+            try
             {
-                var discarded=await catalog!.CreateSnapshot(CurrentFilter(),epoch,generation,lifetime.Token);await catalog.ReleaseSnapshot(discarded.Id);
+                if(queryBusy)await queryCompletion;
+                string displayedId=resultHandle!.Id;long displayedCount=resultHandle.Count;
+                for(int iteration=0;iteration<4;iteration++)
+                {
+                    var discarded=await catalog!.CreateSnapshot(CurrentFilter(),epoch,generation,lifetime.Token);await catalog.ReleaseSnapshot(discarded.Id);
+                }
+                int retainedCount=(await catalog!.ReadPage(displayedId,0)).Count;
+                report["snapshotLeaseObservation"]=new{displayedId,displayedCount,retainedCount,currentId=resultHandle?.Id,currentCount=resultHandle?.Count};
+                if(retainedCount!=displayedCount||resultHandle?.Id!=displayedId)throw new InvalidOperationException("未发布的候选查询淘汰了界面仍在显示的结果快照。");
             }
-            if((await catalog!.ReadPage(displayedId,0)).Count!=displayedCount)throw new InvalidOperationException("未发布的候选查询淘汰了界面仍在显示的结果快照。");
+            finally{slideShow=playingBeforeLeaseCheck;}
             report["displayedSnapshotLeaseRetained"]=true;
             await WaitUntil(()=>thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
             var normalCache=thumbnailCache;await using var unavailableCache=new ThumbnailCache(Path.Combine(dataDirectory,"unavailable-cache"),new(){MinimumFreeBytes=long.MaxValue});await unavailableCache.Initialize();
@@ -277,7 +288,7 @@ public sealed partial class MainWindow
             folderGrouping=new(true);sortDescending=false;await OpenRoot(source);
             if(metadataTask is not null)await metadataTask;await RefreshQuery();
             FilesGrid.ScrollIntoView(results![0],ScrollIntoViewAlignment.Leading);Shell.UpdateLayout();
-            await WaitUntil(()=>visible.Count>0&&visible.All(item=>item.Thumbnail is not null),TimeSpan.FromSeconds(10));
+            await WaitUntil(()=>visible.Count(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)&&FilesGrid.ContainerFromItem(item) is not null)>=10&&visible.All(item=>item.Thumbnail is not null),TimeSpan.FromSeconds(10));
             var stableRows=visible.Where(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)).Select(item=>(Row:item,Container:FilesGrid.ContainerFromItem(item),Thumbnail:item.Thumbnail)).ToArray();
             await File.WriteAllBytesAsync(Path.Combine(first,"image-02a.png"),png);await File.WriteAllBytesAsync(Path.Combine(first,"image-08a.png"),png);
             await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);await Task.Delay(100);
@@ -350,11 +361,13 @@ public sealed partial class MainWindow
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;
         MinWidth.Value=32;PendingView.IsChecked=false;await ApplyBrowserFilters();
+        await StartMetadataRefresh();await RefreshQuery();
         if(resultHandle?.Count!=12)throw new InvalidOperationException("元数据刷新反例的初始图片不完整。");
         string previous=resultHandle.Id;long request=queryRequest;var oldMetadata=metadataTask;
         RefreshRoot(this,new RoutedEventArgs());
-        await WaitUntil(()=>queryRequest>request&&resultHandle?.Id!=previous,TimeSpan.FromSeconds(10));
+        await WaitUntil(()=>queryRequest>request&&resultHandle is {} refreshed&&refreshed.Id!=previous&&!queryBusy,TimeSpan.FromSeconds(10));
         if(metadataTask is not null)await metadataTask;
+        if(queryBusy)await queryCompletion;
         report["matchesAfterRefresh"]=resultHandle!.Count;report["metadataTaskReplaced"]=!ReferenceEquals(oldMetadata,metadataTask);
         if(resultHandle.Count!=12)throw new InvalidOperationException("F5后未变化图片从尺寸筛选结果中消失，元数据未自动恢复。");
         report["status"]="PASS";

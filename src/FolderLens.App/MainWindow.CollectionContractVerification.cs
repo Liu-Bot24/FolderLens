@@ -56,6 +56,13 @@ public sealed partial class MainWindow
         first.Update(large,first.Info with{Count=5000},[new(0,2,5000)]);
         if(!ReferenceEquals(view.CurrentItem,a)||view.CurrentPosition!=4000)failures.Add("Reset后当前项身份改变");
         source.Remove(first);source.Add(first);
+        view.MoveCurrentTo(a);long resetBefore=view.ResetCount;
+        view.ResetSource(new ObservableCollection<BrowserFileGroup>{first,second});
+        if(view.Count!=5001||!ReferenceEquals(view.CurrentItem,a)||view.CurrentPosition!=4000||view.ResetCount!=resetBefore+1)
+            failures.Add("分组批量重排没有保留当前项或通知正确数量");
+        int liveCount=view.Count;source.Add(new BrowserFileGroup(initial,new("detached","Detached",0,1,0,1,"ready","all")));
+        if(view.Count!=liveCount)failures.Add("批量重排后仍订阅旧分组集合");
+        report["bulkGroupResetRetainsCurrencyAndDetachesOldSource"]=true;
         if(structuralCurrencyChanges<3)failures.Add("结构变化缺少不可取消的 CurrentChanging 通知");
         report["collectionCallbacks"]=callbacks;report["structuralCurrencyChanges"]=structuralCurrencyChanges;report["failures"]=failures;
         if(failures.Count>0)throw new InvalidOperationException(string.Join("；",failures.Distinct()));

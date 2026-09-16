@@ -28,6 +28,7 @@ public sealed partial class MainWindow
         {
             report["currentAction"]=action;report["phase"]="open";
             await OpenRoot(directory);if(metadataTask is not null)await metadataTask;
+            slideShow=true;if(queryBusy)await queryCompletion;
             var original=results??throw new InvalidOperationException($"没有浏览结果：busy={queryBusy}, status={Status.Text}, summary={ResultSummary.Text}");
             var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,14 +37,18 @@ public sealed partial class MainWindow
             var first=(FileRow)original[0]!;await original.EnsureLoaded(first,lifetime.Token);await SelectPreview(first);
             var later=(FileRow)original[2]!;await original.EnsureLoaded(later,lifetime.Token);
             int attempts=0;
-            verifySlideAdvanceBarrier=async token=>{if(++attempts>1&&action=="restart-wait")return;entered.TrySetResult();await release.Task;if(action=="restart-error")throw new IOException("Obsolete slideshow tick");};
-            var interval=slideTimer!.Interval;verifySlideTickCompleted=()=>finished.TrySetResult();
+            verifySlideAdvanceBarrier=async token=>{if(++attempts>1&&action=="restart-wait"){slideTimer!.Interval=TimeSpan.FromHours(1);return;}entered.TrySetResult();await release.Task;if(action=="restart-error")throw new IOException("Obsolete slideshow tick");};
+            int completions=0;
+            var interval=slideTimer!.Interval;verifySlideTickCompleted=()=>{if(++completions>=(action=="restart-wait"?2:1))finished.TrySetResult();};
             try
             {
                 slideShow=true;slideTimer.Interval=TimeSpan.FromMilliseconds(1);slideTimer.Start();
                 report["phase"]="tick-enter";
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
                 report["phase"]="user-action";
+                // Keep subsequent valid ticks from racing the stale-tick assertion.
+                // restart-wait explicitly starts one new tick below.
+                slideTimer.Interval=TimeSpan.FromHours(1);
                 if(action=="selection")await SelectPreview(later);
                 else if(action!="advance")
                 {
@@ -52,7 +57,11 @@ public sealed partial class MainWindow
                 }
                 bool newTimerContinued=true;
                 report["phase"]="new-tick";
-                if(action=="restart-wait"){try{await WaitUntil(()=>attempts>1,TimeSpan.FromMilliseconds(300));}catch(TimeoutException){newTimerContinued=false;}}
+                if(action=="restart-wait")
+                {
+                    slideTimer.Interval=TimeSpan.FromMilliseconds(1);slideTimer.Start();
+                    try{await WaitUntil(()=>attempts>1&&selected?.Ordinal==3&&!previewLoading,TimeSpan.FromSeconds(3));}catch(TimeoutException){newTimerContinued=false;}
+                }
                 slideTimer.Stop();slideTimer.Interval=interval;var expected=selected;bool expectedPlaying=slideShow;
                 release.TrySetResult();await finished.Task.WaitAsync(TimeSpan.FromSeconds(3));
                 report["phase"]="check";
@@ -125,13 +134,13 @@ public sealed partial class MainWindow
     private async Task VerifyPreviewLayout(Dictionary<string,object> report)
     {
         report["titleFont"]=FileTitle.FontFamily.Source;report["titleLanguage"]=FileTitle.Language;
-        double original=PreviewPane.Width;var originalSelection=selected;var errors=new List<string>();
+        double original=PreviewPane.Width;var originalSelection=selected;bool originalFullScreen=fullScreen;var errors=new List<string>();
         try
         {
             var padding=PreviewPane.Padding;var border=PreviewPane.BorderThickness;
-            SetFullScreenChrome(true);SetFullScreenChrome(true);
+            fullScreen=true;SetFullScreenChrome(true);SetFullScreenChrome(true);
             if(PreviewPane.Padding!=new Thickness(0)||PreviewPane.BorderThickness!=new Thickness(0)||PreviewActions.Visibility!=Visibility.Collapsed)errors.Add("全屏仍显示窗口边距或按钮");
-            SetFullScreenChrome(false);SetFullScreenChrome(false);
+            fullScreen=false;SetFullScreenChrome(false);SetFullScreenChrome(false);
             if(PreviewPane.Padding!=padding||PreviewPane.BorderThickness!=border||PreviewActions.Visibility!=Visibility.Visible)errors.Add("退出全屏没有恢复预览布局");
             foreach(string kind in new[]{"image","video"})
             {
@@ -144,9 +153,15 @@ public sealed partial class MainWindow
                 foreach(var button in PreviewActions.Children.OfType<Button>().Where(button=>button.Visibility==Visibility.Visible))
                 {
                     var bounds=button.TransformToVisual(PreviewPane).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));
-                    if(bounds.X<0||bounds.Right>width+1||bounds.Width<28||bounds.Height<28)errors.Add($"{width}: 预览按钮越界或过小 ({bounds.X},{bounds.Width})");
+                    if(bounds.Width<28||bounds.Height<28)errors.Add($"{width}: 预览按钮过小 ({bounds.Width},{bounds.Height})");
+                    var scroller=(ScrollViewer)PreviewActions.Parent;
+                    scroller.ChangeView(Math.Clamp(scroller.HorizontalOffset+bounds.X-10,0,scroller.ScrollableWidth),null,null,true);
+                    Shell.UpdateLayout();await Task.Delay(30);
+                    var reachable=button.TransformToVisual(scroller).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));
+                    if(reachable.X<-.5||reachable.Right>scroller.ActualWidth+.5)errors.Add($"{width}: 水平滚动后预览按钮仍不可见");
                     if(ToolTipService.GetToolTip(button) is null)errors.Add($"{width}: 预览按钮缺少说明");
                 }
+                ((ScrollViewer)PreviewActions.Parent).ChangeView(0,null,null,true);
                 var bitmap=new RenderTargetBitmap();await bitmap.RenderAsync(PreviewPane);
                 using var memory=new InMemoryRandomAccessStream();var encoder=await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId,memory);
                 encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,(uint)bitmap.PixelWidth,(uint)bitmap.PixelHeight,96,96,(await bitmap.GetPixelsAsync()).ToArray());await encoder.FlushAsync();
@@ -154,7 +169,7 @@ public sealed partial class MainWindow
             }
             }
         }
-        finally{PreviewPane.Width=original;selected=originalSelection;UpdateViewerInformation();}
+        finally{fullScreen=originalFullScreen;PreviewPane.Width=original;selected=originalSelection;UpdateViewerInformation();}
         report["errors"]=errors;if(errors.Count>0)throw new InvalidOperationException(string.Join("; ",errors));report["status"]="PASS";
     }
     private void VerifyIdentityScale(Dictionary<string,object> report)
@@ -313,7 +328,7 @@ public sealed partial class MainWindow
             var row=(FileRow)old[0]!;next.Retain(row,0,null);results=old;
             var loading=LoadRowProperties(row);await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
             results=next;await LoadRowProperties(row); // Existing request owns the row.
-            if(cancelRoot)scanStop.Cancel();old.Dispose();
+            if(cancelRoot){scanStop.Cancel();CancelThumbnails();}old.Dispose();
             await loading.WaitAsync(TimeSpan.FromSeconds(3));
             if(propertyRequests.Contains(row))errors.Add("属性请求未释放");
             if(!cancelRoot&&(row.Item is null||reads!=1))errors.Add("旧页取消后没有从新源接续");

@@ -54,8 +54,8 @@ public sealed partial class MainWindow
             report["monitors"]=observations;report["mixedDpiTransitionTested"]=scales.Count>1;
             prefetchStop.Cancel();if(prefetchTask is not null)await prefetchTask;
             var currentBitmap=fitBitmap;
-            prefetched.AddFirst(new PrefetchedImage(rootId,epoch,"pressure-fixture",1,0,1,1,1,new byte[4096],null!));prefetchBytes+=4096;
-            prefetchedDetails.AddFirst(new PrefetchedDetail(rootId,epoch,"pressure-detail-fixture",1,0,1,0,0,new byte[4096]));prefetchedDetailBytes+=4096;
+            prefetched.AddFirst(new PrefetchedImage(rootId,epoch,"pressure-fixture",1,new(1,0),1,1,new byte[4096],null!));prefetchBytes+=4096;
+            prefetchedDetails.AddFirst(new PrefetchedDetail(rootId,epoch,"pressure-detail-fixture",1,new(1,0),0,0,new byte[4096]));prefetchedDetailBytes+=4096;
             OnPrefetchMemoryPressure();await WaitUntil(()=>Volatile.Read(ref prefetchPressurePending)==0,TimeSpan.FromSeconds(2));
             if(prefetched.Count!=0||prefetchedDetails.Count!=0||prefetchBytes!=0||prefetchedDetailBytes!=0||!ReferenceEquals(fitBitmap,currentBitmap)||!ReferenceEquals(selected,originalRow))
                 throw new InvalidOperationException("内存压力处理没有释放预取缓存，或影响了正在显示的图片。");

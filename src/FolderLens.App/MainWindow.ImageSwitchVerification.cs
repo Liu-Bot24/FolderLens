@@ -44,10 +44,11 @@ public sealed partial class MainWindow
         report["pressureDisposedCachedBitmaps"]=disposable.Length;
         SchedulePrefetch(selection);if(prefetchTask is not null)await prefetchTask;
         var stale=prefetched.First();var staleRow=results.Cast<FileRow>().First(row=>Path.Combine(root,row.RelativePath)==stale.Path);
-        File.SetLastWriteTimeUtc(stale.Path,File.GetLastWriteTimeUtc(stale.Path).AddSeconds(2));
+        var originalTime=File.GetLastWriteTimeUtc(stale.Path);byte[] replacementBytes=await File.ReadAllBytesAsync(stale.Path);
+        File.Move(stale.Path,stale.Path+".old");await File.WriteAllBytesAsync(stale.Path,replacementBytes);File.SetLastWriteTimeUtc(stale.Path,originalTime);
         if(await FindPrefetched(staleRow,256,256,lifetime.Token) is not null||stale.Bitmap is not null)
             throw new InvalidOperationException("源版本改变后仍返回缓存。");
-        report["changedSourceRejected"]=true;
+        report["sameSizeAndTimeReplacementRejected"]=true;
         // Exercise the real NewDevice callback by replacing this control's device.
         // This does not simulate a hardware driver failure or change system settings.
         using(var replacement=new Microsoft.Graphics.Canvas.CanvasDevice())
@@ -66,7 +67,7 @@ public sealed partial class MainWindow
                 await WaitUntil(()=>imageResourceRevision>deviceRevision&&!previewLoading&&fitBitmap is not null&&previewReadySelection==selection,TimeSpan.FromSeconds(15));
             }
         }
-        await OpenRoot(Path.Combine(source,"B"));
+        string otherRoot=Path.Combine(dataDirectory,"other-root");Directory.CreateDirectory(otherRoot);await OpenRoot(otherRoot);
         if(prefetched.Count!=0||preparedPrefetchBytes!=0)throw new InvalidOperationException("切根没有清理预取位图。");
         report["rootChangeClearedCache"]=true;report["status"]="PASS";
     }
@@ -96,6 +97,10 @@ public sealed partial class MainWindow
         try
         {
             await SelectPreview((FileRow)results![0]!);await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var previousResults=results;var retained=pendingImagePrefetch!.Row;
+            await RefreshQuery(scanPreview:true);
+            if(ReferenceEquals(previousResults,results)||results!.IndexOf(retained)<0)throw new InvalidOperationException("未形成保留行的增量列表发布。");
+            report["incrementalPublicationRetainsTarget"]=true;
             var stages=new List<string>();verifyPreviewStage=stages.Add;
             var next=SelectPreview((FileRow)results[1]!);release.TrySetResult();await next.WaitAsync(TimeSpan.FromSeconds(10));
             report["stages"]=stages;report["targetReady"]=selected?.Ordinal==1&&previewReadySelection==selection&&!previewLoading&&fitBitmap is not null;

@@ -703,6 +703,20 @@ public sealed partial class MainWindow : Window
                 :await previewWorker!.Request(path,"fit",Context(row,current),new(width,height),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));
             message=reply.Message;
             verifyPreviewStage?.Invoke("workerFit");
+            var decoded=message.Metadata!.Value;
+            if(decoded.GetProperty("pages").GetInt32()>1&&!decoded.GetProperty("isAnimated").GetBoolean()&&!decoded.GetProperty("isRaw").GetBoolean())
+            {
+                // Classification must finish before presenting a static multipage
+                // file; an asynchronous metadata update could briefly expose page UI.
+                try{await RecordMetadata(row,reply,cancellation);}
+                finally{await previewWorker!.ReleaseAsset(reply);}
+                if(current==selection&&!cancellation.IsCancellationRequested)
+                {
+                    ClearImage();ImageCanvas.Visibility=FrameTools.Visibility=Visibility.Collapsed;
+                    QualityLabel.Text=$"{row.Detail} · 请用其他应用打开此文件。";
+                }
+                return;
+            }
             // Display first. Metadata writes do not gate the loading indicator.
             await PresentFit(reply,current,cancellation);
             if(current!=selection||cancellation.IsCancellationRequested)return;

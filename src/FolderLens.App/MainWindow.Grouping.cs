@@ -126,6 +126,25 @@ public sealed partial class MainWindow
         {
             flatBrowserItems!.UpdateRanges(changes[""],index=>(FileRow)source[index]!,source.IndexOf);return;
         }
+        int orderChanges=Math.Abs(browserGroups.Count-groups.Count);
+        for(int i=0;i<Math.Min(browserGroups.Count,groups.Count)&&orderChanges<=4096;i++)
+            if(browserGroups[i].Info.Id!=groups[i].Id)orderChanges++;
+        if(orderChanges>4096)
+        {
+            // Thousands of ObservableCollection remove/insert pairs shift the
+            // backing array quadratically and repeatedly rebuild WinUI group offsets.
+            // Use the same bounded-reset policy as large file-range publications.
+            var retained=browserGroups.ToDictionary(group=>group.Info.Id);
+            groupedBrowserSource?.Dispose();
+            var reordered=new List<BrowserFileGroup>(groups.Count);
+            foreach(var info in groups)
+            {
+                if(retained.TryGetValue(info.Id,out var group)){group.Update(source,info,changes[info.Id]);reordered.Add(group);}
+                else reordered.Add(new(source,info));
+            }
+            browserGroups=new(reordered);groupedBrowserSource?.ResetSource(browserGroups);
+            return;
+        }
         var wanted=groups.Select(group=>group.Id).ToHashSet();
         for(int i=browserGroups.Count-1;i>=0;i--)if(!wanted.Contains(browserGroups[i].Info.Id))browserGroups.RemoveAt(i);
         var existing=browserGroups.Select((group,index)=>(group,index)).ToDictionary(pair=>pair.group.Info.Id);
