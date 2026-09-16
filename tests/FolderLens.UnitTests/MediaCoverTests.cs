@@ -5,6 +5,24 @@ namespace FolderLens.UnitTests;
 
 public sealed class MediaCoverTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ForegroundAudioWithoutCoverStillChecksSourceAndCancellation(bool cancel)
+    {
+        string native=Native(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-audio-version",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string source=Path.Combine(directory,"audio.wav"),output=Path.Combine(directory,"cover.png");
+        await BoundedProcess.Run(Path.Combine(native,"ffmpeg.exe"),["-nostdin","-v","error","-f","lavfi","-i","sine=frequency=440:duration=0.1",source],TimeSpan.FromSeconds(10),1<<20,CancellationToken.None);
+        string project=Path.GetFullPath(Path.Combine(native,"..",".."));
+        await using var probe=new SourceFileProbe(Path.Combine(project,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe"));
+        string signature=FileObservationWriter.Signature(await probe.ReadObservation(source,CancellationToken.None));
+        var media=new MediaTools(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
+        using var stop=new CancellationTokenSource();
+        media.VerificationBarrier=_=>{if(cancel)stop.Cancel();else File.SetLastWriteTimeUtc(source,DateTime.UtcNow.AddMinutes(1));return Task.CompletedTask;};
+        if(cancel)await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>media.ReadCover(source,output,signature,probe,stop.Token,512,priority:WorkerPriority.Foreground));
+        else Assert.Equal("FileChanged",(await Assert.ThrowsAsync<IOException>(()=>media.ReadCover(source,output,signature,probe,stop.Token,512,priority:WorkerPriority.Foreground))).Message);
+        Assert.False(File.Exists(output));
+    }
     private static string Native()
     {
         var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;
@@ -69,9 +87,11 @@ public sealed class MediaCoverTests
         held.Dispose();using var acquired=await next;Assert.Equal(WorkerLane.VideoCover,acquired.Lane);
     }
     [Theory]
-    [InlineData("probe")]
-    [InlineData("cover")]
-    public async Task ChangedSourceCannotReturnMetadataOrCoverForPreviousVersion(string stage)
+    [InlineData("probe",false)]
+    [InlineData("cover",false)]
+    [InlineData("probe",true)]
+    [InlineData("cover",true)]
+    public async Task ChangedSourceCannotReturnMetadataOrCoverForPreviousVersion(string stage,bool foreground)
     {
         string native=Native(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-versioned-cover",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
         string source=Path.Combine(directory,"clip.mp4"),output=Path.Combine(directory,"cover.png"),ffmpeg=Path.Combine(native,"ffmpeg.exe");
@@ -80,12 +100,22 @@ public sealed class MediaCoverTests
         await using var probe=new SourceFileProbe(Path.Combine(project,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe"));
         string signature=FileObservationWriter.Signature(await probe.ReadObservation(source,CancellationToken.None));
         var media=new MediaTools(Path.Combine(native,"ffprobe.exe"),ffmpeg);
-        media.VerificationBarrier=at=>{if(at==stage)File.SetLastWriteTimeUtc(source,DateTime.UtcNow.AddSeconds(5));return Task.CompletedTask;};
-        var error=await Assert.ThrowsAsync<IOException>(()=>media.ReadCover(source,output,signature,probe,CancellationToken.None,512));
+        var priority=foreground?WorkerPriority.Foreground:WorkerPriority.Visible;
+        media.VerificationBarrier=at=>
+        {
+            if(at==stage)
+            {
+                // Same bytes and mtime at the same path, but a different file identity.
+                string replacement=Path.Combine(directory,"replacement.mp4");File.Copy(source,replacement);
+                File.SetLastWriteTimeUtc(replacement,File.GetLastWriteTimeUtc(source));File.Move(replacement,source,true);
+            }
+            return Task.CompletedTask;
+        };
+        var error=await Assert.ThrowsAsync<IOException>(()=>media.ReadCover(source,output,signature,probe,CancellationToken.None,512,priority:priority));
         Assert.Equal("FileChanged",error.Message);
         media.VerificationBarrier=null;
         signature=FileObservationWriter.Signature(await probe.ReadObservation(source,CancellationToken.None));
-        var info=await media.ReadCover(source,Path.Combine(directory,"current.png"),signature,probe,CancellationToken.None,512);
+        var info=await media.ReadCover(source,Path.Combine(directory,"current.png"),signature,probe,CancellationToken.None,512,priority:priority);
         Assert.Equal(32,info.Width);Assert.True(File.Exists(Path.Combine(directory,"current.png")));
     }
 }

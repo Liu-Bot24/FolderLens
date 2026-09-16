@@ -31,8 +31,17 @@ public sealed partial class CapacityWindow
                 for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++){var child=VisualTreeHelper.GetChild(node,i);yield return child;foreach(var nested in Children(child))yield return nested;}
             }
             var bars=Children(shares).OfType<Microsoft.UI.Xaml.Controls.ProgressBar>().ToArray();
+            // Theme/size changes realize the ItemsControl template asynchronously.
+            // Wait for the expected controls, not an assumed 60 ms render deadline.
+            for(int attempt=0;attempt<60&&(bars.Length==0||bars.Length!=shares.Items.Count);attempt++)
+            {
+                await Task.Delay(50);root.UpdateLayout();
+                bars=Children(shares).OfType<Microsoft.UI.Xaml.Controls.ProgressBar>().ToArray();
+            }
+            result[$"expectedBars-{width}"]=shares.Items.Count;
             result[$"bars-{width}"]=bars.Select(bar=>new{bar.Value,bar.IsIndeterminate}).ToArray();
-            if(bars.Length==0||bars.Any(bar=>bar.IsIndeterminate))throw new InvalidOperationException("容量占比条没有使用确定数值模式。");
+            if(bars.Length==0||bars.Length!=shares.Items.Count)throw new InvalidOperationException("容量占比条未在等待期内完整实现。");
+            if(bars.Any(bar=>bar.IsIndeterminate))throw new InvalidOperationException("容量占比条没有使用确定数值模式。");
             foreach(var button in new[]{parent,refresh,browseButton})
             {
                 var bounds=button.TransformToVisual(root).TransformBounds(new Windows.Foundation.Rect(0,0,button.ActualWidth,button.ActualHeight));

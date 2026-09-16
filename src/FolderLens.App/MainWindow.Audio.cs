@@ -7,6 +7,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
+    private Action? detachAudioEvents;
     private void InitializeAudio()
     {
         audioTimer=DispatcherQueue.CreateTimer();audioTimer.Interval=TimeSpan.FromMilliseconds(500);
@@ -15,6 +16,7 @@ public sealed partial class MainWindow
     private void StopAudio()
     {
         var previous=audio;audio=null;audioTimer?.Stop();
+        var detach=detachAudioEvents;detachAudioEvents=null;detach?.Invoke();
         if(previous is not null)
         {
             var source=previous.Source;previous.Pause();previous.Source=null;previous.Dispose();
@@ -52,14 +54,24 @@ public sealed partial class MainWindow
                 player=new MediaPlayer{AutoPlay=false,Volume=AudioVolume.Value,IsMuted=AudioMute.IsChecked==true};
                 audio=player;var captured=player;
                 void OnCurrent(Action action)=>DispatcherQueue.TryEnqueue(()=>{if(!closing&&current==selection&&ReferenceEquals(audio,captured))action();});
-                player.MediaOpened+=(_,_)=>OnCurrent(()=>{ApplyAudioRate();AudioState.Text="";UpdateAudioControls();});
-                player.PlaybackSession.PlaybackStateChanged+=(_,_)=>OnCurrent(UpdateAudioControls);
-                player.MediaEnded+=(_,_)=>OnCurrent(()=>{AudioState.Text="播放结束。";UpdateAudioControls();});
-                player.MediaFailed+=(_,error)=>
+                void Opened(MediaPlayer sender,object args)=>OnCurrent(()=>{ApplyAudioRate();AudioState.Text="";UpdateAudioControls();});
+                void StateChanged(MediaPlaybackSession sender,object args)=>OnCurrent(UpdateAudioControls);
+                void Ended(MediaPlayer sender,object args)=>OnCurrent(()=>{AudioState.Text="播放结束。";UpdateAudioControls();});
+                void Failed(MediaPlayer sender,MediaPlayerFailedEventArgs error)
                 {
                     string message=$"无法播放此音频。请检查音频设备，或用其他播放器打开。";
                     OnCurrent(()=>{StopAudio();AudioState.Text=message;});
+                }
+                var playback=player.PlaybackSession;
+                // Closing a WinRT player does not detach its native event delegates.
+                // Those delegates capture this player, so remove them before Close.
+                detachAudioEvents=()=>
+                {
+                    captured.MediaOpened-=Opened;playback.PlaybackStateChanged-=StateChanged;
+                    captured.MediaEnded-=Ended;captured.MediaFailed-=Failed;
                 };
+                player.MediaOpened+=Opened;playback.PlaybackStateChanged+=StateChanged;
+                player.MediaEnded+=Ended;player.MediaFailed+=Failed;
                 AudioState.Text="正在打开音频…";
                 player.Source=MediaSource.CreateFromUri(new Uri(SourcePath(row)));
                 ApplyAudioRate();player.Play();audioTimer?.Start();

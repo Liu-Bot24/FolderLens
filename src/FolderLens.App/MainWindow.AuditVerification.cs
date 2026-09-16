@@ -229,7 +229,21 @@ public sealed partial class MainWindow
         ToggleSlideshow(this,new RoutedEventArgs());await SelectBrowserOrdinal(source,1,lifetime.Token);
         var newDone=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);verifySlideEventCompleted=()=>newDone.TrySetResult();ToggleSlideshow(this,new RoutedEventArgs());await newDone.Task.WaitAsync(TimeSpan.FromSeconds(3));
         var oldDone=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);verifySlideEventCompleted=()=>oldDone.TrySetResult();string currentStatus=Status.Text;
-        try{release.TrySetResult();await oldDone.Task.WaitAsync(TimeSpan.FromSeconds(3));if(!slideShow||Status.Text!=currentStatus)throw new InvalidOperationException("旧启动异常覆盖了新启动状态。");report["status"]="PASS";}
+        report["beforeOldRelease"]=new{slideShow,status=currentStatus,sourceCurrent=ReferenceEquals(results,source),queryBusy,selectedPath=selected?.Item?.RelativePath,slideRequest,generation};
+        try
+        {
+            release.TrySetResult();await oldDone.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            report["afterOldRelease"]=new{slideShow,status=Status.Text,sourceCurrent=ReferenceEquals(results,source),queryBusy,selectedPath=selected?.Item?.RelativePath,slideRequest,generation};
+            if(!slideShow||Status.Text!=currentStatus)throw new InvalidOperationException("旧启动异常覆盖了新启动状态。");
+            if(scanTask is not null)await scanTask;
+            reconcilePending=true;await Reconcile();
+            if(!slideShow||Status.Text!=currentStatus)throw new InvalidOperationException("后台目录核对清除了播放状态。");
+            report["reconcilePreservedPlaybackStatus"]=true;
+            slideShow=false;slideTimer?.Stop();Status.Text="正在刷新文件列表…";
+            reconcilePending=true;await Reconcile();
+            if(Status.Text.Length!=0)throw new InvalidOperationException("普通浏览核对完成后未清除扫描状态。");
+            report["reconcileClearedBrowserStatus"]=true;report["status"]="PASS";
+        }
         finally{verifySlideEventCompleted=null;slideShow=false;slideTimer?.Stop();results=baseline;BindBrowserResults(baseline,[]);await SetImmersive(false);}
     }
     private async Task VerifySelectionRace(string directory,Dictionary<string,object> report)

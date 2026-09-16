@@ -18,7 +18,7 @@ foreach($file in $manifest.files){
  if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "Required manifest file missing: $($file.path)"}
  $actual=Get-Item -LiteralPath $path
  if($actual.Length -ne $file.bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $file.sha256){throw "Manifest hash mismatch: $($file.path)"}
- $expected[$file.path]=$file
+ $expected[([string]$file.path).Replace('\','/')]=$file
 }
 foreach($required in $manifest.requiredFiles){if(-not $expected.ContainsKey($required)){throw "Required runtime file missing from manifest: $required"}}
 foreach($required in @('App.xbf','MainWindow.xbf','FolderLens.App.pri')){
@@ -53,15 +53,24 @@ if($package -and -not $ManifestOnly){
    $zip=[IO.Compression.ZipFile]::OpenRead($path)
    try{
     if($zip.Entries.Count -ne $manifest.files.Count+1){throw 'Portable ZIP entry count mismatch.'}
+    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $manifestHash=(Get-FileHash -LiteralPath (Join-Path $publishRoot 'release-manifest.json')).Hash
     foreach($entry in $zip.Entries){
-     if($entry.FullName -eq 'release-manifest.json'){continue}
-     if(-not $entry.FullName.StartsWith('app/')){throw 'Unexpected ZIP root entry.'}
-     $relative=$entry.FullName.Substring(4)
-     if(-not $expected.ContainsKey($relative)){throw "Unexpected ZIP entry: $relative"}
+     $name=$entry.FullName.Replace('\','/')
+     if($name -match '[\x00-\x1f:*?"{};]|^/|(^|/)(\.|\.\.)(/|$)|//|/$' -or -not $seen.Add($name)){throw "Unsafe or duplicate ZIP entry: $name"}
+     if($name -eq 'release-manifest.json'){$expectedHash=$manifestHash}
+     else{
+      if(-not $name.StartsWith('app/',[StringComparison]::OrdinalIgnoreCase)){throw 'Unexpected ZIP root entry.'}
+      $relative=$name.Substring(4)
+      if(-not $expected.ContainsKey($relative)){throw "Unexpected ZIP entry: $relative"}
+      $expectedHash=$expected[$relative].sha256
+     }
      $stream=$entry.Open();$sha=[Security.Cryptography.SHA256]::Create()
      try{$hash=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')}finally{$stream.Dispose();$sha.Dispose()}
-     if($hash -ne $expected[$relative].sha256){throw "Portable ZIP content mismatch: $relative"}
+     if($hash -ne $expectedHash){throw "Portable ZIP content mismatch: $name"}
     }
+    if(-not $seen.Contains('release-manifest.json')){throw 'Portable ZIP manifest missing.'}
+    foreach($relative in $expected.Keys){if(-not $seen.Contains('app/'+$relative)){throw "Portable ZIP file missing: $relative"}}
    }finally{$zip.Dispose()}
   }
  }

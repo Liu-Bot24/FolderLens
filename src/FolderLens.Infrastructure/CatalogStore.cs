@@ -308,7 +308,13 @@ public sealed partial class CatalogStore : IAsyncDisposable
             started=true;
             using(var dirs=c.CreateCommand())
             {
-                dirs.Transaction=readTransaction;dirs.CommandText="SELECT directory_id,parent_id,relative_path FROM Directories WHERE root_id=$root";dirs.Parameters.AddWithValue("$root",filter.RootId);
+                // Keep the selected subtree and its ancestor chain in the same
+                // catalog read transaction; unrelated siblings do not belong to
+                // this snapshot's frozen hierarchy.
+                dirs.Transaction=readTransaction;dirs.CommandText="SELECT directory_id,parent_id,relative_path FROM Directories WHERE root_id=$root AND ($scope='' OR relative_path=$scope OR substr(relative_path,1,length($prefix))=$prefix OR relative_path='' OR substr($scope,1,length(relative_path)+1)=relative_path||char(92))";
+                dirs.Parameters.AddWithValue("$root",filter.RootId);
+                string scope=filter.DirectoryScope.Replace('/','\\');
+                dirs.Parameters.AddWithValue("$scope",scope);dirs.Parameters.AddWithValue("$prefix",scope+"\\");
                 using var rows=dirs.ExecuteReader();SqliteTransaction? write=null;int batch=0;
                 try
                 {

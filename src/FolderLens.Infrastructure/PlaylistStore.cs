@@ -112,33 +112,58 @@ public sealed partial class CatalogStore
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PlaylistProbeOverride {get;set;}
     public async Task RefreshPlaylist(string collectionId,CancellationToken cancellation=default)
     {
-        if(playlistPath is null)return;
+        await foreach(var _ in RefreshPlaylistBatches(collectionId,cancellation).ConfigureAwait(false)){}
+    }
+    public async IAsyncEnumerable<long> RefreshPlaylistBatches(string collectionId,[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellation=default,TimeSpan? timeBudget=null)
+    {
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeBudget??TimeSpan.FromMinutes(2));
+        await using var batches=RefreshPlaylistBatchesCore(collectionId,deadline.Token).GetAsyncEnumerator(deadline.Token);
+        while(true)
+        {
+            bool more;
+            try{more=await batches.MoveNextAsync().ConfigureAwait(false);}
+            catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("收藏验证已达到本次时间预算，未核实的链接已保留，请刷新重试。");}
+            if(!more)yield break;yield return batches.Current;
+        }
+    }
+    private async IAsyncEnumerable<long> RefreshPlaylistBatchesCore(string collectionId,[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellation)
+    {
+        if(playlistPath is null)yield break;
         await using var worker=ScanWorkerClient.FindExecutable() is {} executable?new ScanWorkerClient(executable):null;
         var missingProof=new ScanRenames(this,worker);
+        async Task<ScanDirectoryPacket> Probe(string value)
+        {
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            try{return PlaylistProbeOverride is {} probe?await probe(value,timeout.Token).ConfigureAwait(false):await (worker??throw new FileNotFoundException("缺少目录扫描组件，无法安全验证收藏。")).Probe(value,timeout.Token).ConfigureAwait(false);}
+            catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){return new("offline",[],"ProbeTimeout");}
+            catch(TimeoutException){cancellation.ThrowIfCancellationRequested();return new("offline",[],"ProbeTimeout");}
+        }
         long offset=0;
         while(true)
         {
             var links=await writer.Execute(c=>
             {
-                using var cmd=c.CreateCommand();cmd.CommandText="SELECT rowid,path,anchor,directory_identity,location_key,file_identity,case_mode FROM playlist.SavedLinks WHERE collection_id=$id AND rowid>$after ORDER BY rowid LIMIT 64";
+                using var cmd=c.CreateCommand();cmd.CommandText="SELECT rowid,path,anchor,directory_identity,location_key,file_identity,case_mode FROM playlist.SavedLinks WHERE collection_id=$id AND rowid>$after ORDER BY rowid LIMIT $limit";
+                cmd.Parameters.AddWithValue("$limit",offset==0?1:64);
                 cmd.Parameters.AddWithValue("$id",collectionId);cmd.Parameters.AddWithValue("$after",offset);
                 using var rows=cmd.ExecuteReader();var batch=new List<(long Id,string Path,string Anchor,string Identity,string Key,string? FileIdentity,string CaseMode)>();
                 while(rows.Read())batch.Add((rows.GetInt64(0),rows.GetString(1),rows.GetString(2),rows.GetString(3),rows.GetString(4),rows.IsDBNull(5)?null:rows.GetString(5),rows.GetString(6)));return batch;
             },cancellation).ConfigureAwait(false);
             if(links.Count==0)break;
+            // Share only within this bounded batch. Later batches must observe
+            // directory replacement again rather than trusting a session cache.
+            var parents=new Dictionary<string,ScanDirectoryPacket>(StringComparer.Ordinal);
+            var pending=new List<(string Parent,Func<Task> Apply)>();var batchClock=System.Diagnostics.Stopwatch.StartNew();int processed=0;
             foreach(var link in links)
             {
+                if(processed>0&&batchClock.Elapsed>=TimeSpan.FromMilliseconds(250))break;
+                processed++;
                 cancellation.ThrowIfCancellationRequested();offset=link.Id;
                 string path=PathRules.ValidateSource(link.Path),parent=Path.GetDirectoryName(path)!;
-                async Task<ScanDirectoryPacket> Probe(string value)
-                {
-                    try{return PlaylistProbeOverride is {} probe?await probe(value,cancellation).ConfigureAwait(false):worker is null?await Task.Run(()=>ScanPathProbe.Read(value),cancellation).ConfigureAwait(false):await worker.Probe(value,cancellation).ConfigureAwait(false);}
-                    catch(TimeoutException){cancellation.ThrowIfCancellationRequested();return new("offline",[],"ProbeTimeout");}
-                }
-                var directory=await Probe(parent).ConfigureAwait(false);
+                if(!parents.TryGetValue(parent,out var directory))parents[parent]=directory=await Probe(parent).ConfigureAwait(false);
                 if(directory.State=="missing"&&await missingProof.ConfirmMissingLocation(link.Anchor,link.Identity,cancellation).ConfigureAwait(false))
                 {
-                    await RemoveSavedLink(collectionId,link.Id,link.Anchor,link.Identity,link.Key,cancellation).ConfigureAwait(false);continue;
+                    pending.Add((parent,()=>RemoveSavedLink(collectionId,link.Id,link.Anchor,link.Identity,link.Key,cancellation)));continue;
                 }
                 // Unknown/offline is not deletion. A verified same-volume parent
                 // and a changed identity/position or missing child is conclusive.
@@ -152,7 +177,7 @@ public sealed partial class CatalogStore
                     file.State=="present"&&file.PhysicalIdentity is not null&&link.FileIdentity is not null&&file.PhysicalIdentity!=link.FileIdentity;
                 if(changed)
                 {
-                    await RemoveSavedLink(collectionId,link.Id,link.Anchor,link.Identity,link.Key,cancellation).ConfigureAwait(false);
+                    pending.Add((parent,()=>RemoveSavedLink(collectionId,link.Id,link.Anchor,link.Identity,link.Key,cancellation)));
                     continue;
                 }
                 if(file.State!="present"||file.FileStamp is null||file.PhysicalIdentity is null||directory.CaseMode is not ("sensitive" or "insensitive"))continue;
@@ -160,6 +185,8 @@ public sealed partial class CatalogStore
                 // proves continuity; a mismatch is uncertainty, never replacement.
                 if(link.FileIdentity is null&&link.Key!=FileLocationKey(parent,Path.GetFileName(path),"sensitive",directory.PhysicalIdentity,file.PhysicalIdentity,"")&&
                     link.Key!=FileLocationKey(parent,Path.GetFileName(path),"insensitive",directory.PhysicalIdentity,file.PhysicalIdentity,""))continue;
+                pending.Add((parent,async()=>
+                {
                 await writer.Execute(c=>
                 {
                     using var t=c.BeginTransaction();
@@ -168,7 +195,18 @@ public sealed partial class CatalogStore
                     t.Commit();return 0;
                 },cancellation).ConfigureAwait(false);
                 await ObservePlaylistFile(parent,Path.GetFileName(path),directory,file,cancellation).ConfigureAwait(false);
+                }));
             }
+            // A replacement directory can contain the same moved file identities.
+            // Revalidate each parent before committing any observation in this batch.
+            var stable=new HashSet<string>(StringComparer.Ordinal);
+            foreach(string parent in pending.Select(item=>item.Parent).Distinct(StringComparer.Ordinal))
+            {
+                var before=parents[parent];var after=await Probe(parent).ConfigureAwait(false);
+                if(before.State==after.State&&before.PhysicalIdentity==after.PhysicalIdentity&&before.ResolvedLocation==after.ResolvedLocation&&before.VolumeIdentity==after.VolumeIdentity&&before.CaseMode==after.CaseMode)stable.Add(parent);
+            }
+            foreach(var item in pending){cancellation.ThrowIfCancellationRequested();if(stable.Contains(item.Parent))await item.Apply().ConfigureAwait(false);}
+            cancellation.ThrowIfCancellationRequested();yield return offset;
         }
     }
 

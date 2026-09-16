@@ -2,12 +2,15 @@
 
 本轮基线为 `5958904d78b914fffa9216d98154a4647555c90f`。本页记录可追溯的实测范围；整体仍为 **NO-GO**，不把部分测试通过等同全部一期验收。
 
+后续六项 Pro 审计修复、553 项全量与 42＋43 项原生复验，以及音频修复后的正式长稳结果，见 [Pro 3451b7c 修复验证](VALIDATION_PRO_3451b7c.md)。长稳仍有未闭合的私有内存增长，A054a 保持 FAIL。
+
 ## 已确认的问题和修复
 
 - 增量查询保留同一个文件行时，预取仍因结果集合对象变化被丢弃。现在复核行的观察身份，接纳仍有效的预取，同时禁止继续按旧集合的序号读取邻居。
 - 预取只比较长度和 mtime，会接受同路径、同长度、同 mtime 的替换文件。缓存现在保存并复核完整 SourceFileStamp。真实替换文件的反例在修复前失败、修复后通过。
 - 冷打开多页静态 TIFF 时，异步分类晚于图片显示。现在先完成多页分类，再释放解码资产并显示普通文件状态，不进入图片翻页预览。已分类和旧索引尚未分类两种路径均验证。
 - 五万文件夹组逐项逆序搬移超过原有 100ms 门槛。大范围变更采用一次有界重置，保留组对象和当前项；详见对应 ADR。相同原生检查从约 182–187ms 降到 50–58ms，没有调整原门槛。
+- 长稳进一步发现音频播放器事件循环保留：停止并关闭的播放器仍被原生事件委托引用。现在在停止和关闭前显式移除四个事件订阅。离屏弱引用回归在修复前保留 2/2 并 FAIL（`artifacts/phase1-audio-retention-red`），修复后保留 0/2 并 PASS（`artifacts/phase1-audio-retention-green`）；真实音频失败后重试和旧回调隔离也 PASS（`artifacts/phase1-audio-recovery-after-retention-fix`）。完整内存曲线复测仍在进行，不能仅凭两个对象回收就宣布整个增长问题消失。
 
 ## 执行结果与证据
 
@@ -21,6 +24,7 @@
 | 原生补充回归 | 43 PASS，包含受控崩溃后重新启动 | `artifacts/phase1-current-extra/summary.json` |
 | 原生综合启动 | 7 PASS；首轮及诊断阶段失败保留，最终固定被测快照并等待所需容器实现后复验 | `artifacts/phase1-startup-final/native-refresh.json` 及同前缀六项专项 |
 | 打包及执行脚本 | 6 PASS：发布规则、隐私、worker 清单、进程日志、孤儿进程、独立原生编译 | `artifacts/phase1-scripts-summary.json` |
+| NuGet 已知漏洞查询 | 官方源查询成功；9 个解决方案项目及传递包未报告已知漏洞，不代表原生组件／独立运行时的完整安全审计 | `artifacts/phase1-nuget-vulnerability-direct.json`、`artifacts/phase1-nuget-vulnerability-direct.stderr.log` |
 | 8 个公开 RAW 样本 | 48 次真实 worker 操作 PASS，源文件前后 SHA 不变；不代表所有相机／色彩变体 | `artifacts/phase1-raw-family/raw-family-results.json` |
 | 百万条真实 SQLite 查询库 | 快照 13.935s；100 次首批查询 P95 0.843ms、深页 P95 0.642ms；并发 59 批写入；查询阶段 WAL 峰值 9.0MiB | `artifacts/phase1-benchmarks/Database-20260916T074451352Z/query-20260916-074452-545/result.json` |
 | 1GiB／5GiB 有效文本 | 非稀疏 UTF-8；100 次窗口读取 P95 0.937／0.959ms；5GiB 文件实际定位超过 4GiB | `artifacts/phase1-benchmarks/Text1GiB-20260916T074536937Z/result.json`、`Text5GiB-20260916T074538306Z/result.json` |
@@ -28,7 +32,7 @@
 | 1GiB／5GiB 离屏 WinUI 阅读 | 功能 PASS；每文件 100 次首块／深位置读取与实际 TextBox 布局、翻块返回、源哈希／mtime 不变；5GiB 实际偏移 4,294,967,303 | `artifacts/phase1-native-large-text/native-refresh.json`、`artifacts/phase1-native-large-text-run.*` |
 | 10,000 次切图／32.7 分钟混合操作 | 流程完成且无崩溃、未超测试预算；100 轮文本、Markdown 本地图片、静音 WAV 和筛选切换 | `artifacts/phase1-soak-30min/native-refresh.json` |
 
-39＋43 项原生回归共同使用的 App DLL SHA-256 为 `1CE806E5C430A84B06FF8B9AE03A5F08EE2F1F325DD2ABC075E39A5EF4385DF0`。构建日志为 `artifacts/phase1-validation-build4.log`，0 个错误；NU1900（漏洞数据源不可达）仍存在，不能声称依赖漏洞检查通过。
+39＋43 项原生回归共同使用的 App DLL SHA-256 为 `1CE806E5C430A84B06FF8B9AE03A5F08EE2F1F325DD2ABC075E39A5EF4385DF0`。构建日志为 `artifacts/phase1-validation-build4.log`，0 个错误；该次构建的 NU1900（漏洞数据源不可达）保留。16:52 另以网络可访问环境执行 `dotnet list FolderLens.slnx package --vulnerable --include-transitive --format json --no-restore`，退出 0、stderr 为空，取得上述 NuGet 官方查询报告；未还原或更新依赖。
 
 长稳运行使用本轮较早的预取修复构建，后续多页 TIFF／大规模分组修复另有针对性验证及短混合回归，不能把长稳结果自动继承为最终构建的完整验收。夹具图片只有 64×48，不代表大图／RAW／视频长稳。应用私有内存约 207–322MiB，末次 313MiB；进程树峰值约 862MiB，句柄 2421–2774、线程 167–176。私有内存有上升，未做静置回收和堆归属分析，**A054a 的“无持续阶梯增长”仍未证明**。
 

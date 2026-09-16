@@ -105,7 +105,7 @@
 "A052b","R052","反例","Integration+Media","锁定构建；受控夹具；按docs/10记录环境和证据","MD/媒体文件含代理指令或私人Token文本","内容只作为数据；不执行、不进报告/仓库","YES","NOT_RUN",""
 "A053a","R053","正常路径","Performance","锁定构建；受控夹具；按docs/10记录环境和证据","按docs08采样首屏筛选切图RAW文本帧时","原始数组及P50/P95/P99有证据；硬门禁通过","YES","NOT_RUN",""
 "A053b","R053","反例","Performance","锁定构建；受控夹具；按docs/10记录环境和证据","只提供Mock计时或不同机器快结果","不作为参考机通过，缺项NOT_RUN","YES","NOT_RUN",""
-"A054a","R054","正常路径","Performance","锁定构建；受控夹具；按docs/10记录环境和证据","10000切图和30分钟混合操作","内存/句柄/线程无持续阶梯增长","YES","NOT_RUN","artifacts/phase1-soak-30min/native-refresh.json (10000 switches/32.7min completed; sustained memory-growth criterion unproven)"
+"A054a","R054","正常路径","Performance","锁定构建；受控夹具；按docs/10记录环境和证据","10000切图和30分钟混合操作","内存/句柄/线程无持续阶梯增长","YES","FAIL","artifacts/phase1-final-memory-soak/native-refresh.json; artifacts/phase1-final-memory-analysis.json (10000/32.7min completed but sustained private-byte growth; audio retention reproduced and fixed, final verification pending)"
 "A054b","R054","反例","Performance","锁定构建；受控夹具；按docs/10记录环境和证据","worker崩溃、网络/睡眠/设备移除循环","可恢复，关闭后应用worker和音频清理","YES","NOT_RUN",""
 "A055a","R055","正常路径","Packaging","锁定构建；受控夹具；按docs/10记录环境和证据","干净源码按脚本restore/build/test/publish","版本锁定、exit code真实、日志完整","YES","NOT_RUN",""
 "A055b","R055","反例","Packaging","锁定构建；受控夹具；按docs/10记录环境和证据","缺依赖/构建失败/测试失败","脚本失败即停，不打印虚假成功","YES","NOT_RUN",""

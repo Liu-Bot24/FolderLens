@@ -53,15 +53,15 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         var observed=await probe.ReadObservation(path,cancellation,allowCloud).ConfigureAwait(false);
         if(FileObservationWriter.Signature(observed)!=signature)throw new IOException("FileChanged");
     }
-    public async Task<MediaMetadata> ReadCover(string path,string destination,string sourceSignature,SourceFileProbe sourceProbe,CancellationToken cancellation,int edge,bool allowCloud=false)
+    public async Task<MediaMetadata> ReadCover(string path,string destination,string sourceSignature,SourceFileProbe sourceProbe,CancellationToken cancellation,int edge,bool allowCloud=false,WorkerPriority priority=WorkerPriority.Visible)
     {
         await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
-        var info=await Probe(path,cancellation,WorkerPriority.Visible).ConfigureAwait(false);
+        var info=await Probe(path,cancellation,priority).ConfigureAwait(false);
         if(VerificationBarrier is not null)await VerificationBarrier("probe").ConfigureAwait(false);
         await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
         if(info.VideoStream is not null||info.HasCover)
         {
-            await Cover(path,destination,info,cancellation,edge).ConfigureAwait(false);
+            await Cover(path,destination,info,cancellation,edge,priority).ConfigureAwait(false);
             if(VerificationBarrier is not null)await VerificationBarrier("cover").ConfigureAwait(false);
             await VerifySource(sourceProbe,path,sourceSignature,cancellation,allowCloud).ConfigureAwait(false);
         }

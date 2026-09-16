@@ -76,7 +76,7 @@ public sealed partial class MainWindow
             byte[] pixels=new byte[64*48*4];for(int index=0;index<pixels.Length;index+=4){pixels[index]=40;pixels[index+1]=100;pixels[index+2]=200;pixels[index+3]=255;}
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,pixels);await encoder.FlushAsync();stream.Seek(0);byte[] png=new byte[checked((int)stream.Size)];await stream.ReadAsync(png.AsBuffer(),(uint)png.Length,InputStreamOptions.None);
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
-            if(arguments.Contains("--verify-soak")||arguments.Contains("--verify-soak-smoke")){await VerifySoak(source,report);return;}
+            if(arguments.Contains("--verify-soak")||arguments.Contains("--verify-soak-smoke")||arguments.Contains("--verify-audio-retention")){await VerifySoak(source,report);return;}
             if(arguments.Contains("--verify-startup-profile")){await VerifyStartupProfile(source,report);return;}
             if(arguments.Contains("--verify-preview-completion")){await VerifyPreviewCompletion(source,report);return;}
             if(arguments.Contains("--verify-file-transfer")){await VerifyFileTransfer(source,report);return;}
@@ -120,6 +120,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-large-text")){await VerifyLargeText(source,report);return;}
             if(arguments.Contains("--verify-text-reader")){await VerifyTextReader(source,report);return;}
             if(arguments.Contains("--verify-markdown-demand")){await VerifyMarkdownDemand(source,report);return;}
+            if(arguments.Contains("--verify-markdown-retries")){await VerifyMarkdownRetries(source,report);return;}
             if(arguments.Contains("--verify-selection-appearance")){await VerifySelectionAppearance(source,report);return;}
             if(arguments.Contains("--verify-directory-filter")){await VerifyDirectoryFilter(source,report);return;}
             if(arguments.Contains("--verify-filmstrip")){await VerifyFilmstrip(report);return;}
@@ -127,6 +128,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-viewer-information")){await VerifyViewerInformation(source,report);return;}
             if(arguments.Contains("--verify-browser-status")){await VerifyBrowserStatusBar(source,report);return;}
             if(arguments.Contains("--verify-collections")){await VerifyCollections(source,report);return;}
+            if(arguments.Contains("--verify-collection-batches")){await VerifyCollectionBatches(source,report);return;}
             if(arguments.Contains("--verify-quick-collections")){await VerifyQuickCollections(source,report);return;}
             if(arguments.Contains("--verify-collection-observation")){await VerifyCollectionObservationRefresh(source,report);return;}
             if(arguments.Contains("--verify-pro-feedback")){await VerifyProFeedback(source,report);return;}

@@ -61,7 +61,8 @@ internal sealed class StaticDecoder : IDisposable
                 rawFlip=info.Flip;rawWidth=rawEncodedWidth=(int)info.Width;rawHeight=rawEncodedHeight=(int)info.Height;if(info.Flip is 5 or 6)(rawWidth,rawHeight)=(rawHeight,rawWidth);
                 Format=ext[1..];Provider="LibRaw 0.22.2";return;
             }
-            byte[] head=new byte[32];int read=source.Read(head);source.Position=0;Format=Identify(head.AsSpan(0,read));
+            byte[] head=new byte[32];int read=source.Read(head);source.Position=0;
+            Format=read>=8&&head.AsSpan(4,4).SequenceEqual("ftyp"u8)?BmffImageFormat.Read(source):Identify(head.AsSpan(0,read));
             if(Format=="png" && IsApng(source)){Format="apng";Animated=true;}
             if(Format is "bmp" or "ico" or "jxl" or "heic")
             {
@@ -145,7 +146,7 @@ internal sealed class StaticDecoder : IDisposable
             }
         }
         if(data[0]==255 && data[1]==10 || data.Slice(4,4).SequenceEqual("JXL "u8))return "jxl";
-        if(data.Slice(4,4).SequenceEqual("ftyp"u8))return data.Slice(8,4).SequenceEqual("avif"u8)?"avif":"heic";
+        if(data.Slice(4,4).SequenceEqual("ftyp"u8)){using var stream=new MemoryStream(data.ToArray(),false);return BmffImageFormat.Read(stream);}
         throw new NotSupportedException("Unsupported image container.");
     }
     public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false,bool fastPreview=false)

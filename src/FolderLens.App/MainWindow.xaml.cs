@@ -269,8 +269,6 @@ public sealed partial class MainWindow : Window
             }
             if(collectionScope)
             {
-                await catalog.RefreshPlaylist(path[11..],scanStop.Token);
-                if(requested!=rootChangeVersion||closing)return;
                 root=path;rootId=path;epoch=requested;activeBackgroundScan=null;
             }
             else
@@ -302,9 +300,23 @@ public sealed partial class MainWindow : Window
             prefetchStop.Cancel();ClearPrefetchedImages();prefetchedDetails.Clear();prefetchedDetailBytes=0;CancelThumbnails();selected=null;resultHandle=null;scanPreviewRefresh.Reset();results?.Dispose();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ClearImage();replacingRoot=false;
             if(collectionScope)
             {
-                await RefreshQuery();
-                if(requested!=rootChangeVersion||closing||scanStop.IsCancellationRequested)return;
-                Status.Text="";
+                // Root ownership is established before slow source validation.
+                // Releasing the admission gate lets navigation cancel this work.
+                rootChangeGate.Release();acquired=false;
+                var collectionToken=scanStop.Token;long nextPublication=0;
+                await foreach(var _ in catalog.RefreshPlaylistBatches(activeCollectionId!,collectionToken))
+                {
+                    if(requested!=rootChangeVersion||closing||collectionToken.IsCancellationRequested)return;
+                    if(Stopwatch.GetTimestamp()>=nextPublication)
+                    {
+                        await RefreshQuery(preserveViewport:true,scanPreview:true);
+                        nextPublication=Stopwatch.GetTimestamp()+Stopwatch.Frequency;
+                    }
+                }
+                if(requested!=rootChangeVersion||closing||collectionToken.IsCancellationRequested)return;
+                await RefreshQuery(preserveViewport:true,scanPreview:true);
+                if(requested!=rootChangeVersion||closing||collectionToken.IsCancellationRequested)return;
+                if(!slideShow)Status.Text="";
                 _=StartMetadataRefresh();
                 return;
             }
@@ -415,7 +427,9 @@ public sealed partial class MainWindow : Window
                 if(report.State=="missing"){ShowScanError(new DirectoryNotFoundException("文件夹已不存在，请选择其他文件夹。"));return;}
             }
             _=StartMetadataRefresh();
-            Status.Text=report.State=="ready"?"":"部分文件夹暂时无法读取，稍后会自动重试。";
+            // Successful background reconciliation does not own a newer playback
+            // status. Keep scan failures visible even while playback is active.
+            if(!slideShow||report.State!="ready")Status.Text=report.State=="ready"?"":"部分文件夹暂时无法读取，稍后会自动重试。";
         }
         catch(OperationCanceledException) when(rootToken.IsCancellationRequested){}
         catch(Exception ex){if(rootVersion==rootChangeVersion)ShowScanError(ex);}
@@ -833,25 +847,28 @@ public sealed partial class MainWindow : Window
         if(verifyMediaCoverBarrier is not null)await verifyMediaCoverBarrier(token);
         token.ThrowIfCancellationRequested();
         long resources=imageResourceRevision;
-        AudioTools.Visibility=kind=="audio"?Visibility.Visible:Visibility.Collapsed;var info=await Task.Run(()=>media!.Probe(path,token,WorkerPriority.Foreground),token);if(current!=selection||token.IsCancellationRequested)return;
-        QualityLabel.Text=$"{info.VideoCodec??info.AudioCodec??"编码未知"} · {(info.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():"时长未知")}";
-        if(kind=="video" || info.HasCover)
-        {
+        string signature=selectedProperties?.SourceSignature??throw new IOException("缺少文件版本信息。");
+        bool allowCloud=selected is {} row&&approvedCloud.Contains(CloudKey(row));
+        AudioTools.Visibility=kind=="audio"?Visibility.Visible:Visibility.Collapsed;
             string folder=Path.Combine(RuntimeDataDirectory,"temp","covers");Directory.CreateDirectory(folder);string output=Path.Combine(folder,Guid.NewGuid().ToString("N")+".png");
             int edge=kind=="video"?1024:512;
             try
             {
-                await media!.Cover(path,output,info,token,edge,WorkerPriority.Foreground);
+                var info=await media!.ReadCover(path,output,signature,prefetchSourceProbe,token,edge,allowCloud,WorkerPriority.Foreground);
+                if(current!=selection||token.IsCancellationRequested||resources!=imageResourceRevision)return;
+                string description=$"{info.VideoCodec??info.AudioCodec??"编码未知"} · {(info.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():"时长未知")}";
+                if(info.VideoStream is null&&!info.HasCover){QualityLabel.Text=description;return;}
                 var bitmap=await LoadLocalBitmap(output);
+                try{await MediaTools.VerifySource(prefetchSourceProbe,path,signature,token,allowCloud);}
+                catch{bitmap.Dispose();throw;}
                 if(current!=selection||token.IsCancellationRequested||resources!=imageResourceRevision){bitmap.Dispose();return;}
                 fitBitmap?.Dispose();fitBitmap=bitmap;
                 sourceWidth=bitmap.SizeInPixels.Width;sourceHeight=bitmap.SizeInPixels.Height;
                 zoom=0;pan=Vector2.Zero;rotation=0;
-                if(kind=="video")QualityLabel.Text="视频封面 · "+QualityLabel.Text;
+                QualityLabel.Text=(kind=="video"?"视频封面 · ":"")+description;
                 ImageCanvas.Visibility=Visibility.Visible;ImageCanvas.Invalidate();UpdateViewerCursor();
             }
             finally{if(File.Exists(output))File.Delete(output);}
-        }
         }
         catch(Exception) when(request.IsCancellationRequested)
         {

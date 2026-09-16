@@ -11,8 +11,15 @@ public sealed partial class MainWindow
 {
     private async Task VerifySoak(string source,Dictionary<string,object> report)
     {
-        bool smoke=Environment.GetCommandLineArgs().Contains("--verify-soak-smoke");
-        int required=smoke?24:10_000;var duration=TimeSpan.FromMinutes(smoke?0:30);
+        bool retentionCheck=Environment.GetCommandLineArgs().Contains("--verify-audio-retention");
+        bool smoke=Environment.GetCommandLineArgs().Contains("--verify-soak-smoke")||(retentionCheck&&!Environment.GetCommandLineArgs().Contains("--verify-soak"));
+        bool fast=Environment.GetCommandLineArgs().Contains("--verify-soak-fast");
+        bool imagesOnly=Environment.GetCommandLineArgs().Contains("--verify-soak-images-only");
+        string mix=Environment.GetCommandLineArgs().FirstOrDefault(arg=>arg.StartsWith("--verify-soak-mix=",StringComparison.Ordinal))?.Split('=')[1]??"all";
+        if(mix is not ("all" or "filters" or "text" or "markdown" or "audio"))throw new ArgumentException("Unknown diagnostic mix.");
+        int required=smoke?24:10_000;var duration=TimeSpan.FromMinutes(smoke||fast?0:30);
+        report["diagnosticOnly"]=fast||imagesOnly||mix!="all";report["diagnosticMix"]=mix;
+        report["imagesOnly"]=imagesOnly;
         await File.WriteAllTextAsync(Path.Combine(source,"soak.txt"),string.Concat(Enumerable.Repeat("中文与 emoji 🌏 / bounded reader\r\n",3000)));
         await File.WriteAllTextAsync(Path.Combine(source,"soak.md"),"# 稳定性测试\n\n正文与 **格式**。\n\n![图片](A/image-00.png)\n");
         using(var stream=File.Create(Path.Combine(source,"soak.wav")))using(var writer=new BinaryWriter(stream,Encoding.ASCII))
@@ -24,6 +31,7 @@ public sealed partial class MainWindow
         suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;AudioMute.IsChecked=true;
         await OpenRoot(source);await RefreshQuery();
         var samples=new List<object>();report["resources"]=samples;
+        var retiredAudioPlayers=new List<WeakReference<MediaPlayer>>();
         var clock=Stopwatch.StartNew();int switches=0,mixedCycles=0;
         object MemoryObservation()
         {
@@ -56,17 +64,34 @@ public sealed partial class MainWindow
                 switches++;
                 if(switches%(smoke?12:100)==0)
                 {
-                    await ReturnToBrowser();await SearchFor("image-0");
-                    if(results?.Count!=10)throw new InvalidOperationException("Soak filter result mismatch.");
-                    await SearchFor("");
-                    await SelectPath("soak.txt");await SetImmersive(true);await PageReader(1);
-                    if(displayedText is null||TextContent.Text.Length==0)throw new InvalidOperationException("Soak text is empty.");
-                    await SelectPath("soak.md");
-                    if(MarkdownHost.Visibility!=Visibility.Visible)throw new InvalidOperationException("Soak Markdown fell back unexpectedly.");
-                    await SelectPath("soak.wav");PlayAudio(this,new());
-                    await WaitUntil(()=>audio?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing,TimeSpan.FromSeconds(8));
-                    await WaitUntil(()=>audio!.PlaybackSession.Position.TotalMilliseconds>100,TimeSpan.FromSeconds(5));StopAudio();
-                    await ReturnToBrowser();mixedCycles++;
+                    if(!imagesOnly)
+                    {
+                        await ReturnToBrowser();
+                        if(mix is "all" or "filters")
+                        {
+                        await SearchFor("image-0");
+                        if(results?.Count!=10)throw new InvalidOperationException("Soak filter result mismatch.");
+                        await SearchFor("");
+                        }
+                        if(mix is "all" or "text")
+                        {
+                        await SelectPath("soak.txt");await SetImmersive(true);await PageReader(1);
+                        if(displayedText is null||TextContent.Text.Length==0)throw new InvalidOperationException("Soak text is empty.");
+                        }
+                        if(mix is "all" or "markdown")
+                        {
+                        await SelectPath("soak.md");
+                        if(MarkdownHost.Visibility!=Visibility.Visible)throw new InvalidOperationException("Soak Markdown fell back unexpectedly.");
+                        }
+                        if(mix is "all" or "audio")
+                        {
+                        await SelectPath("soak.wav");PlayAudio(this,new());
+                        await WaitUntil(()=>audio?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing,TimeSpan.FromSeconds(8));
+                        retiredAudioPlayers.Add(new(audio!));
+                        await WaitUntil(()=>audio!.PlaybackSession.Position.TotalMilliseconds>100,TimeSpan.FromSeconds(5));StopAudio();
+                        }
+                        await ReturnToBrowser();mixedCycles++;
+                    }
                     using var process=Process.GetCurrentProcess();var budget=WorkerResources.Shared.Snapshot;
                     samples.Add(new{switches,mixedCycles,elapsedMs=clock.Elapsed.TotalMilliseconds,appPrivateBytes=process.PrivateMemorySize64,handles=process.HandleCount,threads=process.Threads.Count,budget.ProcessTreeBytes,budget.MeasurementComplete,budget.HardLimitBytes,prefetchBytes,preparedPrefetchBytes,memory=MemoryObservation()});
                     await File.WriteAllTextAsync(Path.Combine(dataDirectory,"soak-progress.json"),JsonSerializer.Serialize(new{status="RUNNING",switches,mixedCycles,elapsedMs=clock.Elapsed.TotalMilliseconds,samples}));
@@ -74,18 +99,22 @@ public sealed partial class MainWindow
                     if(budget.MeasurementComplete&&budget.ProcessTreeBytes>budget.HardLimitBytes)throw new InvalidOperationException("Soak process tree exceeded its hard limit.");
                     if(prefetchBytes>32L*1024*1024||preparedPrefetchBytes>PreparedPrefetchLimit)throw new InvalidOperationException("Soak prefetch cache exceeded its limit.");
                 }
-                if(!smoke&&step.ElapsedMilliseconds<180)await Task.Delay(180-(int)step.ElapsedMilliseconds,lifetime.Token);
+                if(!smoke&&!fast&&step.ElapsedMilliseconds<180)await Task.Delay(180-(int)step.ElapsedMilliseconds,lifetime.Token);
             }
             report["switches"]=switches;report["mixedCycles"]=mixedCycles;report["durationMs"]=clock.Elapsed.TotalMilliseconds;
-            if(Environment.GetCommandLineArgs().Contains("--verify-soak-memory"))
+            if(Environment.GetCommandLineArgs().Contains("--verify-soak-memory")||retentionCheck)
             {
                 await Task.Delay(5000,lifetime.Token);report["idleBeforeDiagnosticGc"]=MemoryObservation();
                 // Diagnostic only, after the measured workload. Never collect
                 // during switching to conceal sustained growth in normal operation.
                 await Task.Run(()=>{GC.Collect(2,GCCollectionMode.Forced,true,true);GC.WaitForPendingFinalizers();GC.Collect(2,GCCollectionMode.Forced,true,true);});
                 await Task.Delay(1000,lifetime.Token);report["idleAfterDiagnosticGc"]=MemoryObservation();
+                report["retiredAudioPlayers"]=new{observed=retiredAudioPlayers.Count,aliveAfterDiagnosticGc=retiredAudioPlayers.Count(reference=>reference.TryGetTarget(out _))};
+                if(retentionCheck&&retiredAudioPlayers.Any(reference=>reference.TryGetTarget(out _)))
+                    throw new InvalidOperationException("Disposed audio players remain reachable after idle and full diagnostic GC.");
             }
-            report["scope"]="Generated 64x48 images, text, local Markdown image, silent WAV; real WinUI lifecycle. No physical sleep/network/device removal, GPU allocation or large-media endurance claim.";
+            report["scope"]=imagesOnly?"Diagnostic image-only run over generated 64x48 images; no mixed-operation or 30-minute acceptance claim.":"Generated 64x48 images, text, local Markdown image, silent WAV; real WinUI lifecycle. No physical sleep/network/device removal, GPU allocation or large-media endurance claim.";
+            if(fast)report["pacing"]="Diagnostic unpaced run; not the required 30-minute soak.";
             report["smokeOnly"]=smoke;report["status"]="PASS";
         }
         finally{StopAudio();}

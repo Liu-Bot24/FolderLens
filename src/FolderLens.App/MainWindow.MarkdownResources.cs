@@ -9,7 +9,7 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private sealed record MarkdownResource(string Root,string Document,string RelativeUrl,bool Video,RequestContext Context,long Selection,CancellationToken Token)
-    {public string? Path;public SourceFileStamp? Stamp;}
+    {public string? Path;public SourceFileStamp? Stamp;public int Failures;public long RetryAfter;public bool PermanentFailure;}
     private readonly Dictionary<string,MarkdownResource> markdownResources=[];
     private readonly SemaphoreSlim markdownResourceGate=new(2,2);
     private int markdownResourceRequests;
@@ -18,16 +18,18 @@ public sealed partial class MainWindow
     private Func<string,CancellationToken,Task>? verifyMarkdownResourceBarrier;
     // Host-owned code only. Markdown scripts, messages, host objects and network access remain disabled.
     private const string MarkdownViewportScript="""
-        (()=>{
+        ((failures)=>{
           for(const node of document.querySelectorAll('img[data-src],video[data-src]')){
             const rect=node.getBoundingClientRect();const visible=rect.bottom>=-160&&rect.top<=innerHeight+160;
             if(node.tagName==='IMG'&&node.complete&&node.naturalWidth>0){node.width=node.naturalWidth;node.height=node.naturalHeight;node.dataset.sized='true';}
-            if(visible&&!node.hasAttribute('src'))node.src=node.dataset.src;
+            const failure=failures[node.dataset.src];
+            if(visible&&node.tagName==='IMG'&&node.hasAttribute('src')&&node.complete&&node.naturalWidth===0&&failure&&!failure.permanent&&Date.now()>=failure.after&&Number(node.dataset.retry||0)<failure.attempt){node.dataset.retry=String(failure.attempt);node.removeAttribute('src');}
+            if(visible&&!node.hasAttribute('src')&&(!failure||!failure.permanent&&Date.now()>=failure.after))node.src=node.dataset.src;
             if(!visible&&node.tagName==='VIDEO')node.pause();
             if(node.tagName==='IMG'&&node.dataset.sized&&(rect.bottom < -innerHeight||rect.top > innerHeight*2))node.removeAttribute('src');
             if(node.tagName==='VIDEO'&&!node.paused&&window.folderLensPlayingVideo!==node){window.folderLensPlayingVideo?.pause();window.folderLensPlayingVideo=node;}
           }
-        })();
+        })
         """;
     private void ResetMarkdownResources(){markdownResources.Clear();markdownImages.Clear();markdownImageBytes=0;}
     private async Task UpdateMarkdownViewport()
@@ -36,7 +38,11 @@ public sealed partial class MainWindow
         // completion wait for decoding and defeats body-first rendering.
         if(markdownLoading||markdownViewportBusy||closing||MarkdownHost.Visibility!=Microsoft.UI.Xaml.Visibility.Visible||markdown?.CoreWebView2 is not {} core)return;
         markdownViewportBusy=true;
-        try{await core.ExecuteScriptAsync(MarkdownViewportScript);}
+        try
+        {
+            var failures=markdownResources.Where(pair=>pair.Value.Failures>0).ToDictionary(pair=>"https://folderlens.local/assets/"+pair.Key,pair=>new{attempt=pair.Value.Failures,after=pair.Value.RetryAfter,permanent=pair.Value.PermanentFailure});
+            await core.ExecuteScriptAsync(MarkdownViewportScript+"("+System.Text.Json.JsonSerializer.Serialize(failures)+");");
+        }
         catch(Exception error){if(!closing)RecordWebView("MarkdownViewportFailure "+error.GetType().Name);}
         finally{markdownViewportBusy=false;}
     }
@@ -48,7 +54,13 @@ public sealed partial class MainWindow
     }
     private async Task ServeMarkdownResource(WebView2 view,CoreWebView2Environment environment,CoreWebView2WebResourceRequestedEventArgs e)
     {
-        using var deferral=e.GetDeferral();bool slot=false,counted=false;long requestedSelection=selection;string requestedDocument=markdownDocumentUrl;
+        using var deferral=e.GetDeferral();bool slot=false,counted=false;long requestedSelection=selection;string requestedDocument=markdownDocumentUrl;MarkdownResource? requestedResource=null;
+        void Failed(bool retryable)
+        {
+            if(requestedResource is not {} resource||resource.Token.IsCancellationRequested||closing||resource.Selection!=selection||requestedDocument!=markdownDocumentUrl)return;
+            resource.Failures++;resource.PermanentFailure=!retryable||resource.Failures>3;
+            resource.RetryAfter=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()+1000L*(1L<<Math.Min(resource.Failures-1,3));
+        }
         CoreWebView2WebResourceResponse Response(byte[] bytes,int status,string reason,string headers)=>environment.CreateWebResourceResponse(new MemoryStream(bytes,false).AsRandomAccessStream(),status,reason,headers+"\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff");
         try
         {
@@ -59,8 +71,9 @@ public sealed partial class MainWindow
             if(!Uri.TryCreate(e.Request.Uri,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host!="folderlens.local"||!uri.AbsolutePath.StartsWith("/assets/",StringComparison.Ordinal))return;
             string key=uri.Segments.Last();
             if(!markdownResources.TryGetValue(key,out var resource)||resource.Selection!=selection||resource.Token.IsCancellationRequested)return;
+            requestedResource=resource;
             using var operation=browserWork.Enter();if(operation is null)return;
-            if(markdownResourceRequests>=16){e.Response=Response([],429,"Too Many Requests","");return;}
+            if(markdownResourceRequests>=16){Failed(true);e.Response=Response([],429,"Too Many Requests","");return;}
             markdownResourceRequests++;counted=true;
             using var timeout=CancellationTokenSource.CreateLinkedTokenSource(resource.Token,lifetime.Token);timeout.CancelAfter(TimeSpan.FromSeconds(15));var token=timeout.Token;
             await markdownResourceGate.WaitAsync(token);slot=true;
@@ -71,7 +84,7 @@ public sealed partial class MainWindow
             if(!resource.Video&&markdownImages.TryGetValue(key,out var cached)){e.Response=Response(cached,200,"OK","Content-Type: image/png");return;}
             string path=await prefetchSourceProbe.ResolveImage(resource.Root,resource.Document,resource.RelativeUrl,token);
             var stamp=await prefetchSourceProbe.Read(path,token);if(!Current())return;
-            if(resource.Stamp is {} prior&&(prior!=stamp||resource.Path!=path))throw new IOException("Markdown 媒体已发生变化。");
+            if(resource.Stamp is {} prior&&(prior!=stamp||resource.Path!=path))throw new InvalidDataException("Markdown 媒体已发生变化。");
             resource.Path=path;resource.Stamp=stamp;
             if(resource.Video)
             {
@@ -88,7 +101,7 @@ public sealed partial class MainWindow
             {
                 image=await worker.Request(path,"thumbnail",resource.Context,new(1024,1024),token,stamp);
                 if(!Current())return;
-                if(await prefetchSourceProbe.Read(path,token)!=stamp)throw new IOException("Markdown 图片已发生变化。");
+                if(await prefetchSourceProbe.Read(path,token)!=stamp)throw new InvalidDataException("Markdown 图片已发生变化。");
                 byte[] bytes=await File.ReadAllBytesAsync(image.AssetPath!,token);if(!Current())return;
                 if(bytes.Length>8*1024*1024)throw new InvalidDataException("MarkdownImageLimit");
                 if(markdownImages.Remove(key,out var previous))markdownImageBytes-=previous.Length;
@@ -99,9 +112,10 @@ public sealed partial class MainWindow
             }
             finally{try{if(image is not null)await worker.ReleaseAsset(image);}finally{thumbnailPool.Enqueue(worker);thumbnailSlots.Release();}}
         }
-        catch(OperationCanceledException){}
+        catch(OperationCanceledException){Failed(true);}
         catch(Exception error)
         {
+            Failed(error is TimeoutException||error is IOException and not (FileNotFoundException or DirectoryNotFoundException));
             RecordWebView("MarkdownResourceFailure "+error.GetType().Name);
             if(!closing&&requestedSelection==selection&&requestedDocument==markdownDocumentUrl&&ReferenceEquals(markdown,view))Status.Text="部分 Markdown 媒体无法显示；文档正文仍可阅读。";
         }
