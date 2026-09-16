@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstdint>
 #include <new>
+#include <memory>
 
 // Only this translation unit knows LibRaw's public C++ structures; callers use a fixed POD ABI.
 struct RawSession {
@@ -9,7 +10,11 @@ struct RawSession {
     std::atomic<bool> cancelled{false};
     libraw_processed_image_t* image{nullptr};
     bool thumbnail_unpacked{false};
-    ~RawSession() { if(image) LibRaw::dcraw_clear_mem(image); }
+    ~RawSession() { if(image) LibRaw::dcraw_clear_mem(image);
+#ifdef FOLDERLENS_RAWBRIDGE_TEST
+        RawDestroyTestHook();
+#endif
+    }
 };
 struct RawInfo { uint32_t width,height,thumb_width,thumb_height; int32_t flip; };
 struct RawPixels { const unsigned char* data; uint64_t bytes; uint32_t width,height,channels,bits,type; };
@@ -19,14 +24,17 @@ EXPORT int fl_raw_open(const wchar_t* path, uint32_t memory_mb, RawSession** out
     if(!path || !output || !info || memory_mb<256 || memory_mb>6144) return -10000;
     *output=nullptr;
     try {
-        auto session=new RawSession();
+        auto session=std::make_unique<RawSession>();
+#ifdef FOLDERLENS_RAWBRIDGE_TEST
+        RawOpenTestHook();
+#endif
         session->raw.imgdata.rawparams.max_raw_memory_mb=memory_mb;
-        session->raw.set_progress_handler(progress,session);
+        session->raw.set_progress_handler(progress,session.get());
         int error=session->raw.open_file(path);
-        if(error){delete session;return error;}
+        if(error)return error;
         auto& s=session->raw.imgdata.sizes;auto& t=session->raw.imgdata.thumbnail;
-        if(static_cast<uint64_t>(s.width)*s.height>300000000ULL){delete session;return -10001;}
-        *info={s.width,s.height,t.twidth,t.theight,s.flip};*output=session;return 0;
+        if(static_cast<uint64_t>(s.width)*s.height>300000000ULL)return -10001;
+        *info={s.width,s.height,t.twidth,t.theight,s.flip};*output=session.release();return 0;
     } catch (...) {return -10002;}
 }
 EXPORT int fl_raw_pixels(RawSession* session,int develop,RawPixels* output) noexcept {

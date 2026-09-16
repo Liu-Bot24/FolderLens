@@ -7,12 +7,13 @@ namespace FolderLens.Infrastructure;
 
 public sealed record TextFileSnapshot(long Length,long LastWriteTicks,long? ChangeTicks,string? Identity)
 {
+    public string? SourceSignature {get;init;}
     internal static TextFileSnapshot Capture(FileStream stream)
     {
         bool basicOk=GetBasic(stream.SafeFileHandle,0,out BasicInfo basic,Marshal.SizeOf<BasicInfo>());
         string? identity=GetId(stream.SafeFileHandle,18,out IdInfo id,Marshal.SizeOf<IdInfo>())?$"{id.Volume:X16}:{id.Low:X16}:{id.High:X16}:{basic.Creation:X16}":null;
         if(!basicOk)throw new IOException("无法核验文本文件版本。");
-        return new(stream.Length,basic.Write,basic.Change>0?basic.Change:null,identity);
+        return new(stream.Length,basic.Write,basic.Change>0?basic.Change:null,identity){SourceSignature=FolderLens.Contracts.FileReadObservation.Read(stream.SafeFileHandle).Signature};
     }
     internal void Validate(string path,FileStream openStream)
     {

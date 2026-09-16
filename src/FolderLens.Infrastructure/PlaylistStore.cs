@@ -28,6 +28,18 @@ public sealed partial class CatalogStore
             upgrade.Commit();
         }
         if(Scalar(c,"SELECT version FROM playlist.PlaylistInfo")!=2)throw new InvalidDataException("收藏库由较新版本创建，请使用匹配版本。");
+        Execute(c,"""
+            CREATE TEMP TABLE PlaylistRefreshState(collection_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0,after_row INTEGER NOT NULL DEFAULT 0);
+            CREATE TEMP TRIGGER Playlist_CursorInsert AFTER INSERT ON playlist.SavedLinks BEGIN
+                INSERT INTO PlaylistRefreshState(collection_id) VALUES(NEW.collection_id) ON CONFLICT(collection_id) DO UPDATE SET revision=revision+1,after_row=0;
+            END;
+            CREATE TEMP TRIGGER Playlist_CursorDelete AFTER DELETE ON playlist.SavedLinks BEGIN
+                INSERT INTO PlaylistRefreshState(collection_id) VALUES(OLD.collection_id) ON CONFLICT(collection_id) DO UPDATE SET revision=revision+1,after_row=0;
+            END;
+            CREATE TEMP TRIGGER Playlist_CursorRelocate AFTER UPDATE OF path,anchor,directory_identity ON playlist.SavedLinks BEGIN
+                INSERT INTO PlaylistRefreshState(collection_id) VALUES(NEW.collection_id) ON CONFLICT(collection_id) DO UPDATE SET revision=revision+1,after_row=0;
+            END;
+            """);
         Execute(c,"INSERT INTO main.Collections SELECT * FROM playlist.SavedCollections;");
         return Execute(c,"""
             CREATE TEMP TRIGGER Playlist_HydrateLocation BEFORE UPDATE OF anchor_locator,directory_identity ON main.DirectoryLocations
@@ -110,6 +122,7 @@ public sealed partial class CatalogStore
     // Only explicitly saved paths are probed. Opening a playlist never scans all
     // their containing directories, and never imports historical file metadata.
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PlaylistProbeOverride {get;set;}
+    private readonly SemaphoreSlim playlistRefreshGate=new(1,1);
     public async Task RefreshPlaylist(string collectionId,CancellationToken cancellation=default)
     {
         await foreach(var _ in RefreshPlaylistBatches(collectionId,cancellation).ConfigureAwait(false)){}
@@ -129,6 +142,9 @@ public sealed partial class CatalogStore
     private async IAsyncEnumerable<long> RefreshPlaylistBatchesCore(string collectionId,[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellation)
     {
         if(playlistPath is null)yield break;
+        await playlistRefreshGate.WaitAsync(cancellation).ConfigureAwait(false);
+        try
+        {
         await using var worker=ScanWorkerClient.FindExecutable() is {} executable?new ScanWorkerClient(executable):null;
         var missingProof=new ScanRenames(this,worker);
         async Task<ScanDirectoryPacket> Probe(string value)
@@ -138,18 +154,31 @@ public sealed partial class CatalogStore
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){return new("offline",[],"ProbeTimeout");}
             catch(TimeoutException){cancellation.ThrowIfCancellationRequested();return new("offline",[],"ProbeTimeout");}
         }
-        long offset=0;
+        var cursor=await writer.Execute(c=>
+        {
+            Execute(c,"INSERT OR IGNORE INTO PlaylistRefreshState(collection_id) VALUES($id)",("$id",collectionId));
+            using var command=c.CreateCommand();command.CommandText="SELECT revision,after_row FROM PlaylistRefreshState WHERE collection_id=$id";command.Parameters.AddWithValue("$id",collectionId);
+            using var row=command.ExecuteReader();row.Read();return(Revision:row.GetInt64(0),After:row.GetInt64(1));
+        },cancellation).ConfigureAwait(false);
+        long offset=cursor.After;bool wrapped=false,firstBatch=true;
+        Task SaveCursor(long after)=>writer.Execute(c=>Execute(c,"UPDATE PlaylistRefreshState SET after_row=$after WHERE collection_id=$id AND revision=$revision",("$after",after),("$id",collectionId),("$revision",cursor.Revision)),cancellation);
         while(true)
         {
             var links=await writer.Execute(c=>
             {
                 using var cmd=c.CreateCommand();cmd.CommandText="SELECT rowid,path,anchor,directory_identity,location_key,file_identity,case_mode FROM playlist.SavedLinks WHERE collection_id=$id AND rowid>$after ORDER BY rowid LIMIT $limit";
-                cmd.Parameters.AddWithValue("$limit",offset==0?1:64);
+                if(wrapped){cmd.CommandText=cmd.CommandText.Replace("ORDER BY rowid","AND rowid<=$end ORDER BY rowid");cmd.Parameters.AddWithValue("$end",cursor.After);}
+                cmd.Parameters.AddWithValue("$limit",firstBatch?1:64);
                 cmd.Parameters.AddWithValue("$id",collectionId);cmd.Parameters.AddWithValue("$after",offset);
                 using var rows=cmd.ExecuteReader();var batch=new List<(long Id,string Path,string Anchor,string Identity,string Key,string? FileIdentity,string CaseMode)>();
                 while(rows.Read())batch.Add((rows.GetInt64(0),rows.GetString(1),rows.GetString(2),rows.GetString(3),rows.GetString(4),rows.IsDBNull(5)?null:rows.GetString(5),rows.GetString(6)));return batch;
             },cancellation).ConfigureAwait(false);
-            if(links.Count==0)break;
+            if(links.Count==0)
+            {
+                if(cursor.After>0&&!wrapped){wrapped=true;offset=0;continue;}
+                await SaveCursor(0).ConfigureAwait(false);break;
+            }
+            firstBatch=false;
             // Share only within this bounded batch. Later batches must observe
             // directory replacement again rather than trusting a session cache.
             var parents=new Dictionary<string,ScanDirectoryPacket>(StringComparer.Ordinal);
@@ -159,6 +188,10 @@ public sealed partial class CatalogStore
                 if(processed>0&&batchClock.Elapsed>=TimeSpan.FromMilliseconds(250))break;
                 processed++;
                 cancellation.ThrowIfCancellationRequested();offset=link.Id;
+                // Remember the attempted item before its potentially blocking probe.
+                // A later invocation starts beyond it, then wraps once. Membership
+                // mutations invalidate the cursor; no filesystem observations persist.
+                await SaveCursor(offset).ConfigureAwait(false);
                 string path=PathRules.ValidateSource(link.Path),parent=Path.GetDirectoryName(path)!;
                 if(!parents.TryGetValue(parent,out var directory))parents[parent]=directory=await Probe(parent).ConfigureAwait(false);
                 if(directory.State=="missing"&&await missingProof.ConfirmMissingLocation(link.Anchor,link.Identity,cancellation).ConfigureAwait(false))
@@ -208,6 +241,8 @@ public sealed partial class CatalogStore
             foreach(var item in pending){cancellation.ThrowIfCancellationRequested();if(stable.Contains(item.Parent))await item.Apply().ConfigureAwait(false);}
             cancellation.ThrowIfCancellationRequested();yield return offset;
         }
+        }
+        finally{playlistRefreshGate.Release();}
     }
 
     private Task RemoveSavedLink(string collectionId,long row,string anchor,string identity,string key,CancellationToken cancellation)=>writer.Execute(c=>

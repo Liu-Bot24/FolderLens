@@ -20,10 +20,10 @@ $manifest=Join-Path $publish 'release-manifest.json'
 Write-JsonFile @{buildId='zip-fixture';requiredFiles=@('App.xbf');files=$files;gates=@{runtime='NOT_RUN'}} $manifest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $results=@()
-foreach($case in @('normal','duplicate-replaces-missing','missing','case-collision','duplicate-manifest','missing-manifest','wrong-manifest','outer-hash')){
+foreach($case in @('normal','duplicate-replaces-missing','missing','case-collision','duplicate-manifest','missing-manifest','wrong-manifest','outer-hash','empty-outer','missing-portable','renamed-portable','duplicate-outer','unsafe-outer','wrong-size','missing-setup','missing-source')){
  $packageRoot=Join-Path $EvidenceRoot $case
  New-Item -ItemType Directory -Path $packageRoot | Out-Null
- $zipPath=Join-Path $packageRoot 'fixture-portable-unverified.zip'
+ $zipPath=Join-Path $packageRoot 'FolderLens-zip-fixture-win-x64-portable-unverified.zip'
  $zip=[IO.Compression.ZipFile]::Open($zipPath,[IO.Compression.ZipArchiveMode]::Create)
  try{
   $entries=@($files | ForEach-Object {[pscustomobject]@{name=('app/'+$_.path);source=(Join-Path $app $_.path)}})
@@ -39,11 +39,26 @@ foreach($case in @('normal','duplicate-replaces-missing','missing','case-collisi
  }finally{$zip.Dispose()}
  $hash=(Get-FileHash -LiteralPath $zipPath).Hash
  if($case -eq 'outer-hash'){$hash='0'*64}
- Write-JsonFile @{buildId='zip-fixture';artifactRoot=$publish;files=@(@{file=(Split-Path $zipPath -Leaf);sha256=$hash})} (Join-Path $packageRoot 'package-manifest.json')
+ $setup=Join-Path $packageRoot 'FolderLens-zip-fixture-win-x64-setup-unsigned.exe'
+ $source=Join-Path $packageRoot 'FolderLens-zip-fixture-source.zip'
+ [IO.File]::WriteAllText($setup,'inert installer fixture');[IO.File]::WriteAllText($source,'inert source fixture')
+ $outer=@(@{file=(Split-Path $zipPath -Leaf);bytes=(Get-Item $zipPath).Length;sha256=$hash})
+ foreach($path in @($setup,$source)){$outer+=@{file=(Split-Path $path -Leaf);bytes=(Get-Item $path).Length;sha256=(Get-FileHash $path).Hash}}
+ switch($case){
+  'empty-outer' {$outer=@()}
+  'missing-portable' {$outer=$outer[1..2]}
+  'renamed-portable' {Move-Item -LiteralPath $zipPath -Destination (Join-Path $packageRoot 'renamed.zip');$outer[0].file='renamed.zip'}
+  'duplicate-outer' {$outer[1]=$outer[0]}
+  'unsafe-outer' {$outer[0].file='../'+$case+'/'+$outer[0].file}
+  'wrong-size' {$outer[0].bytes++}
+  'missing-setup' {$outer=@($outer[0],$outer[2])}
+  'missing-source' {$outer=$outer[0..1]}
+ }
+ Write-JsonFile @{buildId='zip-fixture';artifactRoot=$publish;files=$outer} (Join-Path $packageRoot 'package-manifest.json')
  $accepted=$true;$reason=''
  try{& "$PSScriptRoot\Verify-Release.ps1" -ArtifactRoot $packageRoot}catch{$accepted=$false;$reason=$_.Exception.Message}
  $results+=@{case=$case;accepted=$accepted;expectedAccepted=($case -eq 'normal');reason=$reason}
 }
 Write-JsonFile $results (Join-Path $EvidenceRoot 'results.json')
 if(@($results | Where-Object {$_.accepted -ne $_.expectedAccepted}).Count){throw 'Portable ZIP validation regression. See results.json.'}
-Write-Host 'PASS: exact ZIP contents, manifest and outer hash (8 cases).'
+Write-Host 'PASS: exact ZIP contents and complete outer package set (16 cases).'

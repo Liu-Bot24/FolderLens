@@ -17,6 +17,11 @@ public static class ShellFileOperations
         =>ExecuteCore(requests,owner,cancellation,false);
     internal static Task<ShellBatchResult> ExecuteCore(IReadOnlyList<ShellFileRequest> requests,nint owner,CancellationToken cancellation,bool noUi)
     {
+        // Reject before starting an STA or allocating any Shell COM objects.
+        cancellation.ThrowIfCancellationRequested();
+        var budget=new FileTransferBudget(requests.Count);
+        foreach(var request in requests){cancellation.ThrowIfCancellationRequested();budget.Add(request.Source,request.Destination,request.NewName);}
+        requests=requests.ToArray();
         var done=new TaskCompletionSource<ShellBatchResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread=new Thread(()=>
         {

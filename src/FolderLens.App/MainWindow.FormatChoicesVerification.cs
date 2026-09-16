@@ -27,13 +27,20 @@ public sealed partial class MainWindow
         var legacySearch=CurrentFilter() with{SearchScope="nameAndPath"};ApplySavedFilter(legacySearch);
         if(CurrentFilter().SearchScope!="name")throw new InvalidOperationException("旧视图仍恢复了路径搜索。");
         var beforeRestore=CaptureView();long beforeRootVersion=rootChangeVersion,beforeEpoch=epoch;var beforeScan=scanTask;
+        Task? backgroundReconcile=null;
+        if(Environment.GetCommandLineArgs().Contains("--verify-format-background-race"))
+            verifyCandidateBarrier=_=>{verifyCandidateBarrier=null;reconcilePending=true;backgroundReconcile=Reconcile();return Task.CompletedTask;};
         await RestoreSavedView(beforeRestore with{Filter=beforeRestore.Filter with{Recursive=false}},recordHistory:false);
-        if(rootChangeVersion!=beforeRootVersion||epoch!=beforeEpoch||!ReferenceEquals(scanTask,beforeScan)||CurrentFilter().MaxFolderLevels!=1)
+        report["legacyRestoreObservation"]=new{beforeRootVersion,afterRootVersion=rootChangeVersion,beforeEpoch,afterEpoch=epoch,sameScanTask=ReferenceEquals(scanTask,beforeScan),levels=CurrentFilter().MaxFolderLevels};
+        // scanTask may belong to an independent automatic reconciliation. The
+        // accepted root/epoch and displayed depth are the restore invariants.
+        if(rootChangeVersion!=beforeRootVersion||epoch!=beforeEpoch||CurrentFilter().MaxFolderLevels!=1)
             throw new InvalidOperationException("恢复旧单层视图启动了重扫或没有映射为1层。");
         if((await catalog!.ReadPage(resultHandle!.Id,0)).Any(row=>row.RelativePath.Contains('\\')))
             throw new InvalidOperationException("恢复旧单层视图显示了更深文件。");
+        if(backgroundReconcile is not null)await backgroundReconcile;
         await RestoreSavedView(beforeRestore,recordHistory:false);
-        report["legacyRestoreKeepsScanEpochAndTask"]=true;
+        report["legacyRestoreKeepsRootEpochAndDepth"]=true;
         var imageOptions=FormatOptions.Items.Cast<ExtensionOption>().ToArray();
         if(imageOptions.Length!=1||imageOptions[0].Extension!="png")throw new InvalidOperationException("图片分类扩展名不正确。");
         FormatOptions.SelectedItems.Add(imageOptions[0]);

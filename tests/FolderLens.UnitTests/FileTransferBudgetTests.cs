@@ -3,6 +3,14 @@ using Xunit;
 namespace FolderLens.UnitTests;
 public sealed class FileTransferBudgetTests
 {
+    [Theory][InlineData(false)][InlineData(true)]
+    public async Task ExternalShellBatchRejectsOversizedPayloadBeforeLookingUpSources(bool longPaths)
+    {
+        var requests=Enumerable.Repeat(new ShellFileRequest(
+            longPaths?@"Z:\"+new string('a',32000):@"Z:\nonexistent-source",ShellFileAction.Copy,@"Z:\destination"),longPaths?1000:10_001).ToArray();
+        var error=await Assert.ThrowsAsync<IOException>(()=>ShellFileOperations.ExecuteCore(requests,0,default,true));
+        Assert.Contains(longPaths?"路径过多或过长":"一次最多处理",error.Message);
+    }
     [Fact] public void OrdinarySelectionFitsAndHugeSelectionIsRejectedBeforeEnumeration()
     {
         var budget=new FileTransferBudget(10_000);for(int i=0;i<10_000;i++)budget.Add(@"D:\photos\image.jpg");

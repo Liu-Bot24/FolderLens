@@ -6,6 +6,37 @@ namespace FolderLens.UnitTests;
 public sealed class PlaylistBatchTests
 {
     [Fact]
+    public async Task RepeatedBudgetExhaustionDoesNotStarveHealthyTail()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"FolderLens-playlist-fair",Guid.NewGuid().ToString("N"));
+        string source=Path.Combine(directory,"source"),data=Path.Combine(directory,"data"),collection;
+        Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"a.jpg"),"a");File.WriteAllText(Path.Combine(source,"b.jpg"),"b");
+        await using(var initial=await BrowsingSessionStorage.Open(data))
+        {
+            long epoch=await initial.Catalog.OpenRoot("root",source);await new DirectoryIndexer(initial.Catalog).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+            collection=(await initial.Catalog.CreateCollection("fair")).Id;
+            await initial.Catalog.ChangeCollectionItems([collection],(await initial.Catalog.ReadFirstPage(new(){RootId="root"})).Items,true);
+        }
+        await using var restored=await BrowsingSessionStorage.Open(data);var catalog=restored.Catalog;
+        string? slow=null;int healthy=0;
+        catalog.PlaylistProbeOverride=async(path,token)=>
+        {
+            if(path!=source)
+            {
+                slow??=path;
+                if(path==slow)await Task.Delay(Timeout.Infinite,token);else healthy++;
+            }
+            return ScanPathProbe.Read(path);
+        };
+        for(int round=0;round<3;round++)
+        {
+            try{await foreach(var _ in catalog.RefreshPlaylistBatches(collection,timeBudget:TimeSpan.FromMilliseconds(250))){};}
+            catch(TimeoutException){}
+        }
+        Assert.True(healthy>0,"The healthy tail was never probed after repeated budget exhaustion.");
+        Assert.Single((await catalog.ReadFirstPage(new(){RootId="collection:"+collection,CollectionId=collection})).Items);
+    }
+    [Fact]
     public async Task FirstVerifiedBatchPrecedesSlowTailAndCancellationRetainsLinks()
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-playlist-batch",Guid.NewGuid().ToString("N"));

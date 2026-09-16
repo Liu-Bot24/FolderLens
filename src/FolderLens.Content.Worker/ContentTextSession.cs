@@ -35,7 +35,7 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
         if(reader is null || path!=requestedPath || selectedEncoding!=options.Encoding || fileVersion!=request.Context.FileVersion)
         {
             await CloseDocument();path=requestedPath;selectedEncoding=options.Encoding;fileVersion=request.Context.FileVersion;
-            reader=new(path,selectedEncoding,cancellation);
+            reader=new(path,selectedEncoding,cancellation,new ApprovedInput(path,approved.ExpectedLength,approved.ExpectedLastWriteTicks,approved.AllowCloud,approved.SourceSignature));
         }
         ValidateExpected(approved,options.ExpectedSnapshot);reader.CheckVersion();
         TextWorkerResponse result;
@@ -90,6 +90,7 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
     {
         var actual=reader!.Snapshot;
         if((approved.ExpectedLength is {} length && length!=actual.Length) ||
+            (approved.SourceSignature is {Length:>0} signature && signature!=actual.SourceSignature) ||
             (approved.ExpectedLastWriteTicks is {} ticks && ticks!=DateTime.FromFileTimeUtc(actual.LastWriteTicks).Ticks) ||
             (expected is not null && expected!=actual))throw new IOException("FileChanged");
     }

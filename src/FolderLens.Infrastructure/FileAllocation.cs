@@ -13,6 +13,10 @@ public static class FileAllocation
     public static FileIdentityMetadata InspectMetadata(string path,bool resolveLocation=false)
     {
         using var handle=CreateFileW(path,0x80,7,IntPtr.Zero,3,0x02000000|0x00200000|0x00100000,IntPtr.Zero);
+        return InspectMetadata(handle,resolveLocation);
+    }
+    internal static FileIdentityMetadata InspectMetadata(SafeFileHandle handle,bool resolveLocation=false)
+    {
         if(handle.IsInvalid)return new(null,null,null,null,"unknown",null);
         bool hasBasic=GetBasicInformation(handle,0,out BasicInfo basic,Marshal.SizeOf<BasicInfo>());
         long? allocated=GetFileInformationByHandleEx(handle,1,out StandardInfo standard,Marshal.SizeOf<StandardInfo>()) && standard.Allocation>=0?standard.Allocation:null;
@@ -30,7 +34,7 @@ public static class FileAllocation
             if(length==0)length=GetFinalPathNameByHandleW(handle,buffer,(uint)buffer.Capacity,0);
             if(length>0&&length<buffer.Capacity)locator=buffer.ToString().TrimEnd('\\');
         }
-        return new(allocated,identity,volume,hasBasic&&basic.Change>0?basic.Change:null,mode,tag){ResolvedLocation=locator};
+        return new(allocated,identity,volume,hasBasic&&basic.Change>0?basic.Change:null,mode,tag){ResolvedLocation=locator,Attributes=hasBasic?basic.Attributes:null};
     }
     public static bool IsDeferred(long attributes)=>(attributes&(0x1000|0x40000|0x400000))!=0;
     // Cloud tags vary in bits 12..15; they are not junction/symlink tags.
@@ -52,4 +56,5 @@ public static class FileAllocation
 public sealed record FileIdentityMetadata(long? Allocated,string? PhysicalIdentity,string? VolumeIdentity,long? ChangeTime,string CaseMode,uint? ReparseTag)
 {
     public string? ResolvedLocation {get;init;}
+    public uint? Attributes {get;init;}
 }

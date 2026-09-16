@@ -44,13 +44,23 @@ public sealed partial class MainWindow
         finally{audioUpdating=false;}
     }
     private async void PlayAudio(object sender,RoutedEventArgs e)
+        =>await PlayAudioCore();
+    private Action? verifyAudioSourceCreating;
+    private Func<Task>? verifyAudioResolved;
+    private long audioOpening=-1;
+    private async Task PlayAudioCore()
     {
-        if(selected is not {} row||row.Kind!="audio")return;long current=selection;
+        using var work=browserWork.Enter();
+        if(work is null||closing||selected is not {} row||row.Kind!="audio"||audioOpening==selection)return;long current=selection;
+        audioOpening=current;var token=selectionStop.Token;
         try
         {
             if(!await EnsureCloudRead(row,current)||current!=selection||closing)return;
             if(audio is not {} player)
             {
+                var target=await FolderLens.Infrastructure.ExternalFileLaunch.Resolve(catalog!,prefetchSourceProbe,SourceRootPath(row),SourceRootId(row),row.Item!.EntryId,row.Item.Version,approvedCloud.Contains(CloudKey(row)),token);
+                if(verifyAudioResolved is not null)await verifyAudioResolved();
+                if(current!=selection||closing||token.IsCancellationRequested||!ReferenceEquals(selected,row))return;
                 player=new MediaPlayer{AutoPlay=false,Volume=AudioVolume.Value,IsMuted=AudioMute.IsChecked==true};
                 audio=player;var captured=player;
                 void OnCurrent(Action action)=>DispatcherQueue.TryEnqueue(()=>{if(!closing&&current==selection&&ReferenceEquals(audio,captured))action();});
@@ -73,13 +83,15 @@ public sealed partial class MainWindow
                 player.MediaOpened+=Opened;playback.PlaybackStateChanged+=StateChanged;
                 player.MediaEnded+=Ended;player.MediaFailed+=Failed;
                 AudioState.Text="正在打开音频…";
-                player.Source=MediaSource.CreateFromUri(new Uri(SourcePath(row)));
+                verifyAudioSourceCreating?.Invoke();
+                player.Source=MediaSource.CreateFromUri(new Uri(target.Path));
                 ApplyAudioRate();player.Play();audioTimer?.Start();
             }
             else if(player.PlaybackSession.PlaybackState==MediaPlaybackState.Playing)player.Pause();
             else player.Play();
         }
         catch(Exception ex){if(current==selection&&!closing){StopAudio();AudioState.Text=$"无法试听：{UserMessages.Error(ex)} 可使用外部播放器打开。";}}
+        finally{if(audioOpening==current)audioOpening=-1;}
     }
     private void ApplyAudioRate(){if(audio is not null&&PlaybackRate.SelectedItem is ComboBoxItem item)audio.PlaybackSession.PlaybackRate=double.Parse(item.Tag.ToString()!,System.Globalization.CultureInfo.InvariantCulture);}
     private void ChangeAudioRate(object sender,SelectionChangedEventArgs e)=>ApplyAudioRate();

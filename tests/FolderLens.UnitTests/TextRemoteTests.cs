@@ -8,6 +8,21 @@ namespace FolderLens.UnitTests;
 
 public sealed class TextRemoteTests
 {
+    [Theory][InlineData("window")][InlineData("find")][InlineData("index")]
+    public async Task FirstOperationRejectsReplacementAgainstApprovedSignature(string operation)
+    {
+        var f=Fixture("first\r\nsecond","utf-8");var observed=FileReadObservation.Read(f.Path);
+        await using var worker=new WorkerClient(Worker(),Path.Combine(f.Root,"worker"));
+        var remote=new RemoteTextClient(worker,f.Path,new("root",1,1,1,1,1),sourceStamp:new(observed.Length,observed.ModifiedUtcTicks,observed.Signature));
+        var bytes=File.ReadAllBytes(f.Path);var written=File.GetLastWriteTimeUtc(f.Path);
+        File.Move(f.Path,f.Path+".old");File.WriteAllBytes(f.Path,bytes);File.SetLastWriteTimeUtc(f.Path,written);
+        await Assert.ThrowsAsync<IOException>(async()=>
+        {
+            if(operation=="window")await remote.ReadWindow(0);
+            else if(operation=="find")await remote.FindNext("first");
+            else await remote.IndexStep();
+        });
+    }
     private static string Worker()
     {
         var directory=new DirectoryInfo(AppContext.BaseDirectory);while(directory is not null&&!File.Exists(Path.Combine(directory.FullName,"FolderLens.slnx")))directory=directory.Parent;

@@ -220,6 +220,7 @@ public sealed partial class MainWindow : Window
         // Validate the draft before retiring work or recording navigation history.
         if(rootId.Length>0&&!TryCurrentFilter(out _))return;
         long navigation=++directoryNavigationRequest;
+        CancelPendingSearch();
         SavedView? acceptedView=null;
         var requestedAdvanced=advanced;
         try
@@ -421,9 +422,11 @@ public sealed partial class MainWindow : Window
     }
     private async Task RefreshQuery(bool preserveViewport=false,bool scanPreview=false)
     {
+        if(!scanPreview)CancelPendingSearch();
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
         if(!browserRootReady)return;
         if(!TryCurrentFilter(out var filter))return;
+        if(!scanPreview)submittedSearch=Search.Text;
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;

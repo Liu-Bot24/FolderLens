@@ -10,14 +10,18 @@ public sealed partial class MainWindow
     {
         string path=Path.Combine(source,"audio-recovery.wav");
         await File.WriteAllTextAsync(path,"invalid WAV");
-        string previousRoot=root;var previousSelected=selected;long previousSelection=selection;
-        var binding=FilesGrid.ItemsSource;
-        var row=new FileRow(0);row.Fill(new(0,"audio-recovery",1,Path.GetFileName(path),"",11,null,"audio"));
-        root=source;selected=row;selection++;AudioMute.IsChecked=true;
+        suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;
+        async Task SelectAudio()
+        {
+            await OpenRoot(source,true);await RefreshQuery();
+            long ordinal=await catalog!.FindOrdinal(resultHandle!.Id,Path.GetFileName(path))??throw new InvalidOperationException("Missing audio recovery fixture.");
+            await SelectBrowserOrdinal(results!,checked((int)ordinal),lifetime.Token);
+        }
+        await SelectAudio();AudioMute.IsChecked=true;
         int heartbeats=0;var heartbeat=DispatcherQueue.CreateTimer();heartbeat.Interval=TimeSpan.FromMilliseconds(20);heartbeat.Tick+=(_,_)=>heartbeats++;heartbeat.Start();
         try
         {
-            PlayAudio(this,new RoutedEventArgs());
+            await PlayAudioCore();
             await WaitUntil(()=>audio is null&&AudioState.Text.Contains("无法播放此音频"),TimeSpan.FromSeconds(8));
             if(audioTimer!.IsRunning||AudioPosition.IsEnabled||AudioPlayButton.Content as string!="播放")throw new InvalidOperationException("失败后试听控件未复位。");
             report["nativeMediaFailureRecovered"]=true;
@@ -30,7 +34,8 @@ public sealed partial class MainWindow
                 writer.Write(16);writer.Write((short)1);writer.Write((short)1);writer.Write(8000);writer.Write(16000);writer.Write((short)2);writer.Write((short)16);
                 writer.Write(Encoding.ASCII.GetBytes("data"));writer.Write(dataLength);writer.Write(new byte[dataLength]);
             }
-            PlayAudio(this,new RoutedEventArgs());
+            await SelectAudio();var binding=FilesGrid.ItemsSource;
+            await PlayAudioCore();
             await WaitUntil(()=>audio?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing,TimeSpan.FromSeconds(8));
             var playing=audio!;
             if(playing.AudioDevice is not null)throw new InvalidOperationException("试听意外固定到特定音频设备。");
@@ -47,6 +52,6 @@ public sealed partial class MainWindow
             report["physicalDeviceUnplugTested"]=false;
             report["status"]="PASS";
         }
-        finally{heartbeat.Stop();StopAudio();root=previousRoot;selected=previousSelected;selection=previousSelection;}
+        finally{heartbeat.Stop();StopAudio();}
     }
 }

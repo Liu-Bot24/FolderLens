@@ -45,8 +45,10 @@ public sealed partial class MainWindow
         report["memoryAtStart"]=MemoryObservation();
         async Task SelectPath(string path)
         {
-            long ordinal=await catalog!.FindOrdinal(resultHandle!.Id,path)??throw new InvalidOperationException("Soak fixture missing: "+path);
-            if(!await SelectBrowserOrdinal(results!,checked((int)ordinal),lifetime.Token)||previewReadySelection!=selection||previewFailure is not null)
+            var handle=resultHandle??throw new InvalidOperationException("Soak result missing.");var sourceResults=results!;long request=queryRequest;
+            long ordinal=await catalog!.FindOrdinal(handle.Id,path)??throw new InvalidOperationException("Soak fixture missing: "+path);
+            if(request!=queryRequest||!ReferenceEquals(handle,resultHandle)||!ReferenceEquals(sourceResults,results))throw new InvalidOperationException("Soak query changed during ordinal lookup.");
+            if(!await SelectBrowserOrdinal(sourceResults,checked((int)ordinal),lifetime.Token)||previewReadySelection!=selection||previewFailure is not null)
                 throw new InvalidOperationException("Soak preview failed: "+path+" / "+QualityLabel.Text);
         }
         async Task SearchFor(string text)

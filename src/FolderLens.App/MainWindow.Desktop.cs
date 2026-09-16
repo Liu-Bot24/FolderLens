@@ -16,6 +16,10 @@ public sealed partial class MainWindow
     private bool controlsReady, suppressFilters, immersive, resizingPane;
     private CancellationTokenSource? slideTickStop;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? searchTimer, slideTimer;
+    private long searchRevision;
+    private string? submittedSearch;
+    private Func<Task>? pendingSearchTick;
+    private Action? detachSearchTick;
     private string? playerExecutable;
     private bool playerSupportsPlaylists;
     private readonly Dictionary<FileRow,CancellationTokenSource> thumbnailRequests=[];
@@ -52,7 +56,7 @@ public sealed partial class MainWindow
     private void InitializeDesktop()
     {
         InitializeFileTransfer();
-        searchTimer=DispatcherQueue.CreateTimer();searchTimer.Interval=TimeSpan.FromMilliseconds(280);searchTimer.IsRepeating=false;searchTimer.Tick+=async(_,_)=>await RefreshQuery();
+        searchTimer=DispatcherQueue.CreateTimer();searchTimer.Interval=TimeSpan.FromMilliseconds(280);searchTimer.IsRepeating=false;
         slideTimer=DispatcherQueue.CreateTimer();slideTimer.Interval=TimeSpan.FromSeconds(5);slideTimer.IsRepeating=false;
         slideTimer.Tick+=async(_,_)=>
         {
@@ -143,7 +147,23 @@ public sealed partial class MainWindow
         }
         await RefreshQuery();
     }
-    private void SearchChanged(object sender,TextChangedEventArgs e){if(controlsReady&&!suppressFilters){searchTimer?.Stop();searchTimer?.Start();}}
+    private void CancelPendingSearch(){searchRevision++;searchTimer?.Stop();detachSearchTick?.Invoke();detachSearchTick=null;pendingSearchTick=null;}
+    private void SearchChanged(object sender,TextChangedEventArgs e)
+    {
+        if(!controlsReady||suppressFilters)return;
+        CancelPendingSearch();
+        // A delayed TextChanged must not replace an explicitly submitted sequence.
+        if(Search.Text==submittedSearch)return;
+        long revision=searchRevision,navigation=directoryNavigationRequest;
+        var timer=DispatcherQueue.CreateTimer();timer.Interval=searchTimer?.Interval??TimeSpan.FromMilliseconds(280);timer.IsRepeating=false;searchTimer=timer;
+        async Task Tick()
+        {
+            if(closing||revision!=searchRevision||navigation!=directoryNavigationRequest||!ReferenceEquals(timer,searchTimer))return;
+            await RefreshQuery();
+        }
+        async void OnTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender,object args)=>await Tick();
+        pendingSearchTick=Tick;detachSearchTick=()=>timer.Tick-=OnTick;timer.Tick+=OnTick;timer.Start();
+    }
     private async void SearchKeyDown(object sender,KeyRoutedEventArgs e){if(e.Key==VirtualKey.Enter){e.Handled=true;searchTimer?.Stop();await RefreshQuery();}}
     private int browserToolbarLayout=-1;
     private void UpdateBrowserToolbar()

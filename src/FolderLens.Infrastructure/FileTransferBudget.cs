@@ -11,9 +11,9 @@ public sealed class FileTransferBudget
     {
         if(count<0||count>MaximumItems)throw new IOException($"一次最多处理 {MaximumItems:N0} 个文件，请分批选择，或在资源管理器中操作整个文件夹。");
     }
-    public void Add(string path)
+    public void Add(string path,string? destination=null,string? newName=null)
     {
-        retainedBytes=checked(retainedBytes+2048+2L*path.Length);
+        retainedBytes=checked(retainedBytes+2048+2L*(path.Length+(long)(destination?.Length??0)+(newName?.Length??0)));
         if(retainedBytes>MaximumBytes)throw new IOException("所选文件路径过多或过长，请减少选择后重试。");
     }
 }

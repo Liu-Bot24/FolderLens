@@ -22,8 +22,10 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         internal readonly (string Id,string Path,bool Subtree) Work=work;
         internal readonly IAsyncEnumerator<ScanDirectoryPacket> Packets=packets;
         internal long Entries,LastTurn,BranchTurn;
+        internal string? PhysicalIdentity,ResolvedLocation;
     }
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PathProbeOverride {get;set;}
+    internal Action<string,ScanDirectoryPacket>? PacketReceived {get;set;}
     public TimeSpan RenameLookupTime { get; private set; }
     public TimeSpan BatchWriteTime { get; private set; }
     public static string StablePathId(string rootId,string relative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rootId+"\0"+relative)));
@@ -142,9 +144,11 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     {
                         if(!await cursor.Packets.MoveNextAsync().ConfigureAwait(false))throw new IOException("扫描进程没有返回目录完成状态。");
                         var packet=cursor.Packets.Current;
+                        PacketReceived?.Invoke(path,packet);
                         cancellation.ThrowIfCancellationRequested();
                         if(packet.State=="started")
                         {
+                            cursor.PhysicalIdentity=packet.PhysicalIdentity;cursor.ResolvedLocation=packet.ResolvedLocation;
                             if(relative.Length==0&&packet.PhysicalIdentity is {} rootIdentity)
                                 await renames.RetireConfirmedMovedRoot(rootId,root,epoch,rootIdentity,cancellation).ConfigureAwait(false);
                             await catalog.Write(c=>
@@ -187,7 +191,12 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                             if(relative.Length==0){rootMissing=true;availability="unknown";}terminal=true;
                         }
                         else if(packet.State=="completed")
-                        {await Reconcile(rootId,epoch,scanId,id,directoryEntries,cancellation).ConfigureAwait(false);dirs++;terminal=true;}
+                        {
+                            var current=probe is null?await Task.Run(()=>ScanPathProbe.Read(path),cancellation).ConfigureAwait(false):await probe.Probe(path,cancellation).ConfigureAwait(false);
+                            if(current.State!="present"||cursor.PhysicalIdentity is null||current.PhysicalIdentity!=cursor.PhysicalIdentity||current.ResolvedLocation!=cursor.ResolvedLocation)
+                                throw new IOException("DirectoryChanged");
+                            await Reconcile(rootId,epoch,scanId,id,directoryEntries,cancellation).ConfigureAwait(false);dirs++;terminal=true;
+                        }
                         else if(packet.State=="excluded")
                         {incomplete|=packet.ErrorCode=="DeferredOffline";if(relative.Length==0)availability="unknown";await ExcludeDirectory(rootId,epoch,scanId,id,relative,packet.ErrorCode??"Excluded",cancellation).ConfigureAwait(false);terminal=true;}
                         else if(packet.State is "offline" or "inaccessible" or "failed")

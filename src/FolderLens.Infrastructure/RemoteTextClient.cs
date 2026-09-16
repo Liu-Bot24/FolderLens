@@ -115,7 +115,7 @@ public sealed class RemoteTextClient
             if(reply.AssetPath is not null || reply.Message.AssetToken is not null)throw new InvalidDataException("文本数据不能作为图片缓存返回。");
             var result=reply.Message.Metadata?.Deserialize<TextWorkerResponse>(WorkerProtocol.Json)??throw new InvalidDataException("文本工作进程返回了无效数据。");
             if(!result.IsFinal || result.VersionKey!=result.Snapshot.Key(path,result.Encoding,context.FileVersion) || (snapshot is not null && result.Snapshot!=snapshot))throw new IOException("文本文件已变化，请重新加载。");
-            snapshot=result.Snapshot;stamp=new(snapshot.Length,DateTime.FromFileTimeUtc(snapshot.LastWriteTicks).Ticks);VersionKey=result.VersionKey;EncodingName=result.Encoding;IndexProgress=result.Index;
+            snapshot=result.Snapshot;stamp=new(snapshot.Length,DateTime.FromFileTimeUtc(snapshot.LastWriteTicks).Ticks,snapshot.SourceSignature);VersionKey=result.VersionKey;EncodingName=result.Encoding;IndexProgress=result.Index;
             return result;
         }
         finally{gate.Release();}

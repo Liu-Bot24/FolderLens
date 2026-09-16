@@ -15,7 +15,7 @@ $cases=@(
  'thumbnail-priority','menu-availability','browser-status','collections','quick-collections','pro-feedback','startup-profile','capacity-ui','format-choices','filter-panel','navigation-roots','tree-current-folder','wheel-distance','prefetch-adoption','prefetch-turnaround','prepared-cache',
  'fit-lock','press-gesture','filmstrip','viewer-information','selection-appearance','directory-filter','collection-markdown','collection-pending-close',
  'collection-observation','collection-batches','markdown-retries','audio-recovery','audio-retention','video-card','keyboard-completion','preview-close','preview-pending-close',
- 'root-from-viewer','selection-race','slide-tick-race','slide-error','scan-navigation','shell-refresh-navigation','video-lifetime'
+ 'root-from-viewer','selection-race','slide-tick-race','slide-error','scan-navigation','shell-refresh-navigation','video-lifetime','independent-query','audio-freshness','format-background-race'
 )
 $reports=@()
 $video=Join-Path $EvidenceRoot 'generated-video.mp4'

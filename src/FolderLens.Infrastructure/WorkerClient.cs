@@ -139,7 +139,7 @@ public sealed class WorkerClient : IAsyncDisposable
                 if(currentInputFile is {} previous){await Task.Run(()=>{if(File.Exists(previous))ThumbnailCache.DeleteOwned(previous);},token).ConfigureAwait(false);currentInputFile=null;}
                 currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentSignature=sourceStamp?.SourceSignature;currentVersion=context.FileVersion;currentAllowCloud=allowCloud;
                 currentInputFile=Path.Combine(taskDirectory!,currentInput+".input.json");
-                object approved=dataOnly&&operation!="mediaRange"?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud,currentSignature);
+                object approved=dataOnly&&operation!="mediaRange"?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud,sourceStamp?.SourceSignature):new ApprovedInput(path!,currentLength,currentWrite,allowCloud,currentSignature);
                 try{await File.WriteAllTextAsync(currentInputFile,JsonSerializer.Serialize(approved,WorkerProtocol.Json),token).ConfigureAwait(false);}catch{currentPath=null;throw;}
             }
             string requestId=Guid.NewGuid().ToString("N");

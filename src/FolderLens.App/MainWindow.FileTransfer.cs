@@ -145,6 +145,7 @@ public sealed partial class MainWindow
         try
         {
             incomingDragItems??=args.DataView.GetStorageItemsAsync().AsTask();var files=await incomingDragItems;
+            ValidateIncomingFiles(files,target);
             bool control=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Control)!=0,shift=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Shift)!=0;
             if(control&&shift)return;
             if(!incomingDropDefaults.TryGetValue(target,out var normal))incomingDropDefaults[target]=normal=Task.Run(()=>ShellTransferPolicy.Choose(files.Select(f=>f.Path).ToArray(),target,false,false));
@@ -162,6 +163,7 @@ public sealed partial class MainWindow
         try
         {
             var files=await args.DataView.GetStorageItemsAsync();
+            ValidateIncomingFiles(files,target);
             bool control=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Control)!=0,shift=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Shift)!=0;
             var action=await Task.Run(()=>ShellTransferPolicy.Choose(files.Select(f=>f.Path).ToArray(),target,control,shift));
             var effect=action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy;
@@ -171,6 +173,11 @@ public sealed partial class MainWindow
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}finally{ResetIncomingDrag();deferral.Complete();}
     }
     private void ResetIncomingDrag(){incomingDragItems=null;incomingDropDefaults.Clear();}
+    private static void ValidateIncomingFiles(IReadOnlyList<IStorageItem> files,string destination)
+    {
+        var budget=new FileTransferBudget(files.Count);
+        foreach(var file in files)budget.Add(file.Path,destination);
+    }
     private async Task ReceiveFiles(DataPackageView data,string destination,ShellFileAction? requested)
     {
         if(fileOperationBusy||closing||!data.Contains(StandardDataFormats.StorageItems))return;
@@ -180,6 +187,7 @@ public sealed partial class MainWindow
         try
         {
             var files=await data.GetStorageItemsAsync();if(closing||files.Count==0)return;
+            ValidateIncomingFiles(files,destination);
             var action=requested??(data.RequestedOperation==DataPackageOperation.Move?ShellFileAction.Move:ShellFileAction.Copy);
             var requests=files.Select(f=>new ShellFileRequest(f.Path,action,destination)).ToArray();
             await ReturnToBrowser();if(closing)return;ClearResultSelection();

@@ -7,7 +7,7 @@ $ArtifactRoot=Resolve-ProjectPath $ArtifactRoot
 $packageFile=Join-Path $ArtifactRoot 'package-manifest.json'
 $package=$null
 $publishRoot=$ArtifactRoot
-if(Test-Path -LiteralPath $packageFile){$package=Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json;$publishRoot=$package.artifactRoot}
+if(Test-Path -LiteralPath $packageFile){$package=Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json;if($null -eq $package -or -not $package.artifactRoot){throw 'Invalid package manifest.'};$publishRoot=$package.artifactRoot}
 $manifest=Get-Content (Join-Path $publishRoot 'release-manifest.json') -Raw | ConvertFrom-Json
 $appRoot=Join-Path $publishRoot 'app'
 $null=@(Get-PackageFiles $appRoot $manifest)
@@ -45,11 +45,23 @@ if($cap.providerLoadStatus -ne 'PASS'){throw 'Published provider load probe fail
 $sbom=Get-Content (Join-Path $appRoot 'SBOM.json') -Raw | ConvertFrom-Json
 if(@($sbom.managed).Count -eq 0 -or @($sbom.native).Count -eq 0){throw 'SBOM is empty.'}
 if($package -and -not $ManifestOnly){
+ if($package.buildId -ne $manifest.buildId){throw 'Package and publish identities differ.'}
+ $portableName='FolderLens-'+$manifest.buildId+'-win-x64-portable-unverified.zip'
+ $requiredPackages=@($portableName,('FolderLens-'+$manifest.buildId+'-win-x64-setup-unsigned.exe'),('FolderLens-'+$manifest.buildId+'-source.zip'))
+ if(@($package.files).Count -ne $requiredPackages.Count){throw 'Package manifest must contain portable, setup and matching source artifacts.'}
+ $seenPackages=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+ foreach($file in $package.files){
+  $name=[string]$file.file
+  if($name -match '[\\/:\x00-\x1f]' -or $name -notin $requiredPackages -or -not $seenPackages.Add($name)){throw "Unsafe, duplicate or unexpected package artifact: $name"}
+  if($file.bytes -isnot [long] -and $file.bytes -isnot [int]){throw "Invalid package byte count: $name"}
+  if($file.bytes -le 0 -or [string]$file.sha256 -notmatch '^[0-9a-fA-F]{64}$'){throw "Invalid package integrity descriptor: $name"}
+ }
+ foreach($name in $requiredPackages){if(-not $seenPackages.Contains($name)){throw "Required package artifact missing: $name"}}
  Add-Type -AssemblyName System.IO.Compression.FileSystem
  foreach($file in $package.files){
   $path=Join-Path $ArtifactRoot $file.file
-  if((Get-FileHash -LiteralPath $path).Hash -ne $file.sha256){throw "Package hash mismatch: $($file.file)"}
-  if($file.file.EndsWith('-portable-unverified.zip')){
+  if((Get-Item -LiteralPath $path).Length -ne $file.bytes -or (Get-FileHash -LiteralPath $path).Hash -ne $file.sha256){throw "Package size or hash mismatch: $($file.file)"}
+  if($file.file -eq $portableName){
    $zip=[IO.Compression.ZipFile]::OpenRead($path)
    try{
     if($zip.Entries.Count -ne $manifest.files.Count+1){throw 'Portable ZIP entry count mismatch.'}
