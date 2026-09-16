@@ -22,7 +22,7 @@ public sealed partial class MainWindow
     private void ScheduleMarkdownRelease()
     {
         if(markdownReleaseTimer is null)return;
-        if(!closing&&MarkdownHost.Visibility==Visibility.Visible)markdownViewportTimer?.Start();else markdownViewportTimer?.Stop();
+        if(!closing&&!markdownLoading&&MarkdownHost.Visibility==Visibility.Visible)markdownViewportTimer?.Start();else markdownViewportTimer?.Stop();
         if(closing||markdownLoading||markdown is null||MarkdownHost.Visibility==Visibility.Visible)markdownReleaseTimer.Stop();
         else if(!markdownReleaseTimer.IsRunning)markdownReleaseTimer.Start();
     }

@@ -53,6 +53,12 @@ public sealed partial class MainWindow
             if(switching>=0){await VerifyImageSwitch(arguments[switching+1],report);return;}
             int categorySwitch=Array.IndexOf(arguments,"--verify-category-switch");
             if(categorySwitch>=0){await VerifyCategorySwitch(arguments[categorySwitch+1],report);return;}
+            int directorySource=Array.IndexOf(arguments,"--verify-directory-source");
+            if(directorySource>=0)
+            {
+                if(directorySource+3>=arguments.Length)throw new ArgumentException("缺少只读根目录及两个子目录。");
+                await VerifyDirectorySource(arguments[directorySource+1],arguments[directorySource+2],arguments[directorySource+3],report);return;
+            }
             if(gallery>=0){if(gallery+1>=arguments.Length)throw new ArgumentException("缺少只读源目录。");await VerifyGallery(arguments[gallery+1],report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-tree-scale")){VerifyTreeScale(report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-group-order")){VerifyGroupOrder(report);return;}

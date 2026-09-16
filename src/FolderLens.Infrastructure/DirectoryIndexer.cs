@@ -17,15 +17,11 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     public ScanScheduler? Scheduler {get;init;}
     private async Task<T> Scheduled<T>(string root,CancellationToken token,Func<Task<T>> work)
     {using var turn=Scheduler is null?null:await Scheduler.Enter(root,token).ConfigureAwait(false);return await work().ConfigureAwait(false);}
-    private async IAsyncEnumerable<ScanDirectoryPacket> ScheduledPackets(string root,IAsyncEnumerable<ScanDirectoryPacket> packets,[EnumeratorCancellation]CancellationToken token)
+    private sealed class DirectoryCursor((string Id,string Path,bool Subtree) work,IAsyncEnumerator<ScanDirectoryPacket> packets)
     {
-        await using var iterator=packets.GetAsyncEnumerator(token);
-        while(true)
-        {
-            using var turn=Scheduler is null?null:await Scheduler.Enter(root,token).ConfigureAwait(false);
-            if(!await iterator.MoveNextAsync().ConfigureAwait(false))yield break;
-            yield return iterator.Current;
-        }
+        internal readonly (string Id,string Path,bool Subtree) Work=work;
+        internal readonly IAsyncEnumerator<ScanDirectoryPacket> Packets=packets;
+        internal long Entries,LastTurn,BranchTurn;
     }
     internal Func<string,CancellationToken,Task<ScanDirectoryPacket>>? PathProbeOverride {get;set;}
     public TimeSpan RenameLookupTime { get; private set; }
@@ -47,6 +43,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         var dirtyStore=new ScanDirtyDirectories(catalog);
         IReadOnlyList<DirtyScanScope> captured=[];
         string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false,rootMissing=false;string availability="online",outcome="failed";
+        var cursors=new List<DirectoryCursor>();
         try
         {
         await catalog.Write(c=>
@@ -81,13 +78,19 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             {
                 cancellation.ThrowIfCancellationRequested();
                 if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
-                var queued=await Scheduled(rootId,cancellation,()=>catalog.Write(c=>
+                string priority=Priority.RelativePath;
+                // A directory may contain millions of entries. Reconsider navigation
+                // after every packet, retaining at most eight enumeration positions.
+                bool preferred=priority.Length>0&&++turn%4!=0;if(priority.Length==0)turn++;
+                var cursor=preferred?cursors.Where(c=>Within(c.Work.Path,priority)||Within(priority,c.Work.Path))
+                    .OrderBy(c=>c.Work.Path==priority?0:Within(c.Work.Path,priority)?1:2).ThenBy(c=>c.LastTurn).FirstOrDefault():
+                    cursors.OrderBy(c=>c.BranchTurn).ThenBy(c=>c.LastTurn).FirstOrDefault();
+                (string Id,string Path,bool Subtree)? queued=null;
+                if(cursors.Count<ScanWorkerProtocol.MaximumCursors&&(!preferred||cursor is null||cursor.Work.Path!=priority&&Within(priority,cursor.Work.Path)))
+                queued=await Scheduled(rootId,cancellation,()=>catalog.Write(c=>
                 {
                     using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
                     using var cmd=c.CreateCommand();cmd.Transaction=t;
-                    string priority=Priority.RelativePath;
-                    // Three preferred turns, then a fair turn: the visible subtree cannot starve its siblings.
-                    bool preferred=priority.Length>0&&++turn%4!=0;
                     cmd.CommandText=preferred?"""
                         SELECT directory_id,relative_path,subtree FROM temp.ScanQueue
                         WHERE scan_id=$scan AND (relative_path=$path OR substr(relative_path,1,length($path)+1)=$path||'\'
@@ -97,28 +100,48 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     cmd.Parameters.AddWithValue("$scan",scanId);cmd.Parameters.AddWithValue("$path",priority);
                     (string Id,string Path,bool Subtree)? next=null;
                     if(preferred){using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);}
-                    if(next is null)
+                    if(next is null&&(!preferred||cursors.Count==0))
                     {
                         cmd.CommandText=ScanQueueScheduling.NextSql;
                         using var row=cmd.ExecuteReader();if(row.Read())next=(row.GetString(0),row.GetString(1),row.GetInt64(2)!=0);
                     }
+                    // Fair turns compare suspended and unopened branches together.
+                    // Opening more cursors must not push a small suspended sibling back.
+                    if(!preferred&&cursor is not null&&next is {} candidate)
+                    {
+                        cmd.CommandText="SELECT last_turn FROM temp.ScanBranches WHERE scan_id=$scan AND branch=$branch";
+                        cmd.Parameters.AddWithValue("$branch",ScanPriority.Branch(candidate.Path));
+                        if((long)cmd.ExecuteScalar()!>=cursor.BranchTurn)next=null;
+                    }
                     if(next is {} found)
                     {
-                        Execute(c,t,"UPDATE temp.ScanBranches SET last_turn=(SELECT COALESCE(MAX(last_turn),0)+1 FROM temp.ScanBranches WHERE scan_id=$scan) WHERE scan_id=$scan AND branch=$branch",("$scan",scanId),("$branch",ScanPriority.Branch(found.Path)));
                         Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan AND directory_id=$id",("$scan",scanId),("$id",found.Id));
                     }
                     t.Commit();return next;
                 },cancellation)).ConfigureAwait(false);
-                if(queued is not {} work)break;
+                if(queued is {} pending)
+                {
+                    string pendingPath=Path.Combine(root,pending.Path);
+                    await SetDirectoryState(rootId,epoch,scanId,pending.Id,"enumerating",null,0,cancellation).ConfigureAwait(false);
+                    if(exclusions.Any(e=>e.Mode=="skipScan"&&Within(pending.Path,e.RelativePath)))
+                    {await ExcludeDirectory(rootId,epoch,scanId,pending.Id,pending.Path,"ScanExcluded",cancellation).ConfigureAwait(false);continue;}
+                    var packets=worker is null?ReadLocal(pendingPath,allowCloud,cancellation):worker.ReadCursor(pendingPath,allowCloud,cancellation);
+                    cursor=new(pending,packets.GetAsyncEnumerator(cancellation));cursors.Add(cursor);
+                }
+                cursor??=cursors.OrderBy(c=>c.LastTurn).FirstOrDefault();if(cursor is null)break;
+                cursor.LastTurn=turn;var work=cursor.Work;
+                string branch=ScanPriority.Branch(work.Path);
+                foreach(var active in cursors)if(ScanPriority.Branch(active.Work.Path)==branch)active.BranchTurn=turn;
+                await catalog.Write(c=>Execute(c,null,"UPDATE temp.ScanBranches SET last_turn=$turn WHERE scan_id=$scan AND branch=$branch",("$turn",turn),("$scan",scanId),("$branch",branch)),cancellation).ConfigureAwait(false);
                 string relative=work.Path,id=work.Id,path=Path.Combine(root,relative);long directoryEntries=0;bool terminal=false;
-                await SetDirectoryState(rootId,epoch,scanId,id,"enumerating",null,0,cancellation).ConfigureAwait(false);
-                if(exclusions.Any(e=>e.Mode=="skipScan"&&Within(relative,e.RelativePath)))
-                {await ExcludeDirectory(rootId,epoch,scanId,id,relative,"ScanExcluded",cancellation).ConfigureAwait(false);continue;}
+                directoryEntries=cursor.Entries;
                 try
                 {
-                    var packets=worker is null?ReadLocal(path,allowCloud,cancellation):worker.Read(path,allowCloud,cancellation);
-                    await foreach(var packet in ScheduledPackets(rootId,packets,cancellation).ConfigureAwait(false))
+                    using var packetTurn=Scheduler is null?null:await Scheduler.Enter(rootId,cancellation).ConfigureAwait(false);
+                    do
                     {
+                        if(!await cursor.Packets.MoveNextAsync().ConfigureAwait(false))throw new IOException("扫描进程没有返回目录完成状态。");
+                        var packet=cursor.Packets.Current;
                         cancellation.ThrowIfCancellationRequested();
                         if(packet.State=="started")
                         {
@@ -173,8 +196,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                             await SetDirectoryState(rootId,epoch,scanId,id,packet.State,packet.ErrorCode,directoryEntries,cancellation).ConfigureAwait(false);terminal=true;
                             if(scopeRelative is null)await dirtyStore.Mark(rootId,epoch,[new(relative,"EnumerationIncomplete",true)],cancellation,onlyIfMissing:true).ConfigureAwait(false);
                         }
-                    }
-                    if(!terminal)throw new IOException("扫描进程没有返回目录完成状态。");
+                    }while(false);
                 }
                 catch(RootIdentityChangedException){availability="unknown";throw;}
                 catch(ScanWorkerUnavailableException){throw;}
@@ -185,6 +207,12 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                     if(relative.Length==0)availability=state=="inaccessible"?"inaccessible":"offline";
                     await SetDirectoryState(rootId,epoch,scanId,id,state,ex is TimeoutException?"EnumerationTimeout":state=="inaccessible"?"AccessDenied":"EnumerationIoFailure",directoryEntries,cancellation).ConfigureAwait(false);
                     if(scopeRelative is null)await dirtyStore.Mark(rootId,epoch,[new(relative,"EnumerationIncomplete",true)],cancellation,onlyIfMissing:true).ConfigureAwait(false);
+                    terminal=true;
+                }
+                finally
+                {
+                    cursor.Entries=directoryEntries;
+                    if(terminal){cursors.Remove(cursor);await cursor.Packets.DisposeAsync().ConfigureAwait(false);}
                 }
             }
             outcome=errors==0&&!incomplete?"ready":"partial";
@@ -196,6 +224,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         {catalog.MarkBrowsingBudgetReached();outcome="partial";errors++;}
         finally
         {
+            foreach(var cursor in cursors)await cursor.Packets.DisposeAsync().ConfigureAwait(false);
             if(initialized)await catalog.Write(c=>
             {
                 using var t=c.BeginTransaction();

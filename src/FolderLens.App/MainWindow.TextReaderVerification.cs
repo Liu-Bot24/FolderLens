@@ -71,6 +71,18 @@ public sealed partial class MainWindow
         if(textStart!=initialStart||TextContent.Text!=initialText||TextScroll.VerticalOffset<TextScroll.ScrollableHeight-1)failures.Add("返回上一块丢字、重复或未定位块底部");
         await LoadText(0,selection,selectionStop.Token);Shell.UpdateLayout();await PageReader(-1);
         if(textStart!=0||TextScroll.VerticalOffset>1)failures.Add("文档开头向上翻页越界");
+        int chunks=0;
+        while(displayedText is {} page&&page.Next<page.Length&&chunks++<32)
+        {
+            TextScroll.ChangeView(null,TextScroll.ScrollableHeight,null,true);await Task.Delay(20);
+            long before=textStart;await PageReader(1);Shell.UpdateLayout();
+            if(textStart<=before){failures.Add("长文连续翻块没有推进");break;}
+        }
+        TextScroll.ChangeView(null,TextScroll.ScrollableHeight,null,true);await Task.Delay(20);UpdateReaderControls();
+        long finalStart=textStart;string finalText=TextContent.Text;await PageReader(1);
+        if(displayedText is not {} finalPage||finalPage.Next!=finalPage.Length||!finalText.Contains("第2999行")||
+            textStart!=finalStart||TextContent.Text!=finalText||ReaderNextPage.IsEnabled)failures.Add("文档末尾翻页越界或没有显示最后一行");
+        report["longTextEndOfFileBoundary"]=failures.Count==0;
         report["longTextViewportAndChunkNavigation"]=failures.Count==0;
         await ReturnToBrowser();
         report["failures"]=failures;

@@ -18,7 +18,16 @@ public sealed partial class MainWindow
         suppressFilters=true;SelectTag(Category,"text");suppressFilters=false;
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var requests=new List<string>();
-        verifyMarkdownResourceBarrier=async(path,token)=>{requests.Add(path);if(path=="A/image-00.png")await release.Task.WaitAsync(token);};
+        report["resourceRequests"]=requests;
+        verifyMarkdownResourceBarrier=async(path,token)=>
+        {
+            requests.Add(path);
+            if(path=="A/image-00.png"&&!release.Task.IsCompleted)
+            {
+                report["imageStartedBeforeNavigationCompleted"]=navigationComplete is {Task.IsCompleted:false};
+                await release.Task.WaitAsync(token);
+            }
+        };
         try
         {
             long ordinal=(await catalog!.FindOrdinal(resultHandle!.Id,"demand.md"))!.Value;
@@ -52,6 +61,23 @@ public sealed partial class MainWindow
             await SelectBrowserOrdinal(results!,checked((int)plain),lifetime.Token);
             await WaitUntil(()=>markdownResourceRequests==0,TimeSpan.FromSeconds(10));
             if(TextScroll.Visibility!=Visibility.Visible||MarkdownHost.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("Leaving media did not restore plain text.");
+            if(Environment.GetCommandLineArgs().Contains("--verify-markdown-reopen"))
+            {
+                var repeated=new List<object>();report["repeatedDocumentLoads"]=repeated;
+                for(int i=0;i<20;i++)
+                {
+                    if(i%4==0)await DisposeMarkdownView();
+                    var watch=System.Diagnostics.Stopwatch.StartNew();
+                    await SelectBrowserOrdinal(results!,checked((int)ordinal),lifetime.Token);
+                    report["webviewEvents"]=webviewEvents.ToArray();report["quality"]=QualityLabel.Text;
+                    if(markdown?.CoreWebView2 is not {} repeatedCore||MarkdownHost.Visibility!=Visibility.Visible||
+                        await repeatedCore.ExecuteScriptAsync("document.body.innerText.includes('Demand reader')")!="true")
+                        throw new InvalidOperationException($"Markdown reopen {i} did not display.");
+                    repeated.Add(new{iteration=i,recreatedView=i%4==0,elapsedMs=watch.Elapsed.TotalMilliseconds});
+                    await SelectBrowserOrdinal(results!,checked((int)plain),lifetime.Token);
+                    await WaitUntil(()=>markdownResourceRequests==0,TimeSpan.FromSeconds(10));
+                }
+            }
             report["leavingDocumentRetiresResourceWork"]=true;report["status"]="PASS";
         }
         finally{release.TrySetResult();verifyMarkdownResourceBarrier=null;}

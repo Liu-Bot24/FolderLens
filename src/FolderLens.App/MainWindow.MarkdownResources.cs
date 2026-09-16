@@ -32,7 +32,9 @@ public sealed partial class MainWindow
     private void ResetMarkdownResources(){markdownResources.Clear();markdownImages.Clear();markdownImageBytes=0;}
     private async Task UpdateMarkdownViewport()
     {
-        if(markdownViewportBusy||closing||MarkdownHost.Visibility!=Microsoft.UI.Xaml.Visibility.Visible||markdown?.CoreWebView2 is not {} core)return;
+        // Assigning image src before the document's load event makes navigation
+        // completion wait for decoding and defeats body-first rendering.
+        if(markdownLoading||markdownViewportBusy||closing||MarkdownHost.Visibility!=Microsoft.UI.Xaml.Visibility.Visible||markdown?.CoreWebView2 is not {} core)return;
         markdownViewportBusy=true;
         try{await core.ExecuteScriptAsync(MarkdownViewportScript);}
         catch(Exception error){if(!closing)RecordWebView("MarkdownViewportFailure "+error.GetType().Name);}

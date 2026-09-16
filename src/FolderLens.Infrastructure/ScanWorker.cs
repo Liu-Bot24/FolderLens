@@ -11,10 +11,11 @@ namespace FolderLens.Infrastructure;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ScanWorkerMessage(string Type,string Instance,string Nonce,string RequestId="",string? Directory=null,
-    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v4",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null);
+    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v5",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null);
 
 public static class ScanWorkerProtocol
 {
+    internal const int MaximumCursors=8;
     private static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web){MaxDepth=16,UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow};
     public static async Task Write(Stream stream,ScanWorkerMessage message,CancellationToken cancellation)
     {
@@ -29,7 +30,7 @@ public static class ScanWorkerProtocol
         int length=BinaryPrimitives.ReadInt32LittleEndian(header);if(length is <2 or >1024*1024)throw new InvalidDataException("Invalid scan frame length.");
         byte[] bytes=new byte[length];await stream.ReadExactlyAsync(bytes,cancellation).ConfigureAwait(false);
         var message=JsonSerializer.Deserialize<ScanWorkerMessage>(bytes,Json)??throw new InvalidDataException("Empty scan message.");
-        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v4" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "stat" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
+        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v5" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "cursorOpen" or "cursorNext" or "stat" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
         return message;
     }
     public static async Task Serve(string pipeName,string instance,string nonce,CancellationToken cancellation=default)
@@ -37,11 +38,31 @@ public static class ScanWorkerProtocol
         using var pipe=new NamedPipeClientStream(".",pipeName,PipeDirection.InOut,PipeOptions.Asynchronous);
         await pipe.ConnectAsync(10000,cancellation).ConfigureAwait(false);
         await Write(pipe,new("hello",instance,nonce),cancellation).ConfigureAwait(false);
+        var cursors=new Dictionary<string,IEnumerator<ScanDirectoryPacket>>();
+        try
+        {
         while(true)
         {
             ScanWorkerMessage message;
             try{message=await Read(pipe,cancellation).ConfigureAwait(false);}catch(EndOfStreamException){return;}
-            if(message.Type is not ("directory" or "stat" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type is not ("directory" or "cursorOpen" or "cursorNext" or "stat" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type is "cursorOpen" or "cursorNext")
+            {
+                if(message.Type=="cursorOpen")
+                {
+                    if(cursors.Count>=MaximumCursors||cursors.ContainsKey(message.RequestId))throw new InvalidDataException("Scan cursor budget exceeded.");
+                    cursors.Add(message.RequestId,ScanDirectoryReader.Read(message.Directory,message.AllowCloud).GetEnumerator());
+                }
+                if(!cursors.TryGetValue(message.RequestId,out var cursor))throw new InvalidDataException("Unknown scan cursor.");
+                ScanDirectoryPacket packet;
+                try{if(!cursor.MoveNext())throw new InvalidDataException("Scan cursor ended without a terminal packet.");packet=cursor.Current;}
+                catch(UnauthorizedAccessException){packet=new("inaccessible",[],"AccessDenied");}
+                catch(IOException){packet=new("offline",[],"EnumerationIoFailure");}
+                catch(ArgumentException){packet=new("failed",[],"InvalidPath");}
+                if(packet.State is "completed" or "excluded" or "inaccessible" or "offline" or "failed")
+                {cursor.Dispose();cursors.Remove(message.RequestId);}
+                await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:packet),cancellation).ConfigureAwait(false);continue;
+            }
             if(message.Type=="resolveImage")
             {
                 if(message.Document is null||message.RelativeUrl is null)throw new InvalidDataException("Invalid Markdown resource request.");
@@ -65,6 +86,8 @@ public static class ScanWorkerProtocol
             catch(ArgumentException){failure=new("failed",[],"InvalidPath");}
             if(failure is not null)await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:failure),cancellation).ConfigureAwait(false);
         }
+        }
+        finally{foreach(var cursor in cursors.Values)cursor.Dispose();}
     }
 }
 
@@ -83,6 +106,46 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
     private readonly string instance=Guid.NewGuid().ToString("N"),nonce=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private int busy;
     public int? ProcessId=>process is {HasExited:false}?process.Id:null;
+    // A shared scan worker holds at most eight suspended OS enumerators. Only
+    // the requested cursor advances; it cannot prefetch an old directory while paused.
+    internal async IAsyncEnumerable<ScanDirectoryPacket> ReadCursor(string directory,bool allowCloud,[EnumeratorCancellation]CancellationToken cancellation)
+    {
+        string request=Guid.NewGuid().ToString("N"),path=PathRules.ValidateSource(directory);bool first=true,terminal=false;
+        try
+        {
+            while(!terminal)
+            {
+                var packet=await CursorPacket(first?"cursorOpen":"cursorNext",request,path,allowCloud,cancellation).ConfigureAwait(false);first=false;
+                terminal=packet.State is "completed" or "excluded" or "inaccessible" or "offline" or "failed";
+                yield return packet;
+            }
+        }
+        finally{if(!terminal)await Stop().ConfigureAwait(false);}
+    }
+    private async Task<ScanDirectoryPacket> CursorPacket(string type,string request,string path,bool allowCloud,CancellationToken cancellation)
+    {
+        if(Interlocked.Exchange(ref busy,1)!=0)throw new InvalidOperationException("A scan worker has one active packet request.");
+        using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(operationTimeout??TimeSpan.FromSeconds(20));
+        bool completed=false;
+        try
+        {
+            if(process is null)
+            {
+                if(type!="cursorOpen")throw new ScanWorkerUnavailableException("目录扫描上下文已丢失，请刷新后重试。");
+                await Start(timeout.Token,cancellation).ConfigureAwait(false);
+            }
+            await ScanWorkerProtocol.Write(pipe!,new(type,instance,nonce,request,path,allowCloud),timeout.Token).ConfigureAwait(false);
+            var response=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
+            if(response.Type!="packet"||response.Instance!=instance||response.Nonce!=nonce||response.RequestId!=request||response.Packet is not {} packet||packet.Entries.Length>128||
+                packet.State is not ("started" or "batch" or "completed" or "excluded" or "inaccessible" or "offline" or "failed"))throw new InvalidDataException("Mismatched scan cursor response.");
+            foreach(var entry in packet.Entries)
+                if(string.IsNullOrEmpty(entry.Name)||entry.Name is "." or ".."||entry.Name.IndexOfAny(['\\','/',':','\0'])>=0||entry.Bytes<0)throw new InvalidDataException("Invalid scan entry.");
+            completed=true;return packet;
+        }
+        catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new ScanWorkerUnavailableException("目录扫描批次 I/O 超时，保留未完成范围。");}
+        catch(IOException error){throw new ScanWorkerUnavailableException("目录扫描连接中断，保留未完成范围。",error);}
+        finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
+    }
     public async IAsyncEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud,[EnumeratorCancellation]CancellationToken cancellation)
     {
         if(Interlocked.Exchange(ref busy,1)!=0)throw new InvalidOperationException("A scan worker has one active directory request.");
