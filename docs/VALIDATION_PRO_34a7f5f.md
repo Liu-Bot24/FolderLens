@@ -39,4 +39,14 @@ A054a 保持 **FAIL**。音频事件修复后的 10,000 次、32.66 分钟正式
 
 筛选诊断存在夹具等待错误：固定 350ms 不保证搜索防抖和结果发布结束。等待实际查询代次及目标筛选生效后，10,000 次筛选诊断完成（`artifacts/phase1-memory-filters-ready/native-refresh.json`），约 400 秒，诊断 GC 后约 240MiB。该结果仅证明流程完成，不满足 30 分钟门禁，也不证明没有内存增长。
 
+追加隔离诊断没有改变生产逻辑：
+
+- `phase1-query-row-retention/native-refresh.json`：200 次平面/分组查询替换后，200 个旧结果对象、200 个旧视图均零存活；2,200 次文件行弱引用观察中，当前结果之外有 1 个存活。该数据不支持旧结果/视图成批保留的猜测，单个文件行的所有者尚未追踪，不能宣布所有资源释放。
+- `phase1-memory-text-isolated`：10,000 次切图与 100 次文本混合，183 秒；每千次私有内存均值从 206MiB 到 218MiB，后半段约 216–218MiB；诊断 GC 后约 218MiB。
+- `phase1-memory-markdown-isolated`：10,000 次切图与 100 次 Markdown 混合，184 秒；每千次均值从 206MiB 到 217MiB，诊断 GC 后约 218MiB。
+
+这些短诊断不能直接与不同节奏的正式 32.66 分钟测试判等，也未证明混合路径的增长根因。下一步仍需定位筛选与混合操作下的原生分配，而非凭曲线添加强制回收。
+
+诊断入口：`--verify-refresh --verify-deployed --verify-query-retention --data-dir <新的隔离目录>`；隔离混合入口追加 `--verify-soak --verify-soak-fast --verify-soak-mix=text`（或 `markdown`）和 `--verify-soak-memory`。诊断 GC 仅发生在测量结束后。
+
 干净 Windows、低内存机器按用户要求 **SKIP**；占用前台的物理 UI/DPI/Explorer/外部播放器/安装器验收仍 **BLOCKED**；网络与云盘范围继续延期。以上均不是 PASS。
