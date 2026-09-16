@@ -16,7 +16,7 @@
 | 项目 | 实际结果 | 证据 |
 |---|---|---|
 | 工具链和运行组件 | 9 项存在性／版本检查通过；不是干净机器部署 | `artifacts/phase1-environment.json` |
-| 自动化 Unit／Integration／Media | 532 PASS，0 FAIL，0 SKIP；最终再次执行 | `artifacts/tests/phase1-final/phase1-final.trx`、`artifacts/phase1-final-tests.log` |
+| 自动化 Unit／Integration／Media | 新增单行用例后整批 533 PASS，0 FAIL，0 SKIP；此前 532 项记录保留 | `artifacts/tests/phase1-complete-background/phase1-complete-background.trx`、`artifacts/phase1-complete-background-tests.log` |
 | 原生主回归 | 39 PASS | `artifacts/phase1-current-regression/summary.json` |
 | 原生补充回归 | 43 PASS，包含受控崩溃后重新启动 | `artifacts/phase1-current-extra/summary.json` |
 | 原生综合启动 | 7 PASS；首轮及诊断阶段失败保留，最终固定被测快照并等待所需容器实现后复验 | `artifacts/phase1-startup-final/native-refresh.json` 及同前缀六项专项 |
