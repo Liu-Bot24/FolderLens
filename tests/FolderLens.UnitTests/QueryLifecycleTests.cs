@@ -20,6 +20,8 @@ public sealed class QueryLifecycleTests
         string directory=Temp();await using var catalog=new CatalogStore(directory);await catalog.Initialize();await catalog.SeedBenchmark(40);
         await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET is_animated=0 WHERE entry_id IN (SELECT entry_id FROM Files ORDER BY entry_id LIMIT 10)";return cmd.ExecuteNonQuery();});
         var f=new FilterSpec{RootId="benchmark",Animation="static",IncludePending=true};
+        Assert.Equal(30,(await catalog.ReadFirstPage(f)).Items.Count);
+        Assert.Equal(10,(await catalog.ReadFirstPage(f with{IncludePending=false})).Items.Count);
         var handle=await catalog.CreateSnapshot(f,1,1);Assert.Equal(30,handle.Count);Assert.Equal(10,handle.ConfirmedMatchCount);Assert.True(handle.IsPendingView);
         Assert.True(await catalog.RetainSnapshot(handle.Id));
         for(int i=2;i<=5;i++)await catalog.CreateSnapshot(f with{IncludePending=false},1,i);

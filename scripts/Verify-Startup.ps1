@@ -14,11 +14,11 @@ function Assert-DeployedComponents($Report) {
  foreach($name in $expected.Keys){if($Report.components.$name.Replace('\','/') -ne $expected[$name]){throw "Unexpected verification component: $name"}}
 }
 Assert-DeployedComponents $report
-foreach($case in @('scan-pipeline','promotion-viewport','text-reader')){
+foreach($case in @('scan-pipeline','promotion-viewport','text-reader','audit-filters','bulk-refresh','unrestored-favorites')){
  $caseRoot=$EvidenceRoot+'-'+$case
  $null=Invoke-LoggedProcess (Join-Path $AppRoot 'FolderLens.App.exe') @('--verify-refresh','--verify-deployed',('--verify-'+$case),'--data-dir',$caseRoot) ($caseRoot+'-run') -TimeoutSeconds $TimeoutSeconds
  $caseReport=Get-Content -LiteralPath (Join-Path $caseRoot 'native-refresh.json') -Raw | ConvertFrom-Json
  if($caseReport.status -ne 'PASS'){throw "Published $case verification failed."}
  Assert-DeployedComponents $caseReport
 }
-Write-Host 'PASS: published folder scan, thumbnails, preview, TXT/Markdown reading and navigation verified without development fallback.'
+Write-Host 'PASS: published browsing, readers, filter validation, bulk refresh and favorite recovery verified without development fallback.'

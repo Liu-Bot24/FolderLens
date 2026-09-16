@@ -43,6 +43,7 @@ public sealed record FilterSpec
     public string Raw { get; init; } = "any";
     public string Animation { get; init; } = "any";
     public bool ShowHidden { get; init; }
+    // Serialized v1 name retained for compatibility: true selects Pending only.
     public bool IncludePending { get; init; }
     public string NamePathQuery { get; init; } = "";
     public string SearchScope { get; init; } = "name";

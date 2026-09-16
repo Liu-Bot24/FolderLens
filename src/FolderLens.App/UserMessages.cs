@@ -51,7 +51,7 @@ public static class UserMessages
     public static string Results(long displayed,long pending,long failed,bool includesPending)
     {
         var parts=new List<string>{$"已显示 {displayed:N0} 个文件"};
-        if(includesPending)parts.Add("包含信息尚未读全的文件");
+        if(includesPending)parts.Add("仅显示尚未判定的文件");
         if(pending>0)parts.Add($"{pending:N0} 个文件的信息尚未读全，暂不能确定是否符合筛选条件");
         if(failed>0)parts.Add($"{failed:N0} 个文件的信息无法读取，暂不能确定是否符合筛选条件");
         return string.Join(" · ",parts);

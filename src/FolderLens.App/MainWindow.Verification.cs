@@ -98,6 +98,9 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-prefetch-turnaround")){await VerifyPrefetchTurnaround(source,report);return;}
             if(arguments.Any(arg=>arg.StartsWith("--verify-scan-audit-"))){await VerifyScanAudit(source,report);return;}
             if(arguments.Contains("--verify-promotion-viewport")){await VerifyPromotionViewport(source,report);return;}
+            if(arguments.Contains("--verify-audit-filters")){await VerifyAuditFilters(source,report);return;}
+            if(arguments.Contains("--verify-bulk-refresh")){await VerifyBulkRefresh(source,report);return;}
+            if(arguments.Contains("--verify-unrestored-favorites")){await VerifyUnrestoredFavorites(source,report);return;}
             if(arguments.Contains("--verify-player-settings")){await VerifyPlayerSettings(report);return;}
             if(arguments.Contains("--verify-audio-recovery")){await VerifyAudioRecovery(source,report);return;}
             if(arguments.Contains("--verify-collection-contract")){VerifyCollectionContract(report);return;}

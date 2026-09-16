@@ -165,14 +165,17 @@ public sealed partial class MainWindow : Window
     private static string Tag(ComboBox box)=>((ComboBoxItem)box.SelectedItem).Tag.ToString()!;
     private FilterSpec CurrentFilter()
     {
-        var ranges=advanced is null?new Dictionary<string,IntRange>():new Dictionary<string,IntRange>(advanced.Ranges);
-        ranges.Remove("logicalBytes");
-        long? min=double.IsNaN(MinSize.Value)?null:checked((long)(MinSize.Value*1024*1024));long? max=double.IsNaN(MaxSize.Value)?null:checked((long)(MaxSize.Value*1024*1024));
-        if(min is not null || max is not null)ranges["logicalBytes"]=new(min,max);
-        if(!double.IsNaN(MinWidth.Value))ranges["width"]=new(checked((long)MinWidth.Value),ranges.GetValueOrDefault("width")?.Max);
-        if(!double.IsNaN(MinHeight.Value))ranges["height"]=new(checked((long)MinHeight.Value),ranges.GetValueOrDefault("height")?.Max);
+        var ranges=BasicFilterRanges.Merge(advanced?.Ranges,MinSize.Value,MaxSize.Value,MinWidth.Value,MinHeight.Value);
         string category=Tag(Category);
         var filter=(advanced??new FilterSpec()) with{RootId=rootId,ObservedRootEpoch=activeCollectionId is null?epoch:null,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
+    }
+    private bool TryCurrentFilter(out FilterSpec filter)
+    {
+        try{filter=CurrentFilter();return true;}
+        catch(Exception error) when(error is ArgumentException or OverflowException or FormatException)
+        {
+            filter=null!;ShowError(error);return false;
+        }
     }
     private async void PickRoot(object sender,RoutedEventArgs e)
     {
@@ -214,11 +217,14 @@ public sealed partial class MainWindow : Window
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
+        // Validate the draft before retiring work or recording navigation history.
+        if(rootId.Length>0&&!TryCurrentFilter(out _))return;
         long navigation=++directoryNavigationRequest;
-        var acceptedView=rootId.Length>0?CaptureView():null;
+        SavedView? acceptedView=null;
         var requestedAdvanced=advanced;
         try
         {
+        acceptedView=rootId.Length>0?CaptureView():null;
         if(!forceRefresh&&!preserveDirectoryScope&&!path.StartsWith("collection:",StringComparison.Ordinal))
         {
             path=PathRules.ValidateSource(path);
@@ -416,12 +422,18 @@ public sealed partial class MainWindow : Window
         finally{if(!closing)await RefreshCollectionsAfterScan();if(reconcilePending&&!closing&&rootVersion==rootChangeVersion&&!rootToken.IsCancellationRequested)_=Reconcile();}
     }
     private async void ApplyFilters(object sender,RoutedEventArgs e){FilterFlyout?.Hide();searchTimer?.Stop();await ApplyBrowserFilters();}
-    private Task ApplyBrowserFilters()=>activeCollectionId is not null?RefreshQuery():scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(CurrentFilter())
-        ?OpenRoot(root,true,recordHistory:false,preserveDirectoryScope:true):RefreshQuery();
+    private async Task ApplyBrowserFilters()
+    {
+        if(rootId.Length==0||!TryCurrentFilter(out var filter))return;
+        if(activeCollectionId is null&&(scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(filter)))
+            await OpenRoot(root,true,recordHistory:false,preserveDirectoryScope:true);
+        else await RefreshQuery();
+    }
     private async Task RefreshQuery(bool preserveViewport=false,bool scanPreview=false)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
         if(!browserRootReady)return;
+        if(!TryCurrentFilter(out var filter))return;
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
@@ -434,7 +446,7 @@ public sealed partial class MainWindow : Window
         browserEmptyError=null;UpdateBrowserEmptyState();
         try
         {
-            FilterSpec filter=CurrentFilter();if(!scanPreview){metadataDemandStop.Cancel();metadataDemandStop.Dispose();metadataDemandStop=new();_=StartMetadataRefresh();}if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
+            if(!scanPreview){metadataDemandStop.Cancel();metadataDemandStop.Dispose();metadataDemandStop=new();_=StartMetadataRefresh();}if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
             var activeList=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
             int firstVisible=activeList.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
             string? viewportPath=preserveViewport&&firstVisible>=0&&firstVisible<activeList.Items.Count?BrowserPath(activeList.Items[firstVisible] as FileRow):null;

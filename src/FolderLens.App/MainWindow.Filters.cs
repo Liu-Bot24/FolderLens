@@ -49,7 +49,8 @@ public sealed partial class MainWindow
     private Task StartMetadataRefresh(bool explicitRequest=false)
     {
         if(closing||scanStop.IsCancellationRequested)return Task.CompletedTask;
-        if(!explicitRequest&&!MetadataDemand.ForQuery(CurrentFilter())){if(!explicitMetadataPending)metadataRefreshPending=false;return Task.CompletedTask;}
+        if(!TryCurrentFilter(out var filter))return Task.CompletedTask;
+        if(!explicitRequest&&!MetadataDemand.ForQuery(filter)){if(!explicitMetadataPending)metadataRefreshPending=false;return Task.CompletedTask;}
         explicitMetadataPending|=explicitRequest;metadataRefreshPending=true;
         return metadataTask is {IsCompleted:false}?metadataTask:metadataTask=DrainMetadataRefresh();
     }
@@ -68,7 +69,7 @@ public sealed partial class MainWindow
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(catalog is null||catalog.BrowsingBudgetReached||metadataWorker is null||media is null||rootId.Length==0)return;string activeId=rootId;long revision=rootChangeVersion;var token=scanStop.Token;
         using var demand=CancellationTokenSource.CreateLinkedTokenSource(token,metadataDemandStop.Token);token=demand.Token;
-        var filter=CurrentFilter();if(!explicitRequest&&!MetadataDemand.ForQuery(filter))return;
+        if(!TryCurrentFilter(out var filter)||!explicitRequest&&!MetadataDemand.ForQuery(filter))return;
         bool Current()=>activeId==rootId&&revision==rootChangeVersion&&!closing&&!token.IsCancellationRequested;
         try
         {

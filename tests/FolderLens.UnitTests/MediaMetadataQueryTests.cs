@@ -7,6 +7,24 @@ namespace FolderLens.UnitTests;
 public sealed class MediaMetadataQueryTests
 {
     [Fact]
+    public async Task CompletedMissingFieldsAreTerminalAndAbsentAudioDoesNotMatch()
+    {
+        await using var catalog=new CatalogStore(Temp());await catalog.Initialize();await catalog.SeedBenchmark(1);
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET kind='video'";return cmd.ExecuteNonQuery();});
+        var filter=new FilterSpec{RootId="benchmark",Kinds=["video"],AudioCodecs=["aac"]};
+        Assert.Equal(1,(await catalog.CreateSnapshot(filter,1,1)).Pending);
+        await catalog.MarkMetadataFailure("000000000001",1,"benchmark",1,["media"],"UnsupportedCodec",true);
+        Assert.Equal(1,(await catalog.CreateSnapshot(filter,1,2)).Unresolvable);
+        await catalog.ApplyMediaMetadata("000000000001",1,"benchmark",1,new(null,16,16,"h264",null,30,false,0){HasAudio=false},"test");
+        var noAudio=await catalog.CreateSnapshot(filter,1,3);
+        Assert.Equal(0,noAudio.Count);Assert.Equal(0,noAudio.Pending);Assert.Equal(0,noAudio.Unresolvable);
+        Assert.Empty((await catalog.ReadFirstPage(filter with{IncludePending=true})).Items);
+        var duration=await catalog.CreateSnapshot(filter with{AudioCodecs=[],Ranges=new(){["durationMs"]=new(0,null)}},1,4);
+        Assert.Equal(0,duration.Pending);Assert.Equal(1,duration.Unresolvable);
+        await catalog.ApplyMediaMetadata("000000000001",1,"benchmark",1,new(100,16,16,"h264","aac",30,false,0){HasAudio=true},"test");
+        Assert.Single((await catalog.ReadFirstPage(filter)).Items);
+    }
+    [Fact]
     public async Task ColdPlaylistMetadataIncludesFilteredOutMembersOnly()
     {
         string directory=Temp(),source=Path.Combine(directory,"source"),data=Path.Combine(directory,"data");Directory.CreateDirectory(source);
@@ -49,7 +67,7 @@ public sealed class MediaMetadataQueryTests
         Assert.False(await catalog.MarkMetadataFailure(id,1,"benchmark",2,["media"],"Timeout",false));
         Assert.True(await catalog.ApplyMediaMetadata(id,1,"benchmark",1,new(null,null,null,null,"aac",null,false,null){FormatId="aac"},"fixture"));
         var unknown=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=["audio"],Ranges=new(){["durationMs"]=new(0,0)}},1,2);
-        Assert.Equal(0,unknown.Count);Assert.Equal(1,unknown.Pending);
+        Assert.Equal(0,unknown.Count);Assert.Equal(0,unknown.Pending);Assert.Equal(1,unknown.Unresolvable);
     }
     [Fact]
     public async Task FillAllProbesRealPcmWaveWithoutImageWorkerAndDoesNotRewriteSource()

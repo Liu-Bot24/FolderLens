@@ -40,9 +40,7 @@ public sealed partial class MainWindow
         // A complete snapshot may add millions of positions. Reset the virtual
         // index once for a large publication; retained rows keep their decoded
         // thumbnails. Do not generate a managed row for each inserted position.
-        if(changes.Sum(change=>(long)change.Added+change.Removed)>4096)
-            flatBrowserItems!.Replace(next.Count,i=>(FileRow)next[i]!,next.IndexOf);
-        else flatBrowserItems!.UpdateRanges(changes,i=>(FileRow)next[i]!,next.IndexOf);
+        flatBrowserItems!.UpdateRanges(changes,i=>(FileRow)next[i]!,next.IndexOf);
         firstPageRows.Clear();firstPageSequence=[];firstPageFilter=null;
     }
 }

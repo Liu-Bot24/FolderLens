@@ -30,6 +30,18 @@ public sealed partial class CatalogStore
         if(Scalar(c,"SELECT version FROM playlist.PlaylistInfo")!=2)throw new InvalidDataException("收藏库由较新版本创建，请使用匹配版本。");
         Execute(c,"INSERT INTO main.Collections SELECT * FROM playlist.SavedCollections;");
         return Execute(c,"""
+            CREATE TEMP TRIGGER Playlist_HydrateLocation BEFORE UPDATE OF anchor_locator,directory_identity ON main.DirectoryLocations
+            WHEN OLD.state='active' AND NEW.state='active'
+                AND (OLD.anchor_locator IS NULL OR OLD.anchor_locator=NEW.anchor_locator)
+                AND (OLD.directory_identity IS NULL OR OLD.directory_identity=NEW.directory_identity)
+                AND (coalesce(OLD.anchor_locator,'')<>coalesce(NEW.anchor_locator,'') OR coalesce(OLD.directory_identity,'')<>coalesce(NEW.directory_identity,'')) BEGIN
+                INSERT OR IGNORE INTO SavedLinks(collection_id,anchor,directory_identity,location_key,path,added_utc_ticks,file_identity,case_mode)
+                    SELECT p.collection_id,coalesce(NEW.anchor_locator,''),coalesce(NEW.directory_identity,''),p.location_key,p.path,p.added_utc_ticks,p.file_identity,p.case_mode
+                    FROM SavedLinks p WHERE p.anchor=coalesce(OLD.anchor_locator,'') AND p.directory_identity=coalesce(OLD.directory_identity,'')
+                    AND EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.directory_location_id=OLD.location_id AND m.collection_id=p.collection_id AND m.location_key=p.location_key);
+                DELETE FROM SavedLinks WHERE anchor=coalesce(OLD.anchor_locator,'') AND directory_identity=coalesce(OLD.directory_identity,'')
+                    AND EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.directory_location_id=OLD.location_id AND m.collection_id=SavedLinks.collection_id AND m.location_key=SavedLinks.location_key);
+            END;
             CREATE TEMP TRIGGER Playlist_Create AFTER INSERT ON main.Collections BEGIN
                 INSERT INTO SavedCollections VALUES(NEW.collection_id,NEW.name,NEW.name_key,NEW.created_utc_ticks);
             END;

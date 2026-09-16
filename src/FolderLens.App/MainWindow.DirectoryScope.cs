@@ -8,7 +8,7 @@ public sealed partial class MainWindow
 {
     private long directoryNavigationRequest;
     private string BrowsedDirectory=>activeCollectionId is null&&root.Length>0
-        ?Path.Combine(root,CurrentFilter().DirectoryScope):root;
+        ?Path.Combine(root,advanced?.DirectoryScope??""):root;
     private async Task<bool> TryBrowseCurrentRoot(string path,long navigation)
     {
         if(closing||replacingRoot||!browserRootReady||catalog is null||activeCollectionId is not null||rootId.Length==0||

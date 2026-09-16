@@ -132,7 +132,18 @@ internal sealed class StaticDecoder : IDisposable
         if(data[..2].SequenceEqual("BM"u8))return "bmp";
         if(data[..4].SequenceEqual("RIFF"u8) && data.Slice(8,4).SequenceEqual("WEBP"u8))return "webp";
         if(data[..4].SequenceEqual(new byte[]{0,0,1,0}))return "ico";
-        if(data[..4].SequenceEqual(new byte[]{73,73,42,0}) || data[..4].SequenceEqual(new byte[]{77,77,0,42}) || data[..4].SequenceEqual(new byte[]{73,73,43,0}))return "tiff";
+        bool little=data[..2].SequenceEqual("II"u8),big=data[..2].SequenceEqual("MM"u8);
+        if(little||big)
+        {
+            int version=little?data[2]|data[3]<<8:data[2]<<8|data[3];
+            if(version==42)return "tiff";
+            if(version==43)
+            {
+                int offsetBytes=little?data[4]|data[5]<<8:data[4]<<8|data[5];
+                if(data.Length<16||offsetBytes!=8||data[6]!=0||data[7]!=0)throw new InvalidDataException("Invalid BigTIFF header.");
+                return "tiff";
+            }
+        }
         if(data[0]==255 && data[1]==10 || data.Slice(4,4).SequenceEqual("JXL "u8))return "jxl";
         if(data.Slice(4,4).SequenceEqual("ftyp"u8))return data.Slice(8,4).SequenceEqual("avif"u8)?"avif":"heic";
         throw new NotSupportedException("Unsupported image container.");

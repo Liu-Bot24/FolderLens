@@ -311,7 +311,7 @@
                       <NumberBox x:Name="MinWidth" Grid.Row="4" Header="最小宽度 · px" Minimum="0" />
                       <NumberBox x:Name="MinHeight" Grid.Row="4" Grid.Column="1" Header="最小高度 · px" Minimum="0" />
                       <CheckBox x:Name="ShowHidden" Grid.Row="5" Content="显示隐藏文件" />
-                      <CheckBox x:Name="PendingView" Grid.Row="6" Content="包含信息尚未读全的文件" ToolTipService.ToolTip="尺寸、格式等信息尚未读全，暂时无法判断是否符合筛选条件的文件也会显示" />
+                      <CheckBox x:Name="PendingView" Grid.Row="6" Content="仅显示尚未判定的文件" ToolTipService.ToolTip="仅显示尺寸、格式等信息尚未读全、暂时无法判断是否符合筛选条件的文件；已确认匹配的文件不显示" />
                       <Button x:Name="CollectionFilterButton" Grid.Row="6" Grid.Column="1" Content="收藏标签：不限" Click="ConfigureCollectionFilter" HorizontalAlignment="Stretch" />
                     </Grid>
                   </ScrollViewer>

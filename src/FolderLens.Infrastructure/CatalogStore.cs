@@ -479,6 +479,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         if(changed==1)
         {
             foreach(string group in new[]{"identity","media","imageGeometry"})DirectoryIndexer.Execute(c,t,"INSERT INTO FieldStates(entry_id,field_group,source_version,state,provider_version,attempt_count) VALUES($entry,$group,$version,'ready',$provider,1) ON CONFLICT(entry_id,field_group) DO UPDATE SET source_version=excluded.source_version,state='ready',provider_version=excluded.provider_version,attempt_count=FieldStates.attempt_count+1,error_code=NULL,retry_after_utc_ticks=NULL",("$entry",entryId),("$group",group),("$version",expectedVersion),("$provider",provider));
+            if(metadata.HasAudio==false)DirectoryIndexer.Execute(c,t,"UPDATE FieldStates SET error_code='NoAudioStream' WHERE entry_id=$entry AND field_group='media'",("$entry",entryId));
             DirectoryIndexer.Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");
         }
         t.Commit();return changed==1;

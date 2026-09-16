@@ -98,7 +98,12 @@ public static class FilterSql
             Nullable(col,filter.Orientation switch { "landscape"=>$"{col}>1.02", "portrait"=>$"{col}<0.98", _=>$"{col} BETWEEN 0.98 AND 1.02" },"imageGeometry");
         }
         if (filter.VideoCodecs.Length>0) {Known("f.kind='video'");Set("f.video_codec",filter.VideoCodecs,"media");}
-        if (filter.AudioCodecs.Length>0) {Known("f.kind IN ('audio','video')");Set("f.audio_codec",filter.AudioCodecs,"media");}
+        if (filter.AudioCodecs.Length>0)
+        {
+            Known("f.kind IN ('audio','video')");
+            Known("NOT EXISTS(SELECT 1 FROM FieldStates fs WHERE fs.entry_id=f.entry_id AND fs.field_group='media' AND fs.source_version=f.file_version AND fs.state='ready' AND fs.error_code='NoAudioStream')");
+            Set("f.audio_codec",filter.AudioCodecs,"media");
+        }
         if (filter.FrameRate is { } fps)
         {
             Known("f.kind='video'");
@@ -121,7 +126,7 @@ public static class FilterSql
         string falses=string.Join(" OR ",predicates.Select(p=>$"(({p}) IS FALSE)"));
         string unknown=string.Join(" OR ",predicates.Select(p=>$"(({p}) IS NULL)"));
         var unresolved=missing.Where(m=>m.group.Length>0).ToArray();
-        string failed=unresolved.Length==0 ? "0" : string.Join(" OR ",unresolved.Select(m=>$"({m.expression} AND EXISTS(SELECT 1 FROM FieldStates fs WHERE fs.entry_id=f.entry_id AND fs.field_group='{m.group}' AND fs.source_version=f.file_version AND fs.state IN ('failed','unsupported')))"));
+        string failed=unresolved.Length==0 ? "0" : string.Join(" OR ",unresolved.Select(m=>$"({m.expression} AND EXISTS(SELECT 1 FROM FieldStates fs WHERE fs.entry_id=f.entry_id AND fs.field_group='{m.group}' AND fs.source_version=f.file_version AND fs.state IN ('ready','failed','unsupported')))"));
         string state=$"CASE WHEN {falses} THEN 'NoMatch' WHEN {unknown} THEN CASE WHEN {failed} THEN 'Unresolvable' ELSE 'Pending' END ELSE 'Match' END";
         // Non-null columns need no null discriminator: it would force SQLite to sort the
         // entire catalog instead of streaming the existing compound index.

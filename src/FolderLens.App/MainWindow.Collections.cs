@@ -83,8 +83,8 @@ public sealed partial class MainWindow
             var error=new TextBlock{TextWrapping=TextWrapping.Wrap};var buttons=new StackPanel{Orientation=Orientation.Horizontal,Spacing=8};
             var create=new Button{Content="新建"};var rename=new Button{Content="重命名",IsEnabled=false};var remove=new Button{Content="删除收藏夹",IsEnabled=false};buttons.Children.Add(create);buttons.Children.Add(rename);buttons.Children.Add(remove);
             var panel=new StackPanel{Spacing=10};panel.Children.Add(list);panel.Children.Add(name);panel.Children.Add(buttons);panel.Children.Add(error);
-            var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏夹",Content=panel,PrimaryButtonText="打开所选",CloseButtonText="关闭",IsPrimaryButtonEnabled=false};
-            list.SelectionChanged+=(_,_)=>{var c=list.SelectedItem as FileCollection;name.Text=c?.Name??"";rename.IsEnabled=remove.IsEnabled=dialog.IsPrimaryButtonEnabled=c is not null;remove.Content="删除收藏夹";};
+            var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="收藏夹",Content=panel,PrimaryButtonText="打开所选",SecondaryButtonText="未恢复的记录",CloseButtonText="关闭",IsPrimaryButtonEnabled=false,IsSecondaryButtonEnabled=false};
+            list.SelectionChanged+=(_,_)=>{var c=list.SelectedItem as FileCollection;name.Text=c?.Name??"";rename.IsEnabled=remove.IsEnabled=dialog.IsPrimaryButtonEnabled=dialog.IsSecondaryButtonEnabled=c is not null;remove.Content="删除收藏夹";};
             async Task Reload(string? select=null){await RefreshCollectionsTree();list.ItemsSource=fileCollections;list.SelectedItem=fileCollections.FirstOrDefault(c=>c.Id==select);}
             create.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing)return;try{var created=await catalog!.CreateCollection(name.Text,lifetime.Token);await Reload(created.Id);error.Text="";}catch(Exception ex){error.Text=UserMessages.Error(ex);}};
             rename.Click+=async(_,_)=>{using var submission=browserWork.Enter();if(submission is null||closing||list.SelectedItem is not FileCollection c)return;try{await catalog!.RenameCollection(c.Id,name.Text,lifetime.Token);await Reload(c.Id);error.Text="";}catch(Exception ex){error.Text=UserMessages.Error(ex);}};
@@ -94,7 +94,12 @@ public sealed partial class MainWindow
                 if((string)remove.Content!="确认删除"){remove.Content="确认删除";error.Text="删除此收藏夹及其中的收藏记录，不删除原文件。再次点击确认。";return;}
                 try{await DeleteCollectionAndRefresh(c.Id);await Reload();error.Text="收藏夹已删除，原文件保留。";}catch(Exception ex){error.Text=UserMessages.Error(ex);}
             };
-            if(await ShowCollectionDialog(dialog)==ContentDialogResult.Primary&&list.SelectedItem is FileCollection chosen)await OpenCollection(chosen.Id);
+            var choice=await ShowCollectionDialog(dialog);
+            if(list.SelectedItem is FileCollection chosen)
+            {
+                if(choice==ContentDialogResult.Primary)await OpenCollection(chosen.Id);
+                else if(choice==ContentDialogResult.Secondary)await ManageUnrestoredFavorites(chosen.Id);
+            }
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
     }

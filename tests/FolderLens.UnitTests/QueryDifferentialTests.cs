@@ -105,7 +105,7 @@ public sealed class QueryDifferentialTests
         void Test(string key,Func<object,bool> match,string group)
         {
             if(r.Fields[key] is {} value){Known(match(value));return;}
-            states.Add(r.States.TryGetValue(group,out var status)&&status.Version==1&&status.State is "failed" or "unsupported"?"Unresolvable":"Pending");
+            states.Add(r.States.TryGetValue(group,out var status)&&status.Version==1&&status.State is "ready" or "failed" or "unsupported"?"Unresolvable":"Pending");
         }
         Known(r.Present);Known(f.Recursive||!r.Path.Contains('\\'));Known(f.ShowHidden||!r.Hidden);Known(f.Kinds.Length==0||f.Kinds.Contains(r.Kind));
         if(f.Formats.Length>0)Test("format",v=>f.Formats.Contains((string)v),"identity");

@@ -118,6 +118,7 @@
     },
     "includePending": {
       "type": "boolean",
+      "description": "Compatibility name: true selects the Pending-only view; false selects confirmed Match results.",
       "default": false
     },
     "namePathQuery": {

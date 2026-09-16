@@ -28,6 +28,12 @@ public sealed class VirtualRangeCollection<T>(int count,Func<int,T> read,Func<ob
             var change=changes[i];if(change.Prefix<end||change.Removed<0||change.Added<0||change.Prefix+change.Removed>originalCount)throw new ArgumentOutOfRangeException(nameof(changes));
             finalStarts[i]=checked(change.Prefix+delta);finalEnds[i]=checked(finalStarts[i]+change.Added);delta=checked(delta+change.Added-change.Removed);shifts[i]=delta;end=change.Prefix+change.Removed;
         }
+        // All callers, including later scan publications and grouped views, share
+        // the same UI budget. Retained objects belong to the next projection.
+        if(changes.Sum(change=>(long)change.Added+change.Removed)>4096)
+        {
+            Replace(checked(originalCount+delta),next,finalLocate);return;
+        }
         int OriginalIndex(int index)
         {
             int low=0,high=finalStarts.Length-1;

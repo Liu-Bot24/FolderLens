@@ -188,6 +188,17 @@ function Get-BuildInputs {
     if ($LASTEXITCODE -ne 0) { $gitHead='UNCOMMITTED' }
     return [pscustomobject]@{ sha256=$digest; gitHead=[string]$gitHead; files=$records }
 }
+function Build-PublishNativeRuntime([string]$BuildDirectory,[string]$Configuration='Release') {
+    $BuildDirectory=Resolve-ProjectPath $BuildDirectory
+    if(Test-Path -LiteralPath $BuildDirectory){throw 'A publish native build directory must be new; refusing stale outputs.'}
+    $buildScript=Join-Path $script:ProjectRoot 'scripts\Build-Native.ps1'
+    $null=Invoke-LoggedProcess (Get-ScriptShell) @('-NoProfile','-File',$buildScript,'-Configuration',$Configuration,'-BuildDirectory',$BuildDirectory,'-NoStage') ($BuildDirectory+'-log')
+    $runtime=Join-Path $BuildDirectory $Configuration
+    foreach($file in @('FolderLens.RawBridge.dll','libraw.dll')){
+        if(-not(Test-Path -LiteralPath (Join-Path $runtime $file) -PathType Leaf)){throw "Candidate native output missing: $file"}
+    }
+    return $runtime
+}
 function Copy-VerifiedTree([string]$Source, [string]$Destination) {
     $Source=[IO.Path]::GetFullPath($Source).TrimEnd('\')
     if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "Missing input directory: $Source" }

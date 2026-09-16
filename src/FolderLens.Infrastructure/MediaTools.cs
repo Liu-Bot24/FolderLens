@@ -14,6 +14,8 @@ public sealed record MediaMetadata(long? DurationMs,int? Width,int? Height,strin
     public long? FrameRateDenominator {get;init;}
     public ContentMetadataDetails? Details {get;init;}
     public int? CoverStream {get;init;}
+    // Null means the provider did not establish stream presence.
+    public bool? HasAudio {get;init;}
 }
 
 public static class BoundedProcess
@@ -105,7 +107,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
             Streams=streams.Take(16).Select(s=>new MediaStreamDetails((int)(Number(s,"index")??0),Text(s,"codec_type")??"unknown",Text(s,"codec_name"),(int?)Number(s,"width"),(int?)Number(s,"height"),(int?)Number(s,"channels"),(int?)Number(s,"sample_rate"),s.TryGetProperty("disposition",out var d)&&d.TryGetProperty("default",out var def)&&def.GetInt32()==1,Cover(s))).ToArray(),StreamsTruncated=streams.Length>16
         };
         int? coverIndex=streams.Where(s=>Text(s,"codec_type")=="video"&&Cover(s)).Select(s=>(int?)Number(s,"index")).FirstOrDefault();
-        return new(duration,width>0?width:null,height>0?height:null,videoCodec,audioCodec,fps,coverIndex is not null,index){FormatId=container,FrameRateNumerator=fpsNum,FrameRateDenominator=fpsDen,Details=details,CoverStream=coverIndex};
+        return new(duration,width>0?width:null,height>0?height:null,videoCodec,audioCodec,fps,coverIndex is not null,index){FormatId=container,FrameRateNumerator=fpsNum,FrameRateDenominator=fpsDen,Details=details,CoverStream=coverIndex,HasAudio=audio.ValueKind!=JsonValueKind.Undefined};
     }
     public Task Cover(string path,string destination,MediaMetadata metadata,CancellationToken cancellation,int edge=512,WorkerPriority priority=WorkerPriority.Visible)=>Task.Run(()=>CoverCore(path,destination,metadata,cancellation,edge,priority),cancellation);
     private async Task CoverCore(string path,string destination,MediaMetadata metadata,CancellationToken cancellation,int edge,WorkerPriority priority)

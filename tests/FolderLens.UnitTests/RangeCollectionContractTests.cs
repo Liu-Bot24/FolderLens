@@ -6,6 +6,18 @@ namespace FolderLens.UnitTests;
 
 public sealed class RangeCollectionContractTests
 {
+    [Theory]
+    [InlineData(0,100000)]
+    [InlineData(100000,0)]
+    public void LargeIncrementalPublicationKeepsReadsAndNotificationsBounded(int removed,int added)
+    {
+        int reads=0,events=0;object anchor=new();
+        var view=new VirtualRangeCollection<object>(removed+1,i=>{reads++;return anchor;},_=>0);
+        view.CollectionChanged+=(_,e)=>{events++;Assert.Equal(NotifyCollectionChangedAction.Reset,e.Action);};
+        view.UpdateRanges([new(1,removed,added)],i=>{reads++;return anchor;},_=>0);
+        Assert.Equal(added+1,view.Count);Assert.Equal(1,events);Assert.Equal(0,reads);
+        Assert.Same(anchor,view[0]);Assert.Equal(0,view.IndexOf(anchor));
+    }
     [Fact]
     public void BulkVirtualIndexReplacementDoesNotMaterializeRows()
     {

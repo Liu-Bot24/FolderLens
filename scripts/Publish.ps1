@@ -7,6 +7,8 @@ $id='0.1.0-candidate-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+$i
 $releaseRoot=Join-Path $script:ProjectRoot ('artifacts\publish\'+$id)
 $appRoot=Join-Path $releaseRoot 'app'
 New-Item -ItemType Directory -Path $appRoot | Out-Null
+# Build inside this candidate. Outputs from another revision are never inputs.
+$nativeRuntime=Build-PublishNativeRuntime (Join-Path $releaseRoot 'native-build') $Configuration
 $dotnet=Get-DotNet
 $projects=@(
 @{name='FolderLens.App';destination=$appRoot},
@@ -29,8 +31,8 @@ foreach($project in $projects){
  Copy-VerifiedTree $output $project.destination
 }
 foreach($file in @('FolderLens.RawBridge.dll','libraw.dll')){
- $source=Join-Path $script:ProjectRoot ('artifacts\native-build\Release\'+$file)
- if(-not(Test-Path -LiteralPath $source)){throw 'Native release bridge is missing. Run Build.ps1 first.'}
+ $source=Join-Path $nativeRuntime $file
+ if(-not(Test-Path -LiteralPath $source)){throw 'Candidate native build did not produce the required runtime.'}
  Copy-Item -LiteralPath $source -Destination (Join-Path $appRoot 'workers')
 }
 $nativeLock=Get-Content (Join-Path $script:ProjectRoot 'native\dependency-lock.json') -Raw | ConvertFrom-Json
