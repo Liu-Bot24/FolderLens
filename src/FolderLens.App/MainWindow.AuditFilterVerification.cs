@@ -27,6 +27,9 @@ public sealed partial class MainWindow
             if(cleared.Ranges["width"]!=new IntRange(null,4096)||cleared.Ranges.ContainsKey("height"))throw new InvalidOperationException("清空宽高下限未清除保存视图中的旧下限。");
             ApplySavedFilter(policy);await ApplyBrowserFilters();
             if(queryRequest<=query||resultHandle is null)throw new InvalidOperationException("纠正输入后未恢复查询。");
+            folderGrouping=new(true);await OpenRoot(source);
+            if(!folderGrouping.Enabled||browserGroups is null)throw new InvalidOperationException("同目录导航丢失了有效分组条件。");
+            report["validDraftGroupingSurvivesNavigation"]=true;
             report["invalidDraftPreservesAcceptedView"]=true;report["clearedMinimaPreserveMaxima"]=true;
             report["status"]="PASS";
         }

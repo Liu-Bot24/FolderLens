@@ -31,7 +31,7 @@ public sealed partial class MainWindow
         int index=list.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
         return index>=0&&index<list.Items.Count?BrowserPath(list.Items[index] as FileRow):null;
     }
-    private SavedView CaptureView(FilterSpec? filter=null)=>new(root,filter??(lastAppliedFilter?.RootId==rootId?lastAppliedFilter:CurrentFilter()),BrowserPath(selected),immersive?browserOffset:FindScrollViewer(DetailsMode.IsChecked==true?FilesList:FilesGrid)?.VerticalOffset??0,DetailsMode.IsChecked==true,
+    private SavedView CaptureView(FilterSpec? filter=null)=>new(root,filter??CurrentFilter(),BrowserPath(selected),immersive?browserOffset:FindScrollViewer(DetailsMode.IsChecked==true?FilesList:FilesGrid)?.VerticalOffset??0,DetailsMode.IsChecked==true,
         immersive?(selected?.Ordinal==browserEntryOrdinal?browserAnchorPath:BrowserPath(selected)):VisibleBrowserPath(),CapturePreviewBookmark());
     private SavedView? CaptureClosingView()=>lastAppliedFilter is {} filter&&filter.RootId==rootId?CaptureView(filter):null;
     private void ApplySavedFilter(FilterSpec filter)
