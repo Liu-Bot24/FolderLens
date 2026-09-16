@@ -46,6 +46,7 @@ public sealed class WorkerClient : IAsyncDisposable
     private WorkerJob? job;
     private string? instance,taskDirectory,currentPath,currentInput;
     private long? currentLength,currentWrite;
+    private string? currentSignature;
     private long currentVersion;
     private readonly Dictionary<string,(string Path,string Instance)> producedAssets=new(StringComparer.Ordinal);
     private string? currentInputFile;
@@ -132,12 +133,12 @@ public sealed class WorkerClient : IAsyncDisposable
             },null,TimeSpan.FromMilliseconds(250),TimeSpan.FromMilliseconds(250));
             // Only local approval descriptors are read/written by the host. All
             // source stat calls, including unindexed opens, belong to the worker.
-            if(!fileless&&(dataOnly||currentAllowCloud!=allowCloud||currentPath!=path||currentLength!=sourceStamp?.Length||currentWrite!=sourceStamp?.ModifiedUtcTicks||currentVersion!=context.FileVersion))
+            if(!fileless&&(dataOnly||currentAllowCloud!=allowCloud||currentPath!=path||currentLength!=sourceStamp?.Length||currentWrite!=sourceStamp?.ModifiedUtcTicks||currentSignature!=sourceStamp?.SourceSignature||currentVersion!=context.FileVersion))
             {
                 if(currentInputFile is {} previous){await Task.Run(()=>{if(File.Exists(previous))ThumbnailCache.DeleteOwned(previous);},token).ConfigureAwait(false);currentInputFile=null;}
-                currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentVersion=context.FileVersion;currentAllowCloud=allowCloud;
+                currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentSignature=sourceStamp?.SourceSignature;currentVersion=context.FileVersion;currentAllowCloud=allowCloud;
                 currentInputFile=Path.Combine(taskDirectory!,currentInput+".input.json");
-                object approved=dataOnly?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud);
+                object approved=dataOnly?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud,currentSignature);
                 try{await File.WriteAllTextAsync(currentInputFile,JsonSerializer.Serialize(approved,WorkerProtocol.Json),token).ConfigureAwait(false);}catch{currentPath=null;throw;}
             }
             string requestId=Guid.NewGuid().ToString("N");

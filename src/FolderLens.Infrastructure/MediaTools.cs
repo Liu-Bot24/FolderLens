@@ -65,7 +65,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         }
         return info;
     }
-    public const string CoverStrategyVersion="cover-v2-embedded-first-frame-fallback";
+    public const string CoverStrategyVersion="cover-v3-square-pixel-display-aspect";
     private const string AllowedFormats="mov,matroska,webm,avi,mpegts,wav,mp3,flac,ogg,aac,asf,gif,apng";
     public async Task<MediaMetadata> Probe(string path,CancellationToken cancellation,WorkerPriority priority=WorkerPriority.Metadata)
     {
@@ -122,7 +122,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         {
             var arguments=new List<string>{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-format_whitelist",AllowedFormats,"-threads","1","-filter_threads","1"};
             if(time>0)arguments.AddRange(["-ss",time.ToString(CultureInfo.InvariantCulture)]);
-            arguments.AddRange(["-i",path,"-map",$"0:{stream}","-frames:v","1","-vf",$"scale={edge}:{edge}:force_original_aspect_ratio=decrease","-c:v","png","-threads","1","-f","image2","-y",temporary]);
+            arguments.AddRange(["-i",path,"-map",$"0:{stream}","-frames:v","1","-vf",$"scale={edge}:{edge}:force_original_aspect_ratio=decrease:reset_sar=1","-c:v","png","-threads","1","-f","image2","-y",temporary]);
             await BoundedProcess.Run(ffmpeg,arguments,TimeSpan.FromSeconds(15),1024*1024,stop.Token,priority).ConfigureAwait(false);
             if(!File.Exists(temporary))throw new InvalidDataException("没有提取到可解码的视频帧。");
             using var image=ThumbnailCache.OpenOwnedRead(temporary);Span<byte> header=stackalloc byte[24];

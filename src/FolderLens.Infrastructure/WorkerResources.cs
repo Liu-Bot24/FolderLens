@@ -6,7 +6,7 @@ namespace FolderLens.Infrastructure;
 
 public enum WorkerPriority { Foreground=0,Visible=1,Prefetch=2,Metadata=3 }
 public enum WorkerLane { General, VideoCover }
-public readonly record struct SourceFileStamp(long Length,long ModifiedUtcTicks)
+public readonly record struct SourceFileStamp(long Length,long ModifiedUtcTicks,string? SourceSignature=null)
 {
     public void Validate(){if(Length<0||ModifiedUtcTicks<0||ModifiedUtcTicks>DateTime.MaxValue.Ticks)throw new ArgumentException("源文件版本戳无效。");}
 }

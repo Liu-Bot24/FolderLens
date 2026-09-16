@@ -13,7 +13,7 @@ public sealed record ResourceBudget(long MemoryBytes=2L*1024*1024*1024,long Temp
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ImageParameters(int TargetWidth=1920,int TargetHeight=1080,int FrameIndex=0,int TileX=0,int TileY=0,int TileSize=1024,int Level=0,int PageIndex=0,long CompletedLoops=0,bool ReadDetails=true);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record ApprovedInput(string Path,long? Length=null,long? LastWriteTicks=null,bool AllowCloud=false)
+public sealed record ApprovedInput(string Path,long? Length=null,long? LastWriteTicks=null,bool AllowCloud=false,string? SourceSignature=null)
 {
     public static void CheckAccess(FileAttributes attributes,bool allowCloud)
     {
@@ -27,6 +27,12 @@ public sealed record ApprovedInput(string Path,long? Length=null,long? LastWrite
             throw new InvalidDataException("Invalid source version.");
         if(Length is {} expectedLength&&(expectedLength!=length||LastWriteTicks!=lastWriteTicks))throw new IOException("FileChanged");
         return this with{Length=length,LastWriteTicks=lastWriteTicks};
+    }
+    public ApprovedInput Observe(FileReadObservation observed)
+    {
+        var result=Observe(observed.Length,observed.ModifiedUtcTicks);
+        if(SourceSignature is {Length:>0}&&SourceSignature!=observed.Signature)throw new IOException("FileChanged");
+        return result with{SourceSignature=observed.Signature};
     }
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

@@ -130,6 +130,21 @@ public sealed class WorkerTests
         await Assert.ThrowsAsync<FileNotFoundException>(()=>worker.Request(Path.Combine(directory,"absent.jpeg"),"fit",context,new(32,32),CancellationToken.None));
         var recovered=await worker.Request(input,"fit",context,new(32,32),CancellationToken.None);Assert.Equal("ok",recovered.Message.Status);await worker.ReleaseAsset(recovered);
     }
+    [Fact] public async Task SameSizeAndTimestampReplacementCannotUseOldObservation()
+    {
+        string root=ProjectRoot(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-worker-identity",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string input=Path.Combine(directory,"source.jpeg"),replacement=Path.Combine(directory,"replacement.jpeg");
+        File.Copy(Path.Combine(root,"artifacts","m0","formats","synthetic.jpeg"),input);
+        await using var probe=new SourceFileProbe(Path.Combine(root,"src","FolderLens.Scan.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Scan.Worker.exe"));
+        var before=await probe.Read(input,CancellationToken.None);
+        File.Copy(input,replacement);File.SetLastWriteTimeUtc(replacement,new DateTime(before.ModifiedUtcTicks,DateTimeKind.Utc));
+        File.Move(input,Path.Combine(directory,"retained.jpeg"));File.Move(replacement,input);
+        await using var worker=new WorkerClient(WorkerExecutable(root),Path.Combine(directory,"worker"));var context=new RequestContext("root",1,1,1,1,1);
+        var error=await Assert.ThrowsAsync<IOException>(()=>worker.Request(input,"probe",context,new(ReadDetails:false),CancellationToken.None,before));
+        Assert.Equal("FileChanged",error.Message);
+        var current=await probe.Read(input,CancellationToken.None);Assert.NotEqual(before,current);
+        var valid=await worker.Request(input,"probe",context,new(ReadDetails:false),CancellationToken.None,current);Assert.Equal("ok",valid.Message.Status);
+    }
     [Fact]public async Task DisplayPixelsPreserveAlphaColorAndAllExifOrientations()
     {
         string exe=WorkerExecutable(ProjectRoot()),directory=Path.Combine(Path.GetTempPath(),"FolderLens-display-pixels",Guid.NewGuid().ToString("N"));

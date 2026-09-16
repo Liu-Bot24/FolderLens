@@ -41,6 +41,20 @@ public sealed class MediaCoverTests
         await tools.Cover(source,output,metadata with{VideoStream=999,DurationMs=300000},CancellationToken.None,1024);
         byte[] header=await File.ReadAllBytesAsync(output);Assert.Equal(1024u,System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(16,4)));Assert.Equal(512u,System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(20,4)));
     }
+    [Theory]
+    [InlineData("16/15",512u,384u)]
+    [InlineData("1/1",512u,410u)]
+    public async Task CoverUsesDisplayAspectRatioForSquarePixelImage(string sar,uint width,uint height)
+    {
+        string native=Native(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-cover-aspect",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string source=Path.Combine(directory,"clip.mp4"),output=Path.Combine(directory,"cover.png"),ffmpeg=Path.Combine(native,"ffmpeg.exe");
+        await BoundedProcess.Run(ffmpeg,["-nostdin","-v","error","-f","lavfi","-i","testsrc2=size=720x576:rate=1:duration=1","-vf","setsar="+sar,"-c:v","mpeg4","-threads","1",source],TimeSpan.FromSeconds(10),1<<20,CancellationToken.None);
+        var tools=new MediaTools(Path.Combine(native,"ffprobe.exe"),ffmpeg);
+        await tools.Cover(source,output,await tools.Probe(source,CancellationToken.None),CancellationToken.None,512);
+        byte[] png=await File.ReadAllBytesAsync(output);
+        Assert.Equal(width,System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16,4)));
+        Assert.Equal(height,System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20,4)));
+    }
     [Fact]
     public async Task CoverLaneSerializesAndCancelsWithoutBlockingOtherWork()
     {

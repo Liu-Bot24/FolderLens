@@ -13,7 +13,8 @@ internal sealed class StaticDecoder : IDisposable
     private RawDecoder.Handle? raw;
     private byte[]? rawPixels;
     private readonly string path;
-    private readonly long length,mtime;
+    private readonly FileReadObservation observation;
+    public FileReadObservation Observation=>observation;
     private int rawWidth,rawHeight;
     private int rawFlip;
     private int rawEncodedWidth,rawEncodedHeight;
@@ -49,11 +50,11 @@ internal sealed class StaticDecoder : IDisposable
     public StaticDecoder(string file)
     {
         path=file;source=new(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete,64*1024,FileOptions.RandomAccess);
-        length=source.Length;mtime=File.GetLastWriteTimeUtc(file).Ticks;
         string ext=Path.GetExtension(file).ToLowerInvariant();
         IsRaw=new[]{".arw",".dng",".cr2",".cr3",".nef",".raf",".rw2",".orf",".pef"}.Contains(ext);
         try
         {
+            observation=FileReadObservation.Read(source.SafeFileHandle);
             if(IsRaw)
             {
                 int result=RawDecoder.Open(file,2048,out raw,out var info);if(result!=0)throw new InvalidDataException($"LibRaw open error {result}");
@@ -193,6 +194,6 @@ internal sealed class StaticDecoder : IDisposable
         using var straight=resized.Unpremultiply();
         return straight.Cast(input.Format);
     }
-    public void CheckVersion(){if(source.Length!=length || File.GetLastWriteTimeUtc(path).Ticks!=mtime)throw new IOException("FileChanged");}
+    public void CheckVersion(){if(FileReadObservation.Read(source.SafeFileHandle)!=observation||FileReadObservation.Read(path)!=observation)throw new IOException("FileChanged");}
     public void Dispose(){image?.Dispose();image=null;raw?.Dispose();raw=null;rawPixels=null;source.Dispose();}
 }

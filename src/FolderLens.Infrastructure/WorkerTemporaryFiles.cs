@@ -4,7 +4,8 @@ using Microsoft.Win32.SafeHandles;
 
 namespace FolderLens.Infrastructure;
 
-public sealed record WorkerTemporaryCleanup(int RemovedInstances,int ActiveInstances,int UnownedInstances,int UnsafeEntries,long RetainedBytes);
+public sealed record WorkerTemporaryCleanup(int RemovedInstances,int ActiveInstances,int UnownedInstances,int UnsafeEntries,long RetainedBytes)
+{public long UnownedBytes {get;init;}}
 
 /// <summary>Only nonce-named directories created with this ownership marker are
 /// eligible. A held exclusive lock or a matching live process prevents cleanup.</summary>
@@ -21,7 +22,8 @@ internal static class WorkerTemporaryFiles
         internal Session(string path,string instance,List<SafeFileHandle> pins)
         {
             Path=path;this.pins=pins;using var app=Process.GetCurrentProcess();owner=new(1,instance,app.Id,app.StartTime.ToUniversalTime().Ticks,null,null);
-            activeLock=ThumbnailCache.PinOwnedFile(System.IO.Path.Combine(path,Lock),0xC0000080,1,0);WriteOwner();
+            try{activeLock=ThumbnailCache.PinOwnedFile(System.IO.Path.Combine(path,Lock),0xC0000080,1,0);WriteOwner();}
+            catch{activeLock?.Dispose();throw;}
         }
         private void WriteOwner()
         {
@@ -54,17 +56,18 @@ internal static class WorkerTemporaryFiles
         root=System.IO.Path.GetFullPath(root);if(!Directory.Exists(root))return new(0,0,0,0,0);
         // Pin ancestors as well as the requested cleanup root; a lexical path check
         // alone cannot prevent swapping an ancestor for a junction.
-        var pins=new List<SafeFileHandle>();int removed=0,active=0,unowned=0,unsafeEntries=0;long retained=0;
+        var pins=new List<SafeFileHandle>();int removed=0,active=0,unowned=0,unsafeEntries=0;long retained=0,unownedBytes=0;
         try
         {
             string current=System.IO.Path.GetPathRoot(root)!;pins.Add(ThumbnailCache.PinDirectory(current));foreach(string part in root[current.Length..].Split('\\',StringSplitOptions.RemoveEmptyEntries)){current=System.IO.Path.Combine(current,part);pins.Add(ThumbnailCache.PinDirectory(current));}
             foreach(string directory in Directory.EnumerateDirectories(root,"*",SearchOption.TopDirectoryOnly).Take(1024))
             {
-                if(!Guid.TryParseExact(System.IO.Path.GetFileName(directory),"N",out _)){unowned++;continue;}
                 SafeFileHandle? pin=null,claim=null;
                 try
                 {
-                    pin=ThumbnailCache.PinDirectory(directory);string marker=System.IO.Path.Combine(directory,Marker);if(!File.Exists(marker)){unowned++;continue;}
+                    pin=ThumbnailCache.PinDirectory(directory);string marker=System.IO.Path.Combine(directory,Marker);
+                    if(!Guid.TryParseExact(System.IO.Path.GetFileName(directory),"N",out _)||!File.Exists(marker))
+                    {unowned++;int inspected=0;unownedBytes=checked(unownedBytes+Size(directory,ref inspected,ref unsafeEntries,0));continue;}
                     Owner? owner;using(var input=ThumbnailCache.OpenOwnedRead(marker)){if(input.Length>4096){unsafeEntries++;continue;}owner=JsonSerializer.Deserialize<Owner>(input);}
                     if(owner is not {Schema:1}||owner.Instance!=System.IO.Path.GetFileName(directory)){unsafeEntries++;continue;}
                     try{claim=ThumbnailCache.PinOwnedFile(System.IO.Path.Combine(directory,Lock),0xC0000080,3,0);}catch(System.ComponentModel.Win32Exception ex) when(ex.NativeErrorCode is 32 or 33){active++;continue;}
@@ -78,7 +81,7 @@ internal static class WorkerTemporaryFiles
             }
         }
         finally{foreach(var pin in pins)pin.Dispose();}
-        return new(removed,active,unowned,unsafeEntries,retained);
+        return new(removed,active,unowned,unsafeEntries,retained){UnownedBytes=unownedBytes};
     }
     internal static WorkerTemporaryCleanup ReleaseExited(Session? session)
     {

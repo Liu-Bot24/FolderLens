@@ -118,7 +118,11 @@ public sealed partial class CatalogStore
             {
                 cancellation.ThrowIfCancellationRequested();offset=link.Id;
                 string path=PathRules.ValidateSource(link.Path),parent=Path.GetDirectoryName(path)!;
-                async Task<ScanDirectoryPacket> Probe(string value)=>PlaylistProbeOverride is {} probe?await probe(value,cancellation).ConfigureAwait(false):worker is null?await Task.Run(()=>ScanPathProbe.Read(value),cancellation).ConfigureAwait(false):await worker.Probe(value,cancellation).ConfigureAwait(false);
+                async Task<ScanDirectoryPacket> Probe(string value)
+                {
+                    try{return PlaylistProbeOverride is {} probe?await probe(value,cancellation).ConfigureAwait(false):worker is null?await Task.Run(()=>ScanPathProbe.Read(value),cancellation).ConfigureAwait(false):await worker.Probe(value,cancellation).ConfigureAwait(false);}
+                    catch(TimeoutException){cancellation.ThrowIfCancellationRequested();return new("offline",[],"ProbeTimeout");}
+                }
                 var directory=await Probe(parent).ConfigureAwait(false);
                 if(directory.State=="missing"&&await missingProof.ConfirmMissingLocation(link.Anchor,link.Identity,cancellation).ConfigureAwait(false))
                 {

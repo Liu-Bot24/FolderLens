@@ -14,7 +14,7 @@ public sealed partial class MainWindow
     private Button? cloudPreviewButton;
     private readonly HashSet<string> approvedCloud=[];
     private static string CloudKey(FileRow row)=>row.Item!.EntryId+":"+row.Item.Version;
-    private static SourceFileStamp? Stamp(FileRow row)=>row.Item is {} item&&row.ModifiedUtcTicks is {} modified?new(item.Bytes,modified):null;
+    private static SourceFileStamp? Stamp(FileRow row)=>row.Item is {} item&&row.ModifiedUtcTicks is {} modified?new(item.Bytes,modified,string.IsNullOrEmpty(row.SourceSignature)?null:row.SourceSignature):null;
     private void InitializeProperties()
     {
         cloudPreviewButton=new Button{Content="读取此在线文件…",Visibility=Visibility.Collapsed};cloudPreviewButton.Click+=ReadCloudFile;PreviewExtras.Children.Add(cloudPreviewButton);

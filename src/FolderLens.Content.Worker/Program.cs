@@ -32,10 +32,10 @@ while(pipe.IsConnected)
         {
         if(request.Operation!="markdownRender")throw new NotSupportedException();
         var input=JsonSerializer.Deserialize<ApprovedInput>(await File.ReadAllTextAsync(Path.Combine(directory,request.FileRef.InputToken+".input.json")),WorkerProtocol.Json)??throw new InvalidDataException();
-        inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);var stat=new FileInfo(input.Path);input=input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;
+        inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);var stat=new FileInfo(input.Path);input=input.Observe(FileReadObservation.Read(input.Path));inspectingSource=false;
         if(input.Length>8*1024*1024)throw new InvalidDataException("MarkdownInputLimit");
         using var stream=new FileStream(input.Path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
-        if(stream.Length!=input.Length||File.GetLastWriteTimeUtc(input.Path).Ticks!=input.LastWriteTicks)throw new IOException("FileChanged");
+        input.Observe(FileReadObservation.Read(stream.SafeFileHandle));input.Observe(FileReadObservation.Read(input.Path));
         byte[] data=new byte[checked((int)input.Length!.Value)];stream.ReadExactly(data);
         string? selectedEncoding=request.Parameters is {} parameters && parameters.TryGetProperty("encoding",out var encodingValue) && encodingValue.ValueKind==JsonValueKind.String?encodingValue.GetString():null;
         var detected=TextEncodingPolicy.Detect(data,true,selectedEncoding);
@@ -68,7 +68,7 @@ while(pipe.IsConnected)
         string html="<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https://folderlens.local;\"><style>body{font:16px/1.65 'Segoe UI',sans-serif;max-width:80ch;margin:24px;color:#222;background:#fff}img{max-width:100%;height:auto}pre{overflow:auto;padding:12px;background:#f0f2f5}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px}a{color:#2466b0}</style></head><body>"+writer+"</body></html>";
         if(Encoding.UTF8.GetByteCount(html)>16*1024*1024)throw new InvalidDataException("MarkdownHtmlLimit");
         await File.WriteAllTextAsync(Path.Combine(directory,request.RequestId+".html"),html,new UTF8Encoding(false));
-        if(stream.Length!=input.Length||File.GetLastWriteTimeUtc(input.Path).Ticks!=input.LastWriteTicks)throw new IOException("FileChanged");
+        input.Observe(FileReadObservation.Read(stream.SafeFileHandle));input.Observe(FileReadObservation.Read(input.Path));
         response=response with{Status="ok",AssetToken=request.RequestId,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,resources,encoding=detected.Encoding.WebName})};
         }
     }

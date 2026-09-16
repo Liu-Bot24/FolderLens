@@ -61,7 +61,7 @@ public sealed class MediaMetadataQueryTests
         }
         byte[] hash=System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(wave));var stat=new FileInfo(wave);long modified=stat.LastWriteTimeUtc.Ticks;
         await using var catalog=new CatalogStore(Path.Combine(directory,"data"));await catalog.Initialize();await catalog.SeedBenchmark(1);
-        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET name='sample.wav',relative_path='sample.wav',kind='audio',logical_bytes=$size,mtime_utc_ticks=$mtime";cmd.Parameters.AddWithValue("$size",stat.Length);cmd.Parameters.AddWithValue("$mtime",modified);return cmd.ExecuteNonQuery();});
+        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Files SET name='sample.wav',relative_path='sample.wav',kind='audio',logical_bytes=$size,mtime_utc_ticks=$mtime,stat_signature=$signature";cmd.Parameters.AddWithValue("$size",stat.Length);cmd.Parameters.AddWithValue("$mtime",modified);cmd.Parameters.AddWithValue("$signature",FolderLens.Contracts.FileReadObservation.Read(wave).Signature);return cmd.ExecuteNonQuery();});
         var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;
         Assert.NotNull(project);string native=Path.Combine(project.FullName,"native","ffmpeg");Assert.True(File.Exists(Path.Combine(native,"ffprobe.exe")),"The real packaged FFprobe fixture is required.");
         await using var worker=new WorkerClient(Path.Combine(directory,"unused-image-worker.exe"),Path.Combine(directory,"temp"));

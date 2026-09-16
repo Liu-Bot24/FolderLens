@@ -113,7 +113,7 @@ public sealed class RootChangeMonitor : IDisposable
         try
         {
             lock(sync){watcher?.Dispose();watcher=null;}
-            replacement=new(root){IncludeSubdirectories=true,NotifyFilter=NotifyFilters.FileName|NotifyFilters.DirectoryName|NotifyFilters.Size|NotifyFilters.LastWrite|NotifyFilters.CreationTime,InternalBufferSize=32*1024};
+            replacement=new(root){IncludeSubdirectories=true,NotifyFilter=NotifyFilters.FileName|NotifyFilters.DirectoryName|NotifyFilters.Size|NotifyFilters.LastWrite|NotifyFilters.CreationTime|NotifyFilters.Attributes,InternalBufferSize=32*1024};
             replacement.Created+=OnChange;replacement.Changed+=OnChange;replacement.Deleted+=OnChange;replacement.Renamed+=OnChange;replacement.Error+=OnError;replacement.EnableRaisingEvents=true;
             lock(sync)
             {

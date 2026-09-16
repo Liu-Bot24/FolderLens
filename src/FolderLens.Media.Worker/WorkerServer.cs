@@ -41,14 +41,14 @@ internal static class WorkerServer
                     string inputFile=Path.Combine(taskDirectory,request.FileRef!.InputToken+".input.json");
                     var input=JsonSerializer.Deserialize<ApprovedInput>(await File.ReadAllTextAsync(inputFile),WorkerProtocol.Json)??throw new InvalidDataException();
                     inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);var stat=new FileInfo(input.Path);
-                    input=input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);
+                    input=input.Observe(FileReadObservation.Read(input.Path));
                     inspectingSource=false;
                     if(currentToken!=request.FileRef.InputToken||currentSource!=input)
                     {
                         animation?.Dispose();animation=null;decoder?.Dispose();decoder=null;currentSource=null;
-                        decoder=new StaticDecoder(input.Path);currentToken=request.FileRef.InputToken;currentSource=input;
+                        decoder=new StaticDecoder(input.Path);input.Observe(decoder.Observation);currentToken=request.FileRef.InputToken;currentSource=input;
                     }
-                    void CheckSource(){ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);decoder!.CheckVersion();inspectingSource=true;stat.Refresh();input.Observe(stat.Length,stat.LastWriteTimeUtc.Ticks);inspectingSource=false;}
+                    void CheckSource(){ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);decoder!.CheckVersion();inspectingSource=true;input.Observe(FileReadObservation.Read(input.Path));inspectingSource=false;}
                     NetVips.NetVips.Concurrency=(int)budget.CpuThreads;
                     string token=request.RequestId;
                     if(!decoder!.Animated&&request.Operation is "animationOpen" or "animationFrame")throw new NotSupportedException("Image is not animated.");
@@ -76,6 +76,7 @@ internal static class WorkerServer
                     CheckSource();
                     if(request.Operation!="probe" && new FileInfo(Path.Combine(taskDirectory,token+".png")).Length>budget.MaxOutputBytes)throw new InvalidDataException("Output budget exceeded.");
                     response=response with{Status="ok",Quality=actual.Item3,AssetToken=request.Operation=="probe"?null:token,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,width=actual.Item1,height=actual.Item2,format=decoder.Format,isRaw=decoder.IsRaw,isAnimated=decoder.Animated,pages=decoder.Pages,provider=decoder.Provider,details=request.Operation=="probe"&&parameters.ReadDetails?decoder.ReadDetails():null},WorkerProtocol.Json)};
+                    CheckSource();
                 }
                 catch(Exception ex)
                 {

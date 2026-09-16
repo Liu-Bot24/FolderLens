@@ -37,7 +37,7 @@ public sealed class ExternalFileLaunchTests
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-launch",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
         string source=Path.Combine(directory,"video & 中文.mp4");await File.WriteAllTextAsync(source,"fixture");
         await using var catalog=new CatalogStore(Path.Combine(directory,"index"));await catalog.Initialize();await catalog.SeedBenchmark(1);
-        await SetFile(catalog,Path.GetFileName(source),new FileInfo(source).Length,File.GetLastWriteTimeUtc(source).Ticks);
+        await SetFile(catalog,Path.GetFileName(source),new FileInfo(source).Length,File.GetLastWriteTimeUtc(source).Ticks,FolderLens.Contracts.FileReadObservation.Read(source).Signature);
         await using var probe=new SourceFileProbe(Worker());
         var target=await ExternalFileLaunch.Resolve(catalog,probe,directory,"benchmark","000000000001",1,false,CancellationToken.None);
         Assert.Equal(source,target.Path);Assert.Equal("video",target.Kind);
@@ -49,10 +49,10 @@ public sealed class ExternalFileLaunchTests
         await SetFile(catalog,@"..\outside.mp4",7,1);
         await Assert.ThrowsAsync<InvalidDataException>(()=>ExternalFileLaunch.Resolve(catalog,probe,directory,"benchmark","000000000001",1,false,CancellationToken.None));
     }
-    private static Task<int> SetFile(CatalogStore catalog,string relative,long bytes,long modified)=>catalog.Write(c=>
+    private static Task<int> SetFile(CatalogStore catalog,string relative,long bytes,long modified,string signature="fixture")=>catalog.Write(c=>
     {
-        using var command=c.CreateCommand();command.CommandText="UPDATE Files SET relative_path=$path,kind='video',logical_bytes=$bytes,mtime_utc_ticks=$time";
-        command.Parameters.AddWithValue("$path",relative);command.Parameters.AddWithValue("$bytes",bytes);command.Parameters.AddWithValue("$time",modified);return command.ExecuteNonQuery();
+        using var command=c.CreateCommand();command.CommandText="UPDATE Files SET relative_path=$path,kind='video',logical_bytes=$bytes,mtime_utc_ticks=$time,stat_signature=$signature";
+        command.Parameters.AddWithValue("$path",relative);command.Parameters.AddWithValue("$bytes",bytes);command.Parameters.AddWithValue("$time",modified);command.Parameters.AddWithValue("$signature",signature);return command.ExecuteNonQuery();
     });
     private static string Worker()
     {

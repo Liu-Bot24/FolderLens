@@ -28,7 +28,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                 {
                     using var cmd=c.CreateCommand();cmd.CommandText="""
                         SELECT entry_id,relative_path,file_version,kind,logical_bytes,mtime_utc_ticks,root_id,
-                            (SELECT display_path FROM Roots r WHERE r.root_id=f.root_id),(SELECT root_epoch FROM Roots r WHERE r.root_id=f.root_id)
+                            (SELECT display_path FROM Roots r WHERE r.root_id=f.root_id),(SELECT root_epoch FROM Roots r WHERE r.root_id=f.root_id),stat_signature
                         FROM Files f WHERE root_id=$root
                         AND entry_id>$after AND entry_state='present' AND hydration_state='local'
                         AND ($observed=0 OR last_seen_scan_id IN(SELECT scan_id FROM ScanRuns WHERE root_id=$root AND root_epoch=$epoch))
@@ -64,8 +64,8 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                         cmd.CommandText=cmd.CommandText.Replace("ORDER BY entry_id LIMIT 256","AND f.entry_id=$requestedEntry ORDER BY entry_id LIMIT 256");
                         cmd.Parameters.AddWithValue("$requestedEntry",entryId);
                     }
-                    using var rows=cmd.ExecuteReader();var entries=new List<(string Id,string Path,long Version,string Kind,long Length,long Modified,string RootId,string Root,long Epoch)>();
-                    while(rows.Read())entries.Add((rows.GetString(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetInt64(4),rows.GetInt64(5),rows.GetString(6),rows.GetString(7),rows.GetInt64(8)));return entries;
+                    using var rows=cmd.ExecuteReader();var entries=new List<(string Id,string Path,long Version,string Kind,long Length,long Modified,string RootId,string Root,long Epoch,string Signature)>();
+                    while(rows.Read())entries.Add((rows.GetString(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetInt64(4),rows.GetInt64(5),rows.GetString(6),rows.GetString(7),rows.GetInt64(8),rows.GetString(9)));return entries;
                 },cancellation).ConfigureAwait(false);
                 if(batch.Count==0)break;
                 // Observe a bounded batch together. The 300 ms stability interval is
@@ -81,7 +81,7 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                     {
                         var observation=observations[entry.Id];if(observation.Error is {} error)throw error;
                         string path=observation.Path;var before=observation.Stat;
-                        if(before.Length!=entry.Length || before.ModifiedUtcTicks!=entry.Modified)throw new IOException("FileChanged");
+                        if(before.Length!=entry.Length || before.ModifiedUtcTicks!=entry.Modified||before.SourceSignature!=entry.Signature)throw new IOException("FileChanged");
                         // This also avoids racing common download/copy-in-progress files.
                         double remaining=300-System.Diagnostics.Stopwatch.GetElapsedTime(observation.Timestamp).TotalMilliseconds;
                         if(remaining>0)await Task.Delay(TimeSpan.FromMilliseconds(remaining),cancellation).ConfigureAwait(false);

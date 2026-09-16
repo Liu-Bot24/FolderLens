@@ -9,7 +9,7 @@ public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=nu
     public async Task<SourceFileStamp> Read(string path,CancellationToken cancellation,bool allowCloud=false)
     {
         var observation=await ReadObservation(path,cancellation,allowCloud).ConfigureAwait(false);
-        return new(observation.Bytes,observation.Modified);
+        return new(observation.Bytes,observation.Modified,FileObservationWriter.Signature(observation));
     }
     public async Task<ScanEntry> ReadObservation(string path,CancellationToken cancellation,bool allowCloud=false)
     {

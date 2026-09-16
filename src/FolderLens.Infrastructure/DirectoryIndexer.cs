@@ -214,9 +214,10 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     public async Task<ScanProgress> ReconcileDirty(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,IProgress<ScanProgress>? progress,CancellationToken cancellation)
     {
         var dirty=new ScanDirtyDirectories(catalog);long files=0,directories=0,errors=0;
-        while(true)
+        // Capture a finite batch. Revisions arriving during this pass belong to the
+        // next pass; acknowledgement must not erase them or chase them forever.
+        var pending=await dirty.Read(rootId,epoch,cancellation).ConfigureAwait(false);
         {
-            var pending=await dirty.Read(rootId,epoch,cancellation).ConfigureAwait(false);if(pending.Count==0)break;
             foreach(var scope in pending)
             {
                 cancellation.ThrowIfCancellationRequested();

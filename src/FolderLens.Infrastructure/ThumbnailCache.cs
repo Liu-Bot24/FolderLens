@@ -65,7 +65,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     private readonly Dictionary<string,int> leases=[];
     private readonly HashSet<string> rejected=[];
     private readonly object leaseGate=new();
-    private long bytes,entries,memoryBytes,hits,misses,stores,evictions;
+    private long bytes,entries,memoryBytes,hits,misses,stores,evictions,otherDiskBytes;
     private DateTime lastMaintenance=DateTime.MinValue;
     private bool disposed;
     private int pressureTrim;
@@ -143,12 +143,21 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private void RecoverOrphans(SqliteConnection c,CancellationToken cancellation)
     {
+        // The exclusive cache owner lock and serialized writer prove that no
+        // previous process can still be writing these staging files.
+        foreach(string file in Directory.EnumerateFiles(directory,".*.tmp"))
+        {
+            cancellation.ThrowIfCancellationRequested();
+            string name=Path.GetFileName(file);
+            if(name.Length==102&&name[65]=='.'&&name.AsSpan(1,64).ToString().All(Uri.IsHexDigit)&&Guid.TryParseExact(name.Substring(66,32),"N",out _))DeleteOwned(file);
+        }
         using var query=c.CreateCommand();query.CommandText="SELECT 1 FROM ThumbnailItems WHERE cache_key=$key";var key=query.Parameters.Add("$key",SqliteType.Text);
         foreach(string file in Directory.EnumerateFiles(directory,"*.png",SearchOption.TopDirectoryOnly))
         {
             cancellation.ThrowIfCancellationRequested();string hash=Path.GetFileNameWithoutExtension(file);if(hash.Length!=64||!hash.All(Uri.IsHexDigit))continue;
             key.Value=hash;if(query.ExecuteScalar() is null)DeleteOwned(file);
         }
+        otherDiskBytes=Math.Max(0,Directory.EnumerateFiles(directory).Sum(p=>new FileInfo(p).Length)-bytes-IndexBytes());
     }
     private string AssetPath(string hash)
     {
@@ -256,7 +265,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
             var candidates=new List<(string Key,long Bytes)>();using(var rows=oldest.ExecuteReader())while(rows.Read()){cancellation.ThrowIfCancellationRequested();if(!IsLeased(rows.GetString(0))){candidates.Add((rows.GetString(0),rows.GetInt64(1)));break;}}
             if(candidates.Count==0||!Remove(c,candidates[0].Key,candidates[0].Bytes))throw new IOException("缩略图数量已达到预算，正在显示的缩略图已保留。");
         }
-        long reserve=IndexBytes()+Math.Min(8L<<20,options.DiskBytes/8);
+        long reserve=IndexBytes()+otherDiskBytes+Math.Min(8L<<20,options.DiskBytes/8);
         while(bytes+incoming>options.DiskBytes-reserve)
         {
             long before=bytes;TrimCore(c,false,incoming,cancellation);if(bytes>=before)throw new IOException("缩略图缓存空间不足，正在显示的缓存已保留。");
@@ -283,7 +292,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private ThumbnailCacheCleanup TrimCore(SqliteConnection c,bool clear,long incoming,CancellationToken cancellation)
     {
-        long removed=0,removedBytes=0;long cutoff=DateTime.UtcNow.Subtract(options.MaxAge).Ticks;long target=options.DiskBytes-IndexBytes()-Math.Min(8L<<20,options.DiskBytes/8)-incoming;
+        long removed=0,removedBytes=0;long cutoff=DateTime.UtcNow.Subtract(options.MaxAge).Ticks;long target=options.DiskBytes-IndexBytes()-otherDiskBytes-Math.Min(8L<<20,options.DiskBytes/8)-incoming;
         long afterTime=-1;string afterKey="";
         while(true)
         {
@@ -314,7 +323,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     public Task<ThumbnailCacheStatistics> GetStatistics(CancellationToken cancellation=default)=>Db().Execute(c=>
     {
-        return new ThumbnailCacheStatistics(entries,bytes,bytes+IndexBytes(),memoryBytes,memory.Count,hits,misses,stores,evictions,ActiveLeases());
+        return new ThumbnailCacheStatistics(entries,bytes,Directory.EnumerateFiles(directory).Sum(p=>new FileInfo(p).Length),memoryBytes,memory.Count,hits,misses,stores,evictions,ActiveLeases());
     },cancellation);
     private long IndexBytes()
     {
