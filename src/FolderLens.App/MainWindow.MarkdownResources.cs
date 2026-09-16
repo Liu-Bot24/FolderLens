@@ -77,7 +77,14 @@ public sealed partial class MainWindow
             markdownResourceRequests++;counted=true;
             using var timeout=CancellationTokenSource.CreateLinkedTokenSource(resource.Token,lifetime.Token);timeout.CancelAfter(TimeSpan.FromSeconds(15));var token=timeout.Token;
             await markdownResourceGate.WaitAsync(token);slot=true;
-            bool Current()=>!closing&&ReferenceEquals(markdown,view)&&resource.Selection==selection&&markdownResources.TryGetValue(key,out var current)&&ReferenceEquals(current,resource)&&!token.IsCancellationRequested;
+            bool Current()
+            {
+                if(closing||resource.Token.IsCancellationRequested||!ReferenceEquals(markdown,view)||resource.Selection!=selection||
+                    !markdownResources.TryGetValue(key,out var current)||!ReferenceEquals(current,resource))return false;
+                // A current document's expired request must enter the retryable
+                // failure path even when the preceding await returned normally.
+                token.ThrowIfCancellationRequested();return true;
+            }
             if(!Current())return;
             if(verifyMarkdownResourceBarrier is {} barrier)await barrier(resource.RelativeUrl,token);
             if(!Current())return;

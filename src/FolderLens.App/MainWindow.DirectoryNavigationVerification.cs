@@ -94,7 +94,7 @@ public sealed partial class MainWindow
             await OpenRoot(Path.Combine(source,child));
             if(resultHandle?.Count!=count||BrowsedDirectory!=Path.Combine(source,child)||RootPath.Text!=BrowsedDirectory)throw new InvalidOperationException("Directory navigation published another scope's results.");
             var page=await catalog!.ReadPage(resultHandle.Id,0,16,lifetime.Token);
-            if(page.Any(item=>!item.RelativePath.StartsWith(child+"\\",StringComparison.Ordinal)))throw new InvalidOperationException("Old directory rows leaked into the new scope.");
+            if(root!=Path.Combine(source,child)||page.Any(item=>DirectoryBrowseScope.Relative(root,Path.Combine(root,item.RelativePath)) is null))throw new InvalidOperationException("Old directory rows leaked into the new scope.");
             times.Add(watch.Elapsed.TotalMilliseconds);
         }
         report["scopeSwitchMilliseconds"]=times;

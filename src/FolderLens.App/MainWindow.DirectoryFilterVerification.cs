@@ -117,14 +117,14 @@ public sealed partial class MainWindow
         report["nativeAddPausePreviewApply"]=true;report["noRescan"]=true;report["pdfCategory"]=true;
         long navigationEpoch=epoch;string navigationRoot=rootId;
         await NavigateFolder(new FolderNode(Path.Combine(source,"A"),"A",rootId,"A",source));
-        if(rootId!=navigationRoot||epoch!=navigationEpoch||CurrentFilter().DirectoryScope!="A"||RootPath.Text!=Path.Combine(source,"A"))throw new InvalidOperationException("进入子目录建立了重复扫描根或没有更新浏览位置。");
+        if(rootId==navigationRoot||root!=Path.Combine(source,"A")||CurrentFilter().DirectoryScope!=""||RootPath.Text!=root)throw new InvalidOperationException("进入子目录后扫描范围没有切换到目标目录。");
         if(scanTask is not null)await scanTask;
         await NavigateFolder(new FolderNode(source,"root",rootId,"",source));
-        if(rootId!=navigationRoot||epoch!=navigationEpoch||CurrentFilter().DirectoryScope!="")throw new InvalidOperationException("返回扫描根时未清除子目录范围。");
+        if(rootId!=navigationRoot||epoch<=navigationEpoch||root!=source||CurrentFilter().DirectoryScope!="")throw new InvalidOperationException("返回父目录时未建立新的扫描观察。");
         if(scanTask is not null)await scanTask;
         async Task<long> Versions()=>await catalog!.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT sum(file_version) FROM Files WHERE root_id=$root";cmd.Parameters.AddWithValue("$root",rootId);return (long)cmd.ExecuteScalar()!;});
         long beforeRefresh=await Versions();await RefreshCurrentRoot();
         if(await Versions()!=beforeRefresh)throw new InvalidOperationException("普通刷新使未变化文件的版本全部失效。");
-        report["treeNavigationReusesRootAndEpoch"]=true;report["ordinaryRefreshPreservesUnchangedVersions"]=true;report["status"]="PASS";
+        report["treeNavigationScansSelectedRootOnly"]=true;report["ordinaryRefreshPreservesUnchangedVersions"]=true;report["status"]="PASS";
     }
 }

@@ -15,7 +15,7 @@ $cases=@(
  'thumbnail-priority','menu-availability','browser-status','collections','quick-collections','pro-feedback','startup-profile','capacity-ui','format-choices','filter-panel','navigation-roots','tree-current-folder','wheel-distance','prefetch-adoption','prefetch-turnaround','prepared-cache',
  'fit-lock','press-gesture','filmstrip','viewer-information','selection-appearance','directory-filter','collection-markdown','collection-pending-close',
  'collection-observation','collection-batches','markdown-retries','audio-recovery','audio-retention','video-card','keyboard-completion','preview-close','preview-pending-close',
- 'root-from-viewer','selection-race','slide-tick-race','slide-error'
+ 'root-from-viewer','selection-race','slide-tick-race','slide-error','scan-navigation','shell-refresh-navigation','video-lifetime'
 )
 $reports=@()
 $video=Join-Path $EvidenceRoot 'generated-video.mp4'
@@ -23,7 +23,7 @@ $null=Invoke-LoggedProcess (Join-Path $AppRoot 'native\ffmpeg\ffmpeg.exe') @('-h
 foreach($case in $cases){
  $directory=Join-Path $EvidenceRoot $case
  $arguments=@('--verify-refresh','--verify-deployed',('--verify-'+$case))
- if($case -eq 'video-card'){$arguments+=@($video)}
+ if($case -in @('video-card','video-lifetime')){$arguments+=@($video)}
  $arguments+=@('--data-dir',$directory)
  $run=Invoke-LoggedProcess $exe $arguments ($directory+'-run') -TimeoutSeconds $TimeoutSeconds -AllowFailure
  $path=Join-Path $directory 'native-refresh.json'

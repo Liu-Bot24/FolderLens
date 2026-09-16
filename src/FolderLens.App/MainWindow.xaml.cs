@@ -230,14 +230,6 @@ public sealed partial class MainWindow : Window
             path=PathRules.ValidateSource(path);
             if(await TryBrowseCurrentRoot(path,navigation))return;
             if(closing||navigation!=directoryNavigationRequest)return;
-            var covering=backgroundScans.Where(s=>!s.Cancelled&&!s.Completion.IsCompleted&&s.Policy.HasSameScanPolicy(CurrentFilter())&&DirectoryBrowseScope.Relative(s.Path,path) is not null)
-                .OrderByDescending(s=>s.Path.Length).FirstOrDefault();
-            if(covering is not null&&!string.Equals(covering.Path,path,StringComparison.Ordinal))
-            {
-                previousView??=rootId.Length>0?CaptureView():null;
-                requestedAdvanced=CurrentFilter() with{DirectoryScope=DirectoryBrowseScope.Relative(covering.Path,path)!,ScopeDirectFiles=false};
-                path=covering.Path;preserveDirectoryScope=true;
-            }
         }
         // Refuse a scan that cannot start before cancelling the current view or
         // clearing its rows. Existing scope queries remain available at the limit.
@@ -259,14 +251,9 @@ public sealed partial class MainWindow : Window
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
             bool ownedScan=backgroundScans.Any(s=>ReferenceEquals(s.Completion,scanTask));
             await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
+            await StopScansForNavigation();
             if(requested!=rootChangeVersion)return;
             scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-            var reusable=collectionScope?null:backgroundScans.FirstOrDefault(s=>string.Equals(s.Path,path,StringComparison.Ordinal)&&!s.Completion.IsCompleted);
-            if(reusable is not null&&(reusable.Cancelled||forceRefresh||!reusable.Policy.HasSameScanPolicy(CurrentFilter())))
-            {
-                reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;
-                if(requested!=rootChangeVersion||closing)return;
-            }
             if(collectionScope)
             {
                 root=path;rootId=path;epoch=requested;activeBackgroundScan=null;
@@ -274,14 +261,12 @@ public sealed partial class MainWindow : Window
             else
             {
                 if(verifyRootAdmissionBarrier is not null)await verifyRootAdmissionBarrier(scanStop.Token);
-                var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token,reusable is null?null:(reusable.RootId,reusable.Epoch));
-                if(reusable is not null&&(opened.RootId!=reusable.RootId||opened.Epoch!=reusable.Epoch))
-                {reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;}
-                if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=reusable;
+                var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token);
+                if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=null;
             }
             accepted=true;
             monitor?.Dispose();monitor=null;
-            foreach(var finished in backgroundScans.Where(s=>s!=reusable&&s.Completion.IsCompleted).ToArray()){finished.Dispose();backgroundScans.Remove(finished);}
+            scanProgress.Clear();
             if(recordHistory&&acceptedView is not null&&!string.Equals(acceptedView.Root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??acceptedView);
             advanced=requestedAdvanced;
             if(!preserveDirectoryScope&&acceptedView?.Root!=path&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
@@ -324,7 +309,7 @@ public sealed partial class MainWindow : Window
             RootChangeMonitor CreateScanMonitor()=>new(activeRoot,()=>DispatcherQueue.TryEnqueue(()=>{if(activeId!=rootId||activeEpoch!=epoch||replacingRoot||closing)return;reconcilePending=true;_=Reconcile();}),catalog,activeId,activeEpoch,[dataDirectory]);
             var report=new Progress<ScanProgress>(p=>
             {
-                scanProgress[activeId]=(p,DateTimeOffset.UtcNow);if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
+                if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;scanProgress[activeId]=(p,DateTimeOffset.UtcNow);
                 Status.Text=(advanced?.DirectoryScope is {Length:>0}?"后台根目录扫描：":"")+$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
                 if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
@@ -337,23 +322,14 @@ public sealed partial class MainWindow : Window
             ExclusionSpec[] exclusions=ScanExclusions();
             string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var rootToken=scanStop.Token;
-            if(reusable is null)
-            {
-                var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
-                activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,scanScheduler,lifetime.Token,
-                    // Re-enumeration does not invalidate unchanged media metadata.
-                    async token=>{var result=await indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token);if(verifyBackgroundScanCompletionBarrier is {} barrier)await barrier(token);return result;},CreateScanMonitor);
-                backgroundScans.Add(activeBackgroundScan);
-                _=ObserveBackgroundCompletion(activeBackgroundScan);
-            }
+            var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
+            activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,scanScheduler,lifetime.Token,
+                // Re-enumeration does not invalidate unchanged media metadata.
+                async token=>{var result=await indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token);if(verifyBackgroundScanCompletionBarrier is {} barrier)await barrier(token);return result;},CreateScanMonitor);
+            backgroundScans.Add(activeBackgroundScan);
+            _=ObserveBackgroundCompletion(activeBackgroundScan);
             scanTask=activeBackgroundScan!.Completion;
             var openedScanTask=activeBackgroundScan.Completion;
-            if(reusable is not null&&CurrentFilter().DirectoryScope.Length>0)
-            {
-                await new ScanDirtyDirectories(catalog).Mark(activeId,activeEpoch,[new(CurrentFilter().DirectoryScope,"BrowseNavigation",true)],rootToken);
-                if(requested!=rootChangeVersion||closing)return;
-                reconcilePending=true;
-            }
             PreferScanDirectory(activeId,CurrentFilter().DirectoryScope);
             UpdateBrowserEmptyState();
             rootChangeGate.Release();acquired=false;

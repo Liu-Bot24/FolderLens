@@ -35,6 +35,25 @@ public sealed partial class MainWindow
         foreach(var scan in backgroundScans)
             if(scan.RootId==expectedRoot&&!scan.Completion.IsCompleted&&!scan.Cancelled)scan.Priority.Prefer(path);
     }
+    // Called while rootChangeGate is held. Completion observers also use that
+    // gate, so ownership cannot move while these workers are being retired.
+    private async Task StopScansForNavigation()
+    {
+        var previous=backgroundScans.ToArray();
+        foreach(var scan in previous)scan.Cancel();
+        foreach(var scan in previous)
+        {
+            try{await scan.Completion;}
+            catch(OperationCanceledException){}
+            catch(Exception error){RecordWebView("RetiredScanError "+error.GetType().Name);}
+            // Keep the accepted directory monitored if admission of the next
+            // root fails. Successful admission disposes this monitor below.
+            if(!closing&&ReferenceEquals(activeBackgroundScan,scan)&&scan.Monitor is not null)
+            {monitor?.Dispose();monitor=scan.DetachMonitor();}
+            backgroundScans.Remove(scan);scan.Dispose();
+        }
+        activeBackgroundScan=null;
+    }
     private async Task RetireBackgroundScans()
     {
         foreach(var scan in backgroundScans.ToArray())

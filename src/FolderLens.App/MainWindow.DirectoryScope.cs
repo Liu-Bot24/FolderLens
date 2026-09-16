@@ -14,7 +14,9 @@ public sealed partial class MainWindow
         if(closing||replacingRoot||!browserRootReady||catalog is null||activeCollectionId is not null||rootId.Length==0||
             scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(CurrentFilter()))return false;
         string? relative=DirectoryBrowseScope.Relative(root,path);
-        if(relative is null)return false;
+        // Only a same-directory refresh can reuse this scan. Navigating into a
+        // child must retire the parent traversal and establish the chosen root.
+        if(relative!="")return false;
         string expectedRoot=rootId;long version=rootChangeVersion,view=viewRestoreRevision;
         bool known=await catalog.Read(c=>
         {
@@ -47,9 +49,9 @@ public sealed partial class MainWindow
         if(closing||replacingRoot||rootId!=expectedRoot)throw new OperationCanceledException("浏览目录已变化。");
         var current=CaptureView();
         var next=current with{Filter=current.Filter with{DirectoryScope=path,ScopeDirectFiles=directFiles},SelectedPath=null,ScrollAnchorPath=null,ScrollOffset=0,Preview=null};
-        long rootVersion=rootChangeVersion;
+        long revision=viewRestoreRevision+1;string target=Path.Combine(current.Root,path);
         await RestoreSavedView(next,recheckDirectory:true);
-        if(closing||rootId!=expectedRoot||rootVersion!=rootChangeVersion)throw new OperationCanceledException("浏览目录已变化。");
+        if(closing||viewRestoreRevision!=revision||BrowsedDirectory!=target)throw new OperationCanceledException("浏览目录已变化。");
         if(resultHandle?.Generation!=generation)throw new InvalidOperationException("目录范围结果未建立，请在主窗口查看错误后重试。");
         WindowFocus.Show(this,requestedForeground);
     }

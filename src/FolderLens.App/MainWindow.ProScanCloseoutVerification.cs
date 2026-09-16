@@ -61,7 +61,7 @@ public sealed partial class MainWindow
         if(metadataTask is not null)await metadataTask;
         await RefreshQuery();
         string id=rootId;long observedEpoch=epoch;
-        if(resultHandle?.Count!=12||RootPath.Text==root)throw new InvalidOperationException("Child scope fixture was not loaded.");
+        if(resultHandle?.Count!=12||root!=Path.Combine(source,"A")||RootPath.Text!=root)throw new InvalidOperationException("Child root fixture was not loaded.");
         ShowScanError(new IOException("Injected scan failure"));
         Search.Text="image-01";searchTimer?.Stop();await RefreshQuery();
         if(resultHandle?.Count!=1||browserScanError is null)throw new InvalidOperationException("Search stopped responding after a child scope scan error.");

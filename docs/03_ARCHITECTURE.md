@@ -33,13 +33,13 @@ App 依赖 Core/Contracts，Windows 接入由 Infrastructure 提供；Core 不�
 
 一个 AppSession 拥有活动 RootSession、BrowserQuerySession、SelectionState、PreviewSession。文件集合不是 ObservableCollection<完整文件>；只存在有界页缓存和结果会话句柄。
 
-所有权链：AppSession 持有完整根扫描，浏览切根时保留已经开始的完整扫描，最多两个根并行；显式停止取消当前根扫描，退出时取消并等待全部扫描。BrowserQuerySession 释放时取消查询、列表预取和当前页面元数据请求；PreviewSession 释放时取消图片/文本/音频；SurfaceLease 释放 CPU/GPU/共享内存资源；worker 退出立即使其所有 lease 失效。资源不能靠最终 GC 才释放。调度与身份复用见 ADR `2026-09-14-fair-background-scanning.md`。
+所有权链：AppSession 只扫描当前选择的文件夹及其子目录。切换文件夹时取消并等待旧范围扫描退出，再启动新范围；进入子目录也按此边界处理，不复用仍在扫描的父目录范围。进度只统计当前根的新一轮扫描。显式停止取消当前根扫描，退出时取消并等待全部任务。BrowserQuerySession 释放时取消查询、列表预取和当前页面元数据请求；PreviewSession 释放时取消图片/文本/音频；SurfaceLease 释放 CPU/GPU/共享内存资源；worker 退出立即使其所有 lease 失效。资源不能靠最终 GC 才释放。见 ADR `2026-09-16-selected-directory-scanning.md`；该决策替代旧 ADR 中跨导航继续整根扫描的行为。
 
 ### 版本标识
 
 | 标识 | 变更条件 | 作用 |
 |---|---|---|
-| rootEpoch | 新建或重建根上下文；返回仍在扫描的同一物理根时复用 | 拒绝旧根任务回写；页面切换另外使用页面版本 |
+| rootEpoch | 新建或重建根上下文；返回此前目录建立新观察，同目录筛选保持不变 | 拒绝旧根任务回写；页面切换另外使用页面版本 |
 | queryGeneration | 筛选、排序、排除或显式刷新查询 | 防旧结果页覆盖新列表 |
 | resultSessionId | 每份固定有序快照 | 导航、全选、播放列表、容量同源 |
 | selectionGeneration | 选择或页码/质量请求改变 | 防旧预览覆盖新文件 |

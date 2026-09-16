@@ -17,6 +17,10 @@ public sealed partial class MainWindow
     private nint FileOperationOwner=>WinRT.Interop.WindowNative.GetWindowHandle(this);
     private string? FileTransferDirectory=>!closing&&!replacingRoot&&!immersive&&activeCollectionId is null&&!string.IsNullOrWhiteSpace(rootId)?BrowsedDirectory:null;
     private Func<string,Task>? verifyTransferBarrier;
+    private CancellationTokenSource? shellRefreshStop;
+    private Task? shellRefreshTask;
+    private sealed record ShellRefreshOwner(long RootVersion,long ViewRevision,string RootId,string? Collection,CancellationToken Token);
+    private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,scanStop.Token);
     private async Task<FileOperationTarget[]> CaptureTransferSelection()
     {
         var targets=new List<FileOperationTarget>();
@@ -89,11 +93,13 @@ public sealed partial class MainWindow
         Shell.DragLeave+=(_,_)=>ResetIncomingDrag();
         foreach(var view in new ListViewBase[]{FilesGrid,FilesList})
         {
+            ShellRefreshOwner? dragOwner=null;
             view.CanDragItems=true;view.CanReorderItems=false;
             view.DragStarting+=(_,args)=>args.AllowedOperations=DataPackageOperation.Copy|DataPackageOperation.Move;
             view.DragItemsStarting+=(_,args)=>
             {
                 if(closing||fileOperationBusy){args.Cancel=true;return;}
+                dragOwner=CaptureShellRefreshOwner();
                 EndMarquee(false);var files=TransferStorageItems();
                 args.Data.RequestedOperation=DataPackageOperation.Copy|DataPackageOperation.Move;
                 // ListView/GridView expose DragItemsStarting without an event deferral.
@@ -106,7 +112,7 @@ public sealed partial class MainWindow
                 });
                 _=files.ContinueWith(t=>{var error=t.Exception;DispatcherQueue.TryEnqueue(()=>{if(!closing)ShowError(error!);});},TaskContinuationOptions.OnlyOnFaulted);
             };
-            view.DragItemsCompleted+=async(_,_)=>await RefreshAfterShellOperation();
+            view.DragItemsCompleted+=async(_,_)=>{var owner=dragOwner;dragOwner=null;if(owner is not null)await RefreshAfterShellOperation(owner);};
         }
         foreach(var binding in new[]{(VirtualKey.C,false),(VirtualKey.X,true)})
         {
@@ -170,6 +176,7 @@ public sealed partial class MainWindow
         if(fileOperationBusy||closing||!data.Contains(StandardDataFormats.StorageItems))return;
         using var work=browserWork.Enter();if(work is null)return;
         fileOperationBusy=true;UpdateCommandAvailability();
+        var refreshOwner=CaptureShellRefreshOwner();
         try
         {
             var files=await data.GetStorageItemsAsync();if(closing||files.Count==0)return;
@@ -177,19 +184,52 @@ public sealed partial class MainWindow
             var requests=files.Select(f=>new ShellFileRequest(f.Path,action,destination)).ToArray();
             await ReturnToBrowser();if(closing)return;ClearResultSelection();
             var result=await ShellFileOperations.Execute(requests,FileOperationOwner,lifetime.Token);
-            await RefreshAfterShellOperation();ShowShellResult(result);
+            CompleteShellOperation(result,refreshOwner);
             // A partial move must not tell the source to forget every cut item.
             if(!result.Aborted&&result.HResult>=0&&result.Items.All(i=>i.Outcome==ShellItemOutcome.Completed))
                 data.ReportOperationCompleted(action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy);
         }
         finally{fileOperationBusy=false;UpdateCommandAvailability();}
     }
-    private async Task RefreshAfterShellOperation()
+    private void CompleteShellOperation(ShellBatchResult result,ShellRefreshOwner owner)
+    {
+        ShowShellResult(result);
+        // The Shell operation has ended. Validation is separate cancellable
+        // work and must not keep file commands disabled for an entire playlist.
+        fileOperationBusy=false;UpdateCommandAvailability();
+        shellRefreshTask=RefreshAfterShellOperation(owner);
+    }
+    private async Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null)
     {
         using var work=browserWork.Enter();if(work is null)return;
         if(closing||catalog is null)return;
-        try{if(activeCollectionId is {} collection){await catalog.RefreshPlaylist(collection,lifetime.Token);await RefreshQuery(preserveViewport:true);}else{reconcilePending=true;await Reconcile();}}
-        catch(OperationCanceledException){}catch(Exception error){if(!closing)ShowError(error);}
+        owner??=CaptureShellRefreshOwner();
+        bool OwnsView()=>!closing&&!owner.Token.IsCancellationRequested&&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision&&owner.RootId==rootId&&owner.Collection==activeCollectionId;
+        if(!OwnsView())return;
+        using var refreshCancellation=CancellationTokenSource.CreateLinkedTokenSource(owner.Token,lifetime.Token);
+        var previous=shellRefreshStop;shellRefreshStop=refreshCancellation;previous?.Cancel();
+        var token=refreshCancellation.Token;
+        bool Current()=>!token.IsCancellationRequested&&OwnsView();
+        try
+        {
+            if(!Current())return;
+            if(owner.Collection is {} collection)
+            {
+                long nextPublication=0;
+                await foreach(var _ in catalog.RefreshPlaylistBatches(collection,token))
+                {
+                    if(!Current())return;
+                    if(System.Diagnostics.Stopwatch.GetTimestamp()<nextPublication)continue;
+                    await RefreshQuery(preserveViewport:true,scanPreview:true);
+                    if(!Current())return;
+                    nextPublication=System.Diagnostics.Stopwatch.GetTimestamp()+System.Diagnostics.Stopwatch.Frequency;
+                }
+                if(Current())await RefreshQuery(preserveViewport:true,scanPreview:true);
+            }
+            else{reconcilePending=true;await Reconcile();}
+        }
+        catch(OperationCanceledException){}catch(Exception error){if(Current())ShowError(error);}
+        finally{if(ReferenceEquals(shellRefreshStop,refreshCancellation))shellRefreshStop=null;}
     }
     private void ShowShellResult(ShellBatchResult result)
     {

@@ -11,6 +11,8 @@ public sealed partial class MainWindow
         foreach(string name in names.Append("denied.png").Append("timeout.png").Append("exhausted.png"))File.Copy(Path.Combine(source,"A","image-00.png"),Path.Combine(source,name));
         await File.WriteAllTextAsync(Path.Combine(source,"retry.md"),"# Retry\n\n"+string.Join(" ",names.Append("denied.png").Append("timeout.png").Append("exhausted.png").Select(name=>$"![image]({name})")));
         await File.WriteAllTextAsync(Path.Combine(source,"leave.txt"),"leave");
+        File.Copy(Path.Combine(source,"A","image-00.png"),Path.Combine(source,"late.png"));
+        await File.WriteAllTextAsync(Path.Combine(source,"late.md"),"# Late completion\n\n![image](late.png)\n");
         suppressFilters=true;SelectTag(Category,"text");suppressFilters=false;
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -44,6 +46,29 @@ public sealed partial class MainWindow
             if(attempts.GetValueOrDefault("denied.png")!=1||attempts.GetValueOrDefault("timeout.png")!=2||attempts.GetValueOrDefault("exhausted.png") is <1 or >4||!markdownResources.Values.Single(r=>r.RelativeUrl=="exhausted.png").PermanentFailure)throw new InvalidOperationException("Permanent denial or retry bound failed.");
             report["attempts"]=attempts;report["timeoutAndSaturationRecovered"]=true;report["permanentDenialNotRetried"]=true;report["retryBudgetExhausted"]=true;
             long plain=(await catalog.FindOrdinal(resultHandle.Id,"leave.txt"))!.Value;
+            await SelectBrowserOrdinal(results!,checked((int)plain),lifetime.Token);
+            await WaitUntil(()=>markdownResourceRequests==0,TimeSpan.FromSeconds(5));
+            var lateEntered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var lateFinish=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            CancellationToken lateToken=default;int lateAttempts=0;
+            verifyMarkdownResourceBarrier=async(path,token)=>
+            {
+                if(path!="late.png")return;
+                if(++lateAttempts==1){lateToken=token;lateEntered.TrySetResult();await lateFinish.Task;}
+            };
+            try
+            {
+                long late=(await catalog.FindOrdinal(resultHandle.Id,"late.md"))!.Value;
+                await SelectBrowserOrdinal(results!,checked((int)late),lifetime.Token);
+                await lateEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await WaitUntil(()=>lateToken.IsCancellationRequested,TimeSpan.FromSeconds(18));
+                lateFinish.TrySetResult();
+                await WaitUntil(()=>markdownResources.Values.Single(r=>r.RelativeUrl=="late.png").Failures>0,TimeSpan.FromSeconds(3));
+                for(int n=0;n<160&&await core.ExecuteScriptAsync("Array.from(document.images).filter(n=>n.naturalWidth>0).length")!="1";n++)await Task.Delay(50);
+                if(lateAttempts!=2||await core.ExecuteScriptAsync("Array.from(document.images).filter(n=>n.naturalWidth>0).length")!="1")throw new InvalidOperationException("Normal completion after deadline did not retry and recover.");
+                report["normalCompletionAfterTimeoutRecovered"]=true;
+            }
+            finally{lateFinish.TrySetResult();}
             await SelectBrowserOrdinal(results!,checked((int)plain),lifetime.Token);
             await WaitUntil(()=>markdownResourceRequests==0,TimeSpan.FromSeconds(5));
             foreach(bool pending in new[]{true,false})

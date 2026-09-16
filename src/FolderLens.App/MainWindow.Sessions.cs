@@ -52,6 +52,14 @@ public sealed partial class MainWindow
     private async Task RestoreSavedView(SavedView saved,bool recordHistory=true,bool recheckDirectory=false)
     {
         saved.Filter.Validate();saved=saved with{Filter=saved.Filter.ForBrowserView()};
+        // Old sessions and capacity navigation may describe a child scope of a
+        // larger root. Restore the actual displayed directory as the scan root.
+        if(saved.Filter.CollectionId is null&&saved.Filter.DirectoryScope.Length>0)
+        {
+            string previousRoot=saved.Root,nextRoot=Path.Combine(previousRoot,saved.Filter.DirectoryScope);
+            string? Rebase(string? path)=>path is null?null:DirectoryBrowseScope.Relative(nextRoot,Path.Combine(previousRoot,path));
+            saved=saved with{Root=nextRoot,Filter=saved.Filter with{DirectoryScope=""},SelectedPath=Rebase(saved.SelectedPath),ScrollAnchorPath=Rebase(saved.ScrollAnchorPath)};
+        }
         var previous=rootId.Length>0?CaptureView():null;
         bool sameRoot=previous is not null&&browserRootReady&&!replacingRoot&&string.Equals(root,saved.Root,StringComparison.Ordinal)&&previous.Filter.HasSameScanPolicy(saved.Filter);
         restoringView=true;long revision=++viewRestoreRevision,requestedRoot=rootChangeVersion+(sameRoot?0:1);

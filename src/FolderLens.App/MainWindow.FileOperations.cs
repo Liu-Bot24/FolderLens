@@ -53,12 +53,13 @@ public sealed partial class MainWindow
             if(!Current()||!targets.Select(t=>(t.Item.EntryId,t.Item.Version,t.Path,t.PhysicalIdentity,t.Stamp)).SequenceEqual(currentTargets.Select(t=>(t.Item.EntryId,t.Item.Version,t.Path,t.PhysicalIdentity,t.Stamp))))
                 throw new IOException("所选文件已变化，请重新选择后操作。");
             ClearResultSelection();CancelThumbnails();ClearPrefetchedImages();ClearImage();
+            var refreshOwner=CaptureShellRefreshOwner();
             var action=kind==FileOperationKind.Rename?ShellFileAction.Rename:kind==FileOperationKind.Move?ShellFileAction.Move:ShellFileAction.Recycle;
             var result=await ShellFileOperations.Execute(targets.Select(t=>new ShellFileRequest(t.Path,action,destination,newName,t.Stamp,t.PhysicalIdentity)).ToArray(),FileOperationOwner,lifetime.Token);
             if(verifyFileMutationCompleted is not null&&result.Items.All(i=>i.Outcome==ShellItemOutcome.Completed))await verifyFileMutationCompleted();
             // File operations do not mutate playlists. Filesystem observations and
             // the saved-location validator reconcile changes from any application.
-            await RefreshAfterShellOperation();ShowShellResult(result);
+            CompleteShellOperation(result,refreshOwner);
         }
         catch(OperationCanceledException){if(!closing)Status.Text="操作已取消。";}
         catch(Exception error){RecordWebView($"FileOperation failed kind={kind} error={error}");if(!closing)ShowError(error);}

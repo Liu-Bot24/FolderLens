@@ -30,6 +30,10 @@ public sealed partial class MainWindow
         }
         suppressFilters=true;SelectTag(Category,"all");suppressFilters=false;AudioMute.IsChecked=true;
         await OpenRoot(source);await RefreshQuery();
+        // Exercise a delayed dispatcher/debounce without blocking the desktop.
+        // This affects only this isolated verification instance.
+        bool delayedSearch=Environment.GetCommandLineArgs().Contains("--verify-soak-delayed-search");
+        if(delayedSearch)searchTimer!.Interval=TimeSpan.FromMilliseconds(600);
         var samples=new List<object>();report["resources"]=samples;
         var retiredAudioPlayers=new List<WeakReference<MediaPlayer>>();
         var clock=Stopwatch.StartNew();int switches=0,mixedCycles=0;
@@ -47,11 +51,13 @@ public sealed partial class MainWindow
         }
         async Task SearchFor(string text)
         {
+            long before=queryRequest;
             Search.Text=text;
-            // TextChanged is queued by WinUI. Wait for the actual debounce/query
-            // path as a user would, instead of racing it with a second query.
-            await Task.Delay(350,lifetime.Token);
-            if(queryBusy)await queryCompletion;
+            // TextChanged and the debounce tick are dispatched asynchronously.
+            // Elapsed time alone does not prove the new filter was published.
+            await WaitUntil(()=>queryRequest>before&&searchTimer?.IsRunning!=true&&!queryBusy&&
+                lastAppliedFilter?.NamePathQuery==text,TimeSpan.FromSeconds(30));
+            report["lastSearchWait"]=new{text,before,after=queryRequest,timerRunning=searchTimer?.IsRunning,queryBusy,applied=lastAppliedFilter?.NamePathQuery};
         }
         try
         {
