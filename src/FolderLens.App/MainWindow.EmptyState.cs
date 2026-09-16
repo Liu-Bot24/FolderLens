@@ -23,8 +23,11 @@ public sealed partial class MainWindow
     {
         ResultSummary.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_)=>UpdateBrowserEmptyState());
         Status.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_)=>UpdateBrowserEmptyState());
+        DetailsHeaderScroll.SizeChanged+=(_,_)=>UpdateEmptyStateLayout();
+        DetailsPane.RegisterPropertyChangedCallback(UIElement.VisibilityProperty,(_,_)=>UpdateEmptyStateLayout());
         UpdateBrowserEmptyState();
     }
+    private void UpdateEmptyStateLayout()=>BrowserEmptyState.Margin=new Thickness(0,DetailsPane.Visibility==Visibility.Visible?DetailsHeaderScroll.ActualHeight:0,0,0);
     private void ShowBrowserError(Exception error)
     {
         browserEmptyError=UserMessages.Error(error);ResultSummary.Text="文件列表未加载完成";ShowError(error);UpdateBrowserEmptyState();
@@ -32,6 +35,7 @@ public sealed partial class MainWindow
     private void UpdateBrowserEmptyState()
     {
         UpdateCommandAvailability();
+        UpdateEmptyStateLayout();
         BrowserScanErrorBar.Message=browserScanError??"";
         BrowserScanErrorBar.IsOpen=browserScanError is not null;
         string? error=browserScanError??browserEmptyError;

@@ -471,8 +471,10 @@
             <TextBlock x:Name="TextSelectionStatus" TextWrapping="Wrap" />
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
               <StackPanel Orientation="Horizontal" Spacing="6">
-                <Button x:Name="ReaderPreviousPage" Content="上一页" Click="TextPrevious" />
-                <Button x:Name="ReaderNextPage" Content="下一页" Click="TextNext" />
+                <Button Content="上一个文件" Click="Previous" ToolTipService.ToolTip="上一个文件（←）" />
+                <Button Content="下一个文件" Click="Next" ToolTipService.ToolTip="下一个文件（→）" />
+                <Button x:Name="ReaderPreviousPage" Content="向上翻页" Click="TextPrevious" ToolTipService.ToolTip="向上翻页（↑ / 滚轮向上）" />
+                <Button x:Name="ReaderNextPage" Content="向下翻页" Click="TextNext" ToolTipService.ToolTip="向下翻页（↓ / 滚轮向下）" />
                 <Button x:Name="ReaderRenderMode" Content="查看原文" Click="ToggleMarkdown" Visibility="Collapsed" />
                 <Button Content="查找" Click="OpenReaderSearch" ToolTipService.ToolTip="在整个文档中查找（Ctrl+F）" />
                 <Button Content="A−" Click="DecreaseReaderFont" ToolTipService.ToolTip="缩小文字" AutomationProperties.Name="缩小文字" />

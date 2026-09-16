@@ -96,7 +96,12 @@ public sealed partial class MainWindow
         CopyPreviewPathButton.Visibility=PreviewFilePath.Visibility;
         bool video=selected?.Kind=="video",picture=selected?.Kind=="image";
         UpdateViewerLockToggle();
-        PreviewReturn.Visibility=immersive&&!fullScreen?Visibility.Visible:Visibility.Collapsed;
+        PreviewReturn.Visibility=Visibility.Collapsed;
+        WindowPreviewButton.Content=immersive||fullScreen?"返回列表":"窗口预览";
+        ToolTipService.SetToolTip(WindowPreviewButton,immersive||fullScreen?"返回当前文件列表（Esc）":"在当前窗口内查看所选文件");
+        UpdateNavigationButtons();
+        bool document=selected?.Kind is "text" or "markdown";
+        PreviewActions.Visibility=fullScreen||document?Visibility.Collapsed:Visibility.Visible;
         PreviewFit.Visibility=PreviewActual.Visibility=PreviewRotate.Visibility=picture?Visibility.Visible:Visibility.Collapsed;
         PreviewExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
         VideoExternalOpen.Visibility=PreviewExternalPlayer.Visibility;

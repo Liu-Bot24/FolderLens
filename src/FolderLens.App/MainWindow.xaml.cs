@@ -251,24 +251,21 @@ public sealed partial class MainWindow : Window
             replacingRoot=true;
             await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
             await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
-            monitor?.Dispose();monitor=null;
             bool ownedScan=backgroundScans.Any(s=>ReferenceEquals(s.Completion,scanTask));
             await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
             if(requested!=rootChangeVersion)return;
             scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-            activeBackgroundScan=null;
             var reusable=collectionScope?null:backgroundScans.FirstOrDefault(s=>string.Equals(s.Path,path,StringComparison.Ordinal)&&!s.Completion.IsCompleted);
             if(reusable is not null&&(reusable.Cancelled||forceRefresh||!reusable.Policy.HasSameScanPolicy(CurrentFilter())))
             {
                 reusable.Cancel();try{await reusable.Completion;}catch(OperationCanceledException){}reusable=null;
                 if(requested!=rootChangeVersion||closing)return;
             }
-            foreach(var finished in backgroundScans.Where(s=>s!=reusable&&s.Completion.IsCompleted).ToArray()){finished.Dispose();backgroundScans.Remove(finished);}
             if(collectionScope)
             {
                 await catalog.RefreshPlaylist(path[11..],scanStop.Token);
                 if(requested!=rootChangeVersion||closing)return;
-                root=path;rootId=path;epoch=requested;
+                root=path;rootId=path;epoch=requested;activeBackgroundScan=null;
             }
             else
             {
@@ -279,6 +276,8 @@ public sealed partial class MainWindow : Window
                 if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=reusable;
             }
             accepted=true;
+            monitor?.Dispose();monitor=null;
+            foreach(var finished in backgroundScans.Where(s=>s!=reusable&&s.Completion.IsCompleted).ToArray()){finished.Dispose();backgroundScans.Remove(finished);}
             if(recordHistory&&acceptedView is not null&&!string.Equals(acceptedView.Root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??acceptedView);
             advanced=requestedAdvanced;
             if(!preserveDirectoryScope&&acceptedView?.Root!=path&&advanced is not null)advanced=advanced with{DirectoryScope="",ScopeDirectFiles=false};
@@ -308,7 +307,7 @@ public sealed partial class MainWindow : Window
             var report=new Progress<ScanProgress>(p=>
             {
                 scanProgress[activeId]=(p,DateTimeOffset.UtcNow);if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;
-                Status.Text=$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
+                Status.Text=(advanced?.DirectoryScope is {Length:>0}?"后台根目录扫描：":"")+$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
                 if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
                 {
@@ -325,7 +324,7 @@ public sealed partial class MainWindow : Window
                 var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
                 activeBackgroundScan=new(activeId,activeRoot,activeEpoch,scannedPolicy,indexer.Priority,scanScheduler,lifetime.Token,
                     // Re-enumeration does not invalidate unchanged media metadata.
-                    token=>indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token),CreateScanMonitor);
+                    async token=>{var result=await indexer.Scan(activeId,activeRoot,activeEpoch,recursive,exclusions,report,token);if(verifyBackgroundScanCompletionBarrier is {} barrier)await barrier(token);return result;},CreateScanMonitor);
                 backgroundScans.Add(activeBackgroundScan);
                 _=ObserveBackgroundCompletion(activeBackgroundScan);
             }
@@ -372,6 +371,8 @@ public sealed partial class MainWindow : Window
                 replacingRoot=false;
                 if(!accepted&&acceptedView is not null)
                 {
+                    if(scanStop.IsCancellationRequested){scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);}
+                    scanTask=activeBackgroundScan?.Completion;
                     RootPath.Text=activeCollectionId is null?Path.Combine(acceptedView.Root,acceptedView.Filter.DirectoryScope):"收藏夹："+CollectionLabel(activeCollectionId);
                     queryBusy=false;UpdateNavigationButtons();
                 }
@@ -1114,8 +1115,8 @@ public sealed partial class MainWindow : Window
         previewFailure=null;if(!previewLoading&&loadingBadge is not null)loadingBadge.Visibility=Visibility.Collapsed;
         RecordPreviewStage(current,"textPresented");scanLog?.Write("text-window",new{request=current,encoding=page.Encoding,page.Start,page.Next,page.Length});
     }
-    private async void TextNext(object sender,RoutedEventArgs e){try{await LoadText(textNext,selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}}
-    private async void TextPrevious(object sender,RoutedEventArgs e){try{await LoadText(Math.Max(0,textStart-32*1024),selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}}
+    private async void TextNext(object sender,RoutedEventArgs e)=>await PageReader(1);
+    private async void TextPrevious(object sender,RoutedEventArgs e)=>await PageReader(-1);
     private async void TextJump(object sender,RoutedEventArgs e){try{await LoadText(checked((long)TextOffset.Value),selection,selectionStop.Token);}catch(Exception ex){ShowPreviewError(ex);}}
     private async void TextSearch(object sender,RoutedEventArgs e)
     {
@@ -1140,31 +1141,15 @@ public sealed partial class MainWindow : Window
             await markdownLoadGate.WaitAsync(token);entered=true;if(current!=selection||closing)return;
             markdownLoading=true;ScheduleMarkdownRelease();
             reply=await contentWorker.RenderMarkdown(document,Context(selected,current),token,textEncoding,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));if(current!=selection)return;
-            markdownImages.Clear();int resourceIndex=0;long resourceBytes=0,resourcePixels=0;
+            ResetMarkdownResources();
             foreach(var resource in reply.Message.Metadata!.Value.GetProperty("resources").EnumerateArray())
             {
-                token.ThrowIfCancellationRequested();try
-                {
-                    string path=await prefetchSourceProbe.ResolveImage(documentRoot,document,resource.GetProperty("relativeUrl").GetString()!,token);
-                    var imageStamp=await prefetchSourceProbe.Read(path,token);
-                    await thumbnailSlots.WaitAsync(token);
-                    var imageWorker=thumbnailPool.Dequeue();ImageReply? image=null;
-                    try
-                    {
-                        image=await imageWorker.Request(path,"thumbnail",new(documentRootId,documentEpoch,generation,current,1,1),new(1024,1024),token,imageStamp);
-                        if(current!=selection)return;
-                        if(await prefetchSourceProbe.Read(path,token)!=imageStamp)throw new IOException("Markdown 图片已发生变化。");
-                        long bytes=new FileInfo(image.AssetPath!).Length,pixels=1024L*1024;
-                        if(resourceBytes+bytes>32L*1024*1024||resourcePixels+pixels>32L*1024*1024){Status.Text="此文档的图片较多，部分图片未加载。";break;}
-                        markdownImages[resource.GetProperty("token").GetString()!]=await File.ReadAllBytesAsync(image.AssetPath!,token);resourceBytes+=bytes;resourcePixels+=pixels;if(++resourceIndex>=200)break;
-                    }
-                    finally{try{if(image is not null)await imageWorker.ReleaseAsset(image);}finally{thumbnailPool.Enqueue(imageWorker);thumbnailSlots.Release();}}
-                }
-                catch(Exception ex) when(ex is UnauthorizedAccessException or IOException or NotSupportedException or TimeoutException){if(current==selection&&!closing)Status.Text="部分 Markdown 图片无法显示；已保留文档内容。";}
+                string key=resource.GetProperty("token").GetString()!;
+                markdownResources.Add(key,new(documentRoot,document,resource.GetProperty("relativeUrl").GetString()!,resource.GetProperty("kind").GetString()=="video",new(documentRootId,documentEpoch,generation,current,1,1),current,token));
             }
             if(markdown is null)
             {
-                initializing=true;markdown=new WebView2();var view=markdown;MarkdownHost.Content=markdown;MarkdownHost.Visibility=Visibility.Visible;
+                initializing=true;markdown=new WebView2();markdown.PreviewKeyDown+=MarkdownPreviewKeyDown;var view=markdown;MarkdownHost.Content=markdown;MarkdownHost.Visibility=Visibility.Visible;
                 markdownStage="environment";string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");var environment=await CoreWebView2Environment.CreateWithOptionsAsync(Directory.Exists(fixedRuntime)?fixedRuntime:null,Path.Combine(RuntimeDataDirectory,"webview"),null).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);markdownStage="controller";await markdown.EnsureCoreWebView2Async(environment).AsTask().WaitAsync(TimeSpan.FromSeconds(5),token);
                 token.ThrowIfCancellationRequested();var core=markdown.CoreWebView2;core.Settings.IsScriptEnabled=false;core.Settings.AreHostObjectsAllowed=false;core.Settings.IsWebMessageEnabled=false;core.Settings.AreDevToolsEnabled=false;
                 core.NavigationCompleted+=(_,e)=>{if(!ReferenceEquals(markdown,view))return;RecordWebView($"NavigationCompleted success={e.IsSuccess} error={e.WebErrorStatus}");if(e.NavigationId==markdownNavigationId)navigationComplete?.TrySetResult(e.IsSuccess);};
@@ -1177,21 +1162,13 @@ public sealed partial class MainWindow : Window
                 core.NewWindowRequested+=(_,e)=>e.Handled=true;core.DownloadStarting+=(_,e)=>e.Cancel=true;core.PermissionRequested+=(_,e)=>e.State=CoreWebView2PermissionState.Deny;
                 core.NavigationStarting+=(_,e)=>{if(!ReferenceEquals(markdown,view)||closing){e.Cancel=true;return;}RecordWebView($"NavigationStarting user={e.IsUserInitiated}");if(markdownDocumentUrl.Length>0&&e.Uri.Split('#')[0]==markdownDocumentUrl){markdownNavigationId=e.NavigationId;return;}e.Cancel=true;if(e.IsUserInitiated&&Uri.TryCreate(e.Uri,UriKind.Absolute,out var uri)&&uri.Scheme is "https" or "http" && uri.Host!="folderlens.local")Process.Start(new ProcessStartInfo(e.Uri){UseShellExecute=true});};
                 core.AddWebResourceRequestedFilter("*",CoreWebView2WebResourceContext.All);
-                core.WebResourceRequested+=(_,e)=>
-                {
-                    if(!ReferenceEquals(markdown,view)||closing){e.Response=environment.CreateWebResourceResponse(null,403,"Forbidden","");return;}
-                    using var deferral=e.GetDeferral();var uri=new Uri(e.Request.Uri);string key=uri.Segments.LastOrDefault()??"";
-                    RecordWebView($"Resource context={e.ResourceContext} local={uri.Host=="folderlens.local"}");
-                    if(e.ResourceContext==CoreWebView2WebResourceContext.Document&&e.Request.Uri==markdownDocumentUrl)e.Response=environment.CreateWebResourceResponse(new MemoryStream(markdownDocument,false).AsRandomAccessStream(),200,"OK","Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff");
-                    else if(uri.Scheme=="https"&&uri.Host=="folderlens.local"&&markdownImages.TryGetValue(key,out var bytes)){e.Response=environment.CreateWebResourceResponse(new MemoryStream(bytes,false).AsRandomAccessStream(),200,"OK","Content-Type: image/png\r\nCache-Control: no-store");}
-                    else e.Response=environment.CreateWebResourceResponse(new MemoryStream().AsRandomAccessStream(),403,"Forbidden","Content-Type: text/plain");
-                };
+                core.WebResourceRequested+=async(_,e)=>await ServeMarkdownResource(view,environment,e);
                 initializing=false;
             }
-            if(current!=selection)return;markdownStage="navigation";markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();QualityLabel.Text="Markdown 排版 · 未加载网络资源";}
+            if(current!=selection)return;markdownStage="navigation";markdownDocument=await File.ReadAllBytesAsync(reply.AssetPath!,token);markdownDocumentUrl="https://folderlens.local/document/"+Guid.NewGuid().ToString("N");navigationComplete=new(TaskCreationOptions.RunContinuationsAsynchronously);markdown.CoreWebView2.Navigate(markdownDocumentUrl);MarkdownHost.Visibility=Visibility.Visible;TextScroll.Visibility=Visibility.Collapsed;QualityLabel.Text="正在显示 Markdown…";if(!await navigationComplete.Task.WaitAsync(TimeSpan.FromSeconds(5),token))throw new IOException("Markdown 导航失败。");if(current==selection){await ApplyMarkdownTextSize();await markdown.CoreWebView2.ExecuteScriptAsync(MarkdownViewportScript);QualityLabel.Text="Markdown 排版 · 未加载网络资源";}
         }
         catch(OperationCanceledException){if(entered&&initializing)ReleaseMarkdownView();}
-        catch(Exception ex){RecordWebView($"MarkdownFailure stage={markdownStage} type={ex.GetType().Name}");if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"无法按排版显示，已改为纯文本。{UserMessages.Error(ex)}";}}
+        catch(Exception ex){RecordWebView($"MarkdownFailure stage={markdownStage} type={ex.GetType().Name}");scanLog?.Write("markdown-failure",new{stage=markdownStage,type=ex.GetType().Name,ex.HResult,current,stillSelected=current==selection});if(entered)ReleaseMarkdownView();if(current==selection&&!closing){MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;QualityLabel.Text=$"无法按排版显示，已改为纯文本。{UserMessages.Error(ex)}";}}
         finally{try{if(reply is not null)await contentWorker.ReleaseAsset(reply);}finally{if(entered){markdownLoading=false;UpdateReaderControls();ScheduleMarkdownRelease();markdownLoadGate.Release();}}}
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}

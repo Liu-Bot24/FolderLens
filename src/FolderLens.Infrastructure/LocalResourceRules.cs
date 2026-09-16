@@ -19,7 +19,7 @@ public static class LocalResourceRules
         using var imageHandle=CreateFileW(candidate,0,7,IntPtr.Zero,3,0x02100000,IntPtr.Zero);if(imageHandle.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error());
         string actualRoot=FinalName(rootHandle).TrimEnd('\\'),actualImage=FinalName(imageHandle);
         if(!actualImage.StartsWith(actualRoot+"\\",StringComparison.Ordinal))throw new UnauthorizedAccessException("Markdown 图片不在当前根目录内。");
-        string extension=Path.GetExtension(actualImage).ToLowerInvariant();if(extension is not (".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp"))throw new NotSupportedException("该格式不用于 Markdown 内嵌预览。");
+        string extension=Path.GetExtension(actualImage).ToLowerInvariant();if(extension is not (".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp")&&!LocalMediaRange.IsVideo(actualImage))throw new NotSupportedException("该格式不用于 Markdown 内嵌预览。");
         return actualImage;
     }
     private static string FinalName(SafeFileHandle handle)

@@ -23,11 +23,23 @@ public sealed partial class MainWindow
         wholeTextSelected=false;
         if(TextSelectionStatus is not null)TextSelectionStatus.Text="";
     }
-    private void TextPreviewKeyDown(object sender,KeyRoutedEventArgs e)
+    private async void TextPreviewKeyDown(object sender,KeyRoutedEventArgs e)
     {
+        if(ViewerModifiers()==VirtualKeyModifiers.None&&e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        {
+            e.Handled=true;
+            if(e.Key==VirtualKey.Left)Navigate(-1);else if(e.Key==VirtualKey.Right)Navigate(1);else await PageReader(e.Key==VirtualKey.Up?-1:1);
+            return;
+        }
         if(ViewerModifiers()!=VirtualKeyModifiers.Control)return;
         if(e.Key==VirtualKey.A){e.Handled=true;SelectWholeText(sender,new());}
         else if(e.Key==VirtualKey.C){e.Handled=true;CopyTextSelection(sender,new());}
+    }
+    private async void MarkdownPreviewKeyDown(object sender,KeyRoutedEventArgs e)
+    {
+        if(e.Handled||ViewerModifiers()!=VirtualKeyModifiers.None||e.Key is not(VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down))return;
+        e.Handled=true;
+        if(e.Key==VirtualKey.Left)Navigate(-1);else if(e.Key==VirtualKey.Right)Navigate(1);else await PageReader(e.Key==VirtualKey.Up?-1:1);
     }
     private void CancelTextCopy(object sender,RoutedEventArgs e)
     {

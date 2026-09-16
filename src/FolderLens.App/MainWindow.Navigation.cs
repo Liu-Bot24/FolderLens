@@ -9,11 +9,12 @@ public sealed partial class MainWindow
     private readonly NavigationHistory<SavedView> navigationHistory=new();
     private void UpdateNavigationButtons()
     {
-        BackButton.IsEnabled=navigationHistory.CanGoBack;
+        BackButton.IsEnabled=immersive||fullScreen||navigationHistory.CanGoBack;
         ForwardButton.IsEnabled=navigationHistory.CanGoForward;
     }
     private async Task NavigateHistory(bool forward)
     {
+        if(!forward&&(immersive||fullScreen)){await ReturnToBrowser();UpdateNavigationButtons();return;}
         if(forward?!navigationHistory.CanGoForward:!navigationHistory.CanGoBack)return;
         await ReturnToBrowser();
         var target=forward?navigationHistory.GoForward(CaptureView()):navigationHistory.GoBack(CaptureView());

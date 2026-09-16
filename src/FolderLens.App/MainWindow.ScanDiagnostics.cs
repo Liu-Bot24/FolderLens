@@ -30,9 +30,10 @@ public sealed partial class MainWindow
     private string ScanStatusDescription()
     {
         if(activeBackgroundScan is not {} scan)return Status.Text;
-        if(scanScheduler.IsWaiting(scan.RootId))return "正在等待当前批次结束，即将继续扫描此文件夹。";
+        string scope=advanced?.DirectoryScope is {Length:>0}?"后台根目录扫描：":"";
+        if(scanScheduler.IsWaiting(scan.RootId))return scope+"正在等待当前批次结束，即将继续扫描此文件夹。";
         if(scanProgress.TryGetValue(scan.RootId,out var p))
-            return $"已发现 {p.Progress.Files:N0} 个文件、{p.Progress.Directories:N0} 个文件夹"+((DateTimeOffset.UtcNow-p.At).TotalSeconds>=30?"；扫描暂未取得新进展，可停止或刷新。":"。");
-        return (DateTimeOffset.UtcNow-scan.RequestedAt).TotalSeconds>=30?"扫描尚未返回文件；可停止扫描或刷新重试。":"正在读取文件夹，尚未发现文件。";
+            return scope+$"已发现 {p.Progress.Files:N0} 个文件、{p.Progress.Directories:N0} 个文件夹"+((DateTimeOffset.UtcNow-p.At).TotalSeconds>=30?"；扫描暂未取得新进展，可停止或刷新。":"。");
+        return scope+((DateTimeOffset.UtcNow-scan.RequestedAt).TotalSeconds>=30?"扫描尚未返回文件；可停止扫描或刷新重试。":"正在读取文件夹，尚未发现文件。");
     }
 }

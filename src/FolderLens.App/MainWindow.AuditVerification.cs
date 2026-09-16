@@ -17,8 +17,8 @@ public sealed partial class MainWindow
         await SelectBrowserOrdinal(results!,0,lifetime.Token);await SetImmersive(true);
         if(!immersive)throw new InvalidOperationException("未进入沉浸查看。");
         await OpenRoot(target);if(metadataTask is not null)await metadataTask;
-        report["resultCount"]=resultHandle?.Count??-1;report["viewerStillOpen"]=immersive;report["rootMatches"]=root==target;
-        if(immersive||root!=target||resultHandle?.Count!=12)throw new InvalidOperationException("从沉浸看图打开含图目录后，没有恢复浏览结果。");
+        report["resultCount"]=resultHandle?.Count??-1;report["viewerStillOpen"]=immersive;report["rootMatches"]=BrowsedDirectory==target;report["scanRoot"]=root;report["browsedDirectory"]=BrowsedDirectory;
+        if(immersive||BrowsedDirectory!=target||RootPath.Text!=target||resultHandle?.Count!=12)throw new InvalidOperationException("从沉浸看图打开含图目录后，没有恢复浏览结果。");
         report["status"]="PASS";
     }
     private async Task VerifySlideTickRace(string directory,Dictionary<string,object> report)

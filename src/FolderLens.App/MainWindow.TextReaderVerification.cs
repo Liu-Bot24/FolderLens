@@ -34,7 +34,7 @@ public sealed partial class MainWindow
                 string zoomValue=await markdown!.CoreWebView2.ExecuteScriptAsync("document.body.style.zoom");
                 if(zoomValue!="\"1.125\"")failures.Add("Markdown 字号没有跟随阅读按钮");
                 if(markdown.CoreWebView2.Settings.IsScriptEnabled)failures.Add("阅读字号意外允许文档脚本执行");
-                if(markdownImages.Count!=1)failures.Add("隔离资源核验没有只加载允许的本地图片");
+                await WaitUntil(()=>markdownImages.Count==1,TimeSpan.FromSeconds(10));
                 string imageReady=await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).some(image=>image.naturalWidth>0)");
                 if(imageReady!="true")failures.Add("允许的本地图片没有在 Markdown 阅读区显示");
                 report["isolatedMarkdownImageDisplayed"]=imageReady=="true";
@@ -43,21 +43,36 @@ public sealed partial class MainWindow
             }
             else if(ReaderRenderMode.Visibility!=Visibility.Collapsed)failures.Add("TXT 出现了不适用的排版按钮");
             await ResizeReaderFont(-2);
-            if(ReaderNextPage.IsEnabled||ReaderPreviousPage.IsEnabled)failures.Add("单页文档仍允许翻到空白页");
+
             var list=FilesGrid.ItemsSource;string beforeRoot=root;var current=selected;
             await SetImmersive(true);
             Shell.UpdateLayout();
-            if(PreviewReturn.ActualWidth<96)failures.Add("返回文件列表文字被图标按钮宽度裁切");
-            var exit=PreviewActions.Children.OfType<Button>().FirstOrDefault(b=>b.Content as string=="返回文件列表");
-            if(exit is null||exit.Visibility!=Visibility.Visible)failures.Add("阅读页没有返回文件列表入口");
-            else
-            {
-                ((IInvokeProvider)new ButtonAutomationPeer(exit).GetPattern(PatternInterface.Invoke)).Invoke();
-                await WaitUntil(()=>!immersive,TimeSpan.FromSeconds(3));
-            }
+            UpdateReaderControls();
+            if(TextScroll.ScrollableHeight<=0.5&&(ReaderNextPage.IsEnabled||ReaderPreviousPage.IsEnabled))failures.Add("完整显示的短文档仍允许翻到空白页");
+            if(WindowPreviewButton.Content as string!="返回列表"||PreviewReturn.Visibility!=Visibility.Collapsed||PreviewActions.Visibility!=Visibility.Collapsed)failures.Add("预览入口或多余工具行不符合当前阅读布局");
+            if(!BackButton.IsEnabled)failures.Add("窗口预览时返回按钮未启用");
+            await NavigateHistory(false);
             if(immersive)await ReturnToBrowser();
             if(root!=beforeRoot||!ReferenceEquals(list,FilesGrid.ItemsSource)||!ReferenceEquals(current,selected))failures.Add("返回阅读列表改变了目录、结果或选择");
         }
+        await ReturnToBrowser();
+        string longText=string.Concat(Enumerable.Range(0,3000).Select(i=>$"第{i:D4}行 中文与 emoji 🐈 文本翻页边界。\r\n"));
+        await File.WriteAllTextAsync(Path.Combine(source,"long-reader.txt"),longText);
+        await RefreshCurrentRoot();await RefreshQuery();
+        long longOrdinal=(await catalog!.FindOrdinal(resultHandle!.Id,"long-reader.txt"))!.Value;
+        await SelectBrowserOrdinal(results!,checked((int)longOrdinal),lifetime.Token);await SetImmersive(true);Shell.UpdateLayout();
+        long initialStart=textStart,initialNext=textNext;string initialText=TextContent.Text;
+        await PageReader(1);Shell.UpdateLayout();
+        if(textStart!=initialStart||TextScroll.VerticalOffset<=0)failures.Add("向下翻页没有先滚动当前读取块");
+        TextScroll.ChangeView(null,TextScroll.ScrollableHeight,null,true);await Task.Delay(50);
+        await PageReader(1);Shell.UpdateLayout();
+        if(textStart!=initialNext||TextScroll.VerticalOffset>1)failures.Add("块末尾没有连续进入下一读取块顶部");
+        await PageReader(-1);Shell.UpdateLayout();
+        if(textStart!=initialStart||TextContent.Text!=initialText||TextScroll.VerticalOffset<TextScroll.ScrollableHeight-1)failures.Add("返回上一块丢字、重复或未定位块底部");
+        await LoadText(0,selection,selectionStop.Token);Shell.UpdateLayout();await PageReader(-1);
+        if(textStart!=0||TextScroll.VerticalOffset>1)failures.Add("文档开头向上翻页越界");
+        report["longTextViewportAndChunkNavigation"]=failures.Count==0;
+        await ReturnToBrowser();
         report["failures"]=failures;
         if(failures.Count>0)throw new InvalidOperationException(string.Join("；",failures));
         report["status"]="PASS";

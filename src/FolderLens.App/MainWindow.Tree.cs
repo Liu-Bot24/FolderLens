@@ -205,6 +205,9 @@ public sealed partial class MainWindow
     }
     private void ApplyTreePage(TreeViewNode node,TreeListing state,IReadOnlyList<string> paths)
     {
+        // An ancestor loaded from the filesystem must not keep an old catalog
+        // routing tag: expanding it again would replace fresh siblings with stale rows.
+        node.Content=state.Folder;
         var selectedBefore=FolderTree.SelectedNode;
         // Keep the selected ancestor chain reachable even while browsing another sibling page.
         TreeViewNode? pinned=activeTreeRoot;

@@ -17,6 +17,32 @@ public sealed partial class MainWindow
     private bool textSearchRunning;
     private bool restoringTextEncoding;
     private TextWindow? displayedText;
+    private bool readerPaging;
+    private async Task PageReader(int direction)
+    {
+        if(readerPaging||selected?.Kind is not ("text" or "markdown"))return;
+        readerPaging=true;long current=selection;
+        try
+        {
+            if(MarkdownHost.Visibility==Visibility.Visible&&markdown?.CoreWebView2 is {} core)
+            {await core.ExecuteScriptAsync($"window.scrollBy(0,window.innerHeight*{(direction<0?"-0.9":"0.9")})");return;}
+            if(displayedText is null)return;
+            double offset=TextScroll.VerticalOffset,extent=TextScroll.ScrollableHeight;
+            if(direction<0&&offset>0.5||direction>0&&offset<extent-0.5)
+            {TextScroll.ChangeView(null,Math.Clamp(offset+direction*Math.Max(32,TextScroll.ViewportHeight*.9),0,extent),null,true);return;}
+            if(direction>0&&textNext<displayedText.Length)await LoadText(textNext,current,selectionStop.Token);
+            else if(direction<0&&textStart>0)
+            {await LoadText(Math.Max(0,textStart-32*1024),current,selectionStop.Token);if(current==selection){TextScroll.UpdateLayout();TextScroll.ChangeView(null,TextScroll.ScrollableHeight,null,true);}}
+        }
+        catch(OperationCanceledException){}catch(Exception ex){if(current==selection)ShowPreviewError(ex);}
+        finally{readerPaging=false;UpdateReaderControls();}
+    }
+    private async void ReaderWheel(object sender,PointerRoutedEventArgs e)
+    {
+        if(ViewerModifiers()!=VirtualKeyModifiers.None||TextScroll.Visibility!=Visibility.Visible)return;
+        var point=e.GetCurrentPoint(TextScroll);if(point.Properties.IsHorizontalMouseWheel||point.Properties.MouseWheelDelta==0)return;
+        e.Handled=true;await PageReader(point.Properties.MouseWheelDelta>0?-1:1);
+    }
     private void OpenReaderSearch(object sender,RoutedEventArgs e){viewerFindPending=true;TextToolsFlyout.ShowAt(TextTools);}
     private async void DecreaseReaderFont(object sender,RoutedEventArgs e)=>await ResizeReaderFont(-2);
     private async void IncreaseReaderFont(object sender,RoutedEventArgs e)=>await ResizeReaderFont(2);
@@ -37,9 +63,9 @@ public sealed partial class MainWindow
         bool rendered=MarkdownHost.Visibility==Visibility.Visible;
         ReaderRenderMode.Visibility=selected?.Kind=="markdown"?Visibility.Visible:Visibility.Collapsed;
         ReaderRenderMode.Content=rendered?"查看原文":"阅读排版";
-        ReaderPreviousPage.Visibility=ReaderNextPage.Visibility=rendered?Visibility.Collapsed:Visibility.Visible;
-        ReaderPreviousPage.IsEnabled=displayedText is not null&&textStart>0;
-        ReaderNextPage.IsEnabled=displayedText is {} page&&page.Next<page.Length;
+        ReaderPreviousPage.Visibility=ReaderNextPage.Visibility=Visibility.Visible;
+        ReaderPreviousPage.IsEnabled=rendered||displayedText is not null&&(textStart>0||TextScroll.VerticalOffset>0.5);
+        ReaderNextPage.IsEnabled=rendered||displayedText is {} page&&(page.Next<page.Length||TextScroll.VerticalOffset<TextScroll.ScrollableHeight-0.5);
     }
     private Task ResetTextSession()
     {

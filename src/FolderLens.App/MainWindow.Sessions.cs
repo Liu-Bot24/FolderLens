@@ -76,9 +76,15 @@ public sealed partial class MainWindow
                 if(closing||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion)return;
                 reconcilePending=true;PreferScanDirectory(rootId,saved.Filter.DirectoryScope);
             }
-            ApplySavedFilter(saved.Filter);RootPath.Text=saved.Root;DetailsMode.IsChecked=saved.Details;UpdatePathPresentationControl();
+            ApplySavedFilter(saved.Filter);RootPath.Text=activeCollectionId is null?Path.Combine(saved.Root,saved.Filter.DirectoryScope):"收藏夹："+CollectionLabel(activeCollectionId);DetailsMode.IsChecked=saved.Details;UpdatePathPresentationControl();
             if(sameRoot)
             {
+                if(activeCollectionId is null)
+                {
+                    ShowTreeRoot(BrowsedDirectory);
+                    if(activeTreeRoot is {} node)node.Content=new FolderNode(BrowsedDirectory,(node.Content as FolderNode)?.Label??FolderLabel(BrowsedDirectory),rootId,saved.Filter.DirectoryScope,root,Icon:(node.Content as FolderNode)?.Icon);
+                    QueueTreeRefresh();
+                }
                 if(recordHistory&&previous is not null)navigationHistory.VisitFrom(previous);UpdateNavigationButtons();
                 await RefreshQuery(preserveViewport:false);
             }

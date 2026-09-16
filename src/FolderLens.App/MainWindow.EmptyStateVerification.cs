@@ -14,7 +14,7 @@ public sealed partial class MainWindow
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;
         verifyCandidateBarrier=_=>throw new IOException("增量查询失败");
         try{await RefreshQuery(scanPreview:true);}finally{verifyCandidateBarrier=null;}
-        if(ResultSummary.Text!="浏览结果未完成")failures.Add("增量查询失败摘要被旧匹配数量覆盖");
+        if(ResultSummary.Text!="文件列表未加载完成")failures.Add("增量查询失败摘要被旧匹配数量覆盖");
         foreach(bool failPublication in new[]{false,true})
         {
             suppressFilters=true;Search.Text="__no_match__";suppressFilters=false;await RefreshQuery();
@@ -57,6 +57,12 @@ public sealed partial class MainWindow
         await OpenRoot(empty);if(metadataTask is not null)await metadataTask;
         if(BrowserEmptyState.Visibility!=Visibility.Visible||BrowserEmptyTitle.Text!="当前视图没有可显示的文件")throw new InvalidOperationException("真实空目录状态不明确。");
         await Capture("empty");
+        DetailsMode.IsChecked=true;ToggleView(DetailsMode,new());Shell.UpdateLayout();
+        var headerBounds=DetailsHeaderScroll.TransformToVisual(Shell).TransformBounds(new Windows.Foundation.Rect(0,0,DetailsHeaderScroll.ActualWidth,DetailsHeaderScroll.ActualHeight));
+        var emptyBounds=BrowserEmptyState.TransformToVisual(Shell).TransformBounds(new Windows.Foundation.Rect(0,0,BrowserEmptyState.ActualWidth,BrowserEmptyState.ActualHeight));
+        if(headerBounds.Height<=0||emptyBounds.Top<headerBounds.Bottom-.5)throw new InvalidOperationException("Details empty state overlaps the column header.");
+        report["detailsHeaderBottom"]=headerBounds.Bottom;report["detailsEmptyTop"]=emptyBounds.Top;
+        await Capture("details-empty");DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());Shell.UpdateLayout();
         // Presentation-only scan/cancel states: no fabricated catalog or progress.
         var priorScan=scanTask;var pendingScan=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         scanTask=pendingScan.Task;UpdateBrowserEmptyState();
@@ -67,7 +73,8 @@ public sealed partial class MainWindow
         await OpenRoot(empty);if(metadataTask is not null)await metadataTask;
         verifyCandidateBarrier=_=>throw new UnauthorizedAccessException("无法读取当前目录。");
         try{await RefreshQuery();}finally{verifyCandidateBarrier=null;}
-        if(BrowserEmptyTitle.Text!="暂时无法显示浏览结果"||BrowserEmptyDescription.Text!="无法读取当前目录。"||ResultSummary.Text!="浏览结果未完成")throw new InvalidOperationException("查询失败没有显示原因或仍显示加载中。");
+        report["failurePresentation"]=new{title=BrowserEmptyTitle.Text,description=BrowserEmptyDescription.Text,summary=ResultSummary.Text};
+        if(BrowserEmptyTitle.Text!="暂时无法显示浏览结果"||BrowserEmptyDescription.Text!="没有访问权限，请检查文件或文件夹的权限。"||ResultSummary.Text!="文件列表未加载完成")throw new InvalidOperationException("查询失败没有显示原因或仍显示加载中。");
         await Capture("error");
         const string newerStatus="新的目录状态";
         verifyCandidateBarrier=_=>{queryRequest++;Status.Text=newerStatus;return Task.FromException(new IOException("过期查询错误"));};

@@ -38,6 +38,7 @@ public sealed partial class MainWindow
         string tag=(await catalog.CreateCollection("Markdown 来源验证")).Id;await catalog.ChangeCollectionMembers([tag],[item.EntryId],true);
         await RefreshCollectionsTree();await OpenCollection(tag);
         var row=(FileRow)results![0]!;await results.EnsureLoaded(row,lifetime.Token);await SelectPreview(row);
+        await WaitUntil(()=>markdownImages.Count==1,TimeSpan.FromSeconds(10));
         report["webviewEvents"]=webviewEvents.ToArray();
         if(MarkdownHost.Visibility!=Visibility.Visible||markdownImages.Count!=1)throw new InvalidOperationException("收藏 Markdown 没有使用物理源根加载本地内嵌图片："+QualityLabel.Text);
         if(WindowFocus.IsForeground(this))throw new InvalidOperationException("Markdown 后台验证抢占前台。");

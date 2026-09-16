@@ -78,6 +78,8 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-demand-audit")||arguments.Contains("--verify-file-operation-close")){await VerifyDemandAudit(source,report);return;}
             if(arguments.Contains("--verify-demand-layout")){await VerifyDemandLayout(source,report);return;}
             if(arguments.Contains("--verify-pro-scan-closeout")){await VerifyProScanCloseout(source,report);return;}
+            if(arguments.Contains("--verify-rejected-root-monitor")){await VerifyRejectedRootMonitor(source,report);return;}
+            if(arguments.Contains("--verify-directory-navigation")){await VerifyDirectoryNavigation(source,report);return;}
             if(arguments.Contains("--verify-format-choices")){await VerifyFormatChoices(source,report);return;}
             if(arguments.Contains("--verify-navigation-roots")){await VerifyNavigationRoots(source,report);return;}
             if(arguments.Contains("--verify-filter-panel")){await VerifyFilterPanelLayout(report);return;}
@@ -85,6 +87,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-menu-availability")){await VerifyMenuAvailability(source,report);return;}
             if(arguments.Contains("--verify-prefetch-adoption")){await VerifyPrefetchAdoption(source,report);return;}
             if(arguments.Contains("--verify-wheel-distance")){await VerifyWheelDistance(source,report);return;}
+            if(arguments.Contains("--verify-long-image-wheel")){await VerifyLongImageWheel(source,report);return;}
             if(arguments.Contains("--verify-prepared-cache")){await VerifyPreparedCache(source,report);return;}
             if(arguments.Contains("--verify-prefetch-turnaround")){await VerifyPrefetchTurnaround(source,report);return;}
             if(arguments.Any(arg=>arg.StartsWith("--verify-scan-audit-"))){await VerifyScanAudit(source,report);return;}
@@ -105,6 +108,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-fit-lock")){await VerifyFitLock(source,report);return;}
             if(arguments.Contains("--verify-first-page")){await VerifyFirstPage(source,report);return;}
             if(arguments.Contains("--verify-text-reader")){await VerifyTextReader(source,report);return;}
+            if(arguments.Contains("--verify-markdown-demand")){await VerifyMarkdownDemand(source,report);return;}
             if(arguments.Contains("--verify-selection-appearance")){await VerifySelectionAppearance(source,report);return;}
             if(arguments.Contains("--verify-directory-filter")){await VerifyDirectoryFilter(source,report);return;}
             if(arguments.Contains("--verify-filmstrip")){await VerifyFilmstrip(report);return;}
@@ -204,8 +208,8 @@ public sealed partial class MainWindow
             var siblings=activeTreeRoot?.Parent?.Children.Select(node=>(node.Content as FolderNode)?.Path).ToArray()??[];
             if(!siblings.Contains(first)||!siblings.Contains(second))throw new InvalidOperationException("祖先目录未显示完整兄弟文件夹。");
             await OpenRoot(second);if(resultHandle?.Count!=2)throw new InvalidOperationException("切换另一目录仍显示旧结果。");
-            await NavigateHistory(false);if(root!=first||resultHandle?.Count!=13)throw new InvalidOperationException("返回未恢复对应目录结果。");
-            await NavigateHistory(true);if(root!=second||resultHandle?.Count!=2)throw new InvalidOperationException("前进未恢复对应目录结果。");
+            await NavigateHistory(false);if(BrowsedDirectory!=first||RootPath.Text!=first||resultHandle?.Count!=13)throw new InvalidOperationException("返回未恢复对应目录结果。");
+            await NavigateHistory(true);if(BrowsedDirectory!=second||RootPath.Text!=second||resultHandle?.Count!=2)throw new InvalidOperationException("前进未恢复对应目录结果。");
             report["directoryTreeAndHistory"]=true;
             string third=Path.Combine(source,"C");Directory.CreateDirectory(third);
             await RefreshAncestors(activeTreeRoot!,rootChangeVersion,physicalTreeStop.Token);var ancestor=activeTreeRoot!.Parent!;
@@ -254,9 +258,10 @@ public sealed partial class MainWindow
             var normalCache=thumbnailCache;await using var unavailableCache=new ThumbnailCache(Path.Combine(dataDirectory,"unavailable-cache"),new(){MinimumFreeBytes=long.MaxValue});await unavailableCache.Initialize();
             try
             {
+                int warningsBefore=webviewEvents.Count(message=>message.StartsWith("ThumbnailCache: ",StringComparison.Ordinal));
                 thumbnailCache=unavailableCache;var visibleRow=visible.First(item=>item.Item is not null);visibleRow.Thumbnail=null;await LoadThumbnail(FilesGrid,visibleRow);
                 if(visibleRow.Thumbnail is null||visibleRow.ThumbnailError.Length>0)throw new InvalidOperationException("缓存空间保护拒绝写入后，已解码图片没有显示。");
-                if(!Status.Text.Contains("缓存"))throw new InvalidOperationException("缓存写入警告未显示。");
+                if(webviewEvents.Count(message=>message.StartsWith("ThumbnailCache: ",StringComparison.Ordinal))<=warningsBefore)throw new InvalidOperationException("缓存写入警告未记录。");
             }
             finally{thumbnailCache=normalCache;}
             report["cacheWriteFailureStillDisplaysImage"]=true;

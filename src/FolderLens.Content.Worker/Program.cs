@@ -28,6 +28,12 @@ while(pipe.IsConnected)
             var data=await textSession.Execute(request);
             response=response with{Status="ok",Metadata=JsonSerializer.SerializeToElement(data,WorkerProtocol.Json)};
         }
+        else if(request.Operation=="mediaRange")
+        {
+            var input=JsonSerializer.Deserialize<ApprovedInput>(await File.ReadAllTextAsync(Path.Combine(directory,request.FileRef.InputToken+".input.json")),WorkerProtocol.Json)??throw new InvalidDataException();
+            var range=request.Parameters!.Value.GetProperty("range").GetString();
+            response=response with{Status="ok",Metadata=JsonSerializer.SerializeToElement(LocalMediaRange.Read(input,range))};
+        }
         else
         {
         if(request.Operation!="markdownRender")throw new NotSupportedException();
@@ -48,7 +54,7 @@ while(pipe.IsConnected)
             if(lines>50_000)throw new InvalidDataException("MarkdownLineLimit");
         }
         var pipeline=new MarkdownPipelineBuilder().UsePipeTables().UseTaskLists().UseAutoLinks().DisableHtml().Build();var document=Markdown.Parse(source,pipeline);
-        var resources=new List<object>();int count=0;
+        var resources=new List<object>();var videos=new HashSet<string>(StringComparer.Ordinal);int count=0;
         foreach(var node in document.Descendants())
         {
             if(++count>100_000)throw new InvalidDataException("MarkdownAstLimit");
@@ -58,14 +64,17 @@ while(pipe.IsConnected)
                 string target=link.Url??"";
                 if(resources.Count<200 && target.Length<4096 && !Uri.TryCreate(target,UriKind.Absolute,out _) && !target.StartsWith('\\'))
                 {
-                    string token=Guid.NewGuid().ToString("N");resources.Add(new{token,relativeUrl=target});link.Url="https://folderlens.local/assets/"+token;
+                    string token=Guid.NewGuid().ToString("N");bool video=LocalMediaRange.IsVideo(target);
+                    resources.Add(new{token,relativeUrl=target,kind=video?"video":"image"});link.Url="https://folderlens.local/assets/"+token;
+                    if(video)videos.Add(link.Url);
                 }
                 else {link.IsImage=false;link.Url="#";}
             }
             else if(link.Url is {} url && !url.StartsWith('#') && (!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme is not ("http" or "https"))){link.Url="#";}
         }
-        using var writer=new BoundedHtmlWriter(16*1024*1024);var renderer=new HtmlRenderer(writer);pipeline.Setup(renderer);renderer.Render(document);writer.Flush();
-        string html="<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https://folderlens.local;\"><style>body{font:16px/1.65 'Segoe UI',sans-serif;max-width:80ch;margin:24px;color:#222;background:#fff}img{max-width:100%;height:auto}pre{overflow:auto;padding:12px;background:#f0f2f5}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px}a{color:#2466b0}</style></head><body>"+writer+"</body></html>";
+        using var writer=new BoundedHtmlWriter(16*1024*1024);var renderer=new HtmlRenderer(writer);pipeline.Setup(renderer);
+        renderer.ObjectRenderers.Insert(0,new LocalMediaRenderer(videos));renderer.Render(document);writer.Flush();
+        string html="<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https://folderlens.local; media-src https://folderlens.local;\"><style>body{font:16px/1.65 'Segoe UI',sans-serif;max-width:80ch;margin:24px;color:#222;background:#fff}img,video{max-width:100%;height:auto}img:not([data-sized]){display:block;width:100%;height:160px;background:#f0f2f5}video{display:block;width:100%;min-height:180px;background:#111}pre{overflow:auto;padding:12px;background:#f0f2f5}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px}a{color:#2466b0}</style></head><body>"+writer+"</body></html>";
         if(Encoding.UTF8.GetByteCount(html)>16*1024*1024)throw new InvalidDataException("MarkdownHtmlLimit");
         await File.WriteAllTextAsync(Path.Combine(directory,request.RequestId+".html"),html,new UTF8Encoding(false));
         input.Observe(FileReadObservation.Read(stream.SafeFileHandle));input.Observe(FileReadObservation.Read(input.Path));

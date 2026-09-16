@@ -91,6 +91,9 @@ public sealed partial class MainWindow
         PreviewSurface.MagnifierDraw+=DrawViewerMagnifier;
         TextToolsFlyout.Opened+=(_,_)=>{if(viewerFindPending){viewerFindPending=false;FocusIfForeground(TextQuery,FocusState.Keyboard);TextQuery.SelectAll();}};
         PreviewSurface.InputSurface=ImageInput;ImageInput.IsTabStop=true;UpdateViewerCursor();
+        TextScroll.AddHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler(ReaderWheel),true);
+        TextScroll.ViewChanged+=(_,_)=>UpdateReaderControls();
+        TextScroll.SizeChanged+=(_,_)=>UpdateReaderControls();
         BuildViewerContextMenu();
     }
     private async void ViewerKeyDown(object sender,KeyRoutedEventArgs e)
@@ -119,6 +122,7 @@ public sealed partial class MainWindow
         if(binding.Action is ViewerAction.RenameFile or ViewerAction.DeleteFile)return selected.Item is not null&&!fileOperationBusy&&(immersive||fullScreen||IsInFileList(source)||IsInViewerSurface(source));
         if(binding.Action==ViewerAction.CopyFilePath)return selected.Item is not null;
         if(selected.Kind=="video")return binding.Action is ViewerAction.Previous or ViewerAction.Next or ViewerAction.First or ViewerAction.Last or ViewerAction.Left or ViewerAction.Right or ViewerAction.ContextMenu;
+        if(selected.Kind is "text" or "markdown")return binding.Action is ViewerAction.Previous or ViewerAction.Next or ViewerAction.Left or ViewerAction.Right or ViewerAction.Up or ViewerAction.Down;
         if(selected.Kind!="image")return false;
         if(binding.Action is ViewerAction.Left or ViewerAction.Right or ViewerAction.Up or ViewerAction.Down)
             return immersive||IsInViewerSurface(source);
@@ -183,6 +187,12 @@ public sealed partial class MainWindow
                 case ViewerAction.First: if(selected is not null)Navigate(-(int)selected.Ordinal);return;
                 case ViewerAction.Last: if(selected is not null)Navigate((results?.Count??firstPageSequence.Length)-1-(int)selected.Ordinal);return;
                 case ViewerAction.ContextMenu: ShowViewerContextMenu(new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
+            }
+            if(selected?.Kind is "text" or "markdown")
+            {
+                if(action==ViewerAction.Left)Navigate(-1);else if(action==ViewerAction.Right)Navigate(1);
+                else if(action is ViewerAction.Up or ViewerAction.Down)await PageReader(action==ViewerAction.Up?-1:1);
+                return;
             }
             if(selected?.Kind=="video")
             {
@@ -250,9 +260,16 @@ public sealed partial class MainWindow
     {
         if(e.Handled||selected is null||selected.Kind is not ("image" or "video"))return;
         var point=e.GetCurrentPoint(ImageCanvas);int delta=point.Properties.MouseWheelDelta;if(delta==0)return;e.Handled=true;ResetViewerGesture();WakeViewerCursor(point.Position);
+        await ApplyViewerWheel(delta,point.Position,ViewerModifiers(),point.Properties.IsHorizontalMouseWheel);
+    }
+    private async Task ApplyViewerWheel(int delta,Point position,VirtualKeyModifiers modifiers,bool horizontalWheel=false)
+    {
+        if(selected is null)return;
         try
         {
-            bool control=(ViewerModifiers()&VirtualKeyModifiers.Control)!=0;
+            bool control=(modifiers&VirtualKeyModifiers.Control)!=0;
+            if(selected.Kind=="image"&&(modifiers&VirtualKeyModifiers.Menu)!=0)
+            {PanViewerScreen(new(0,delta*.75f));await RefreshViewerPixels();return;}
             if(selected.Kind=="video")
             {
                 if(control)return;
@@ -262,8 +279,8 @@ public sealed partial class MainWindow
             if(!control&&effectiveWheel=="next")
             {await NavigateViewerWheel(delta);return;}
             if(!control&&effectiveWheel=="pan")
-            {bool horizontal=point.Properties.IsHorizontalMouseWheel||wheelBehavior=="next"&&viewerScaleIntent==ViewerScaleIntent.Height;PanViewerScreen(horizontal?new(delta*.75f,0):new(0,delta*.75f));await RefreshViewerPixels();return;}
-            await ZoomViewerAt(EffectiveScale()*Math.Pow(1.2,delta/120.0),point.Position);
+            {bool horizontal=horizontalWheel||wheelBehavior=="next"&&viewerScaleIntent==ViewerScaleIntent.Height;PanViewerScreen(horizontal?new(delta*.75f,0):new(0,delta*.75f));await RefreshViewerPixels();return;}
+            await ZoomViewerAt(EffectiveScale()*Math.Pow(1.2,delta/120.0),position);
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
     }

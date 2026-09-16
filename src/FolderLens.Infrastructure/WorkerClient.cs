@@ -102,6 +102,7 @@ public sealed class WorkerClient : IAsyncDisposable
         return reply.Message.Metadata!.Value.GetProperty("capabilities").Deserialize<RuntimeCapabilities>(WorkerProtocol.Json)??throw new InvalidDataException("Invalid capability report.");
     }
     public Task<ImageReply> RenderMarkdown(string path,RequestContext context,CancellationToken cancellation,string? encoding=null,SourceFileStamp? sourceStamp=null,bool allowCloud=false)=>RequestCore(path,"markdownRender",context,new{maxInputBytes=8388608,maxAstNodes=100000,maxHtmlBytes=16777216,encoding},cancellation,sourceStamp,false,allowCloud:allowCloud);
+    public Task<ImageReply> ReadMediaRange(string path,string? range,RequestContext context,SourceFileStamp sourceStamp,CancellationToken cancellation)=>RequestCore(path,"mediaRange",context,new{range},cancellation,sourceStamp,true);
     public Task<ImageReply> RequestData(string path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)
     {
         if(operation is not("textWindow" or "textFind" or "textLinePosition" or "textIndexStep"))throw new ArgumentException("未知文本工作进程操作。",nameof(operation));
@@ -138,7 +139,7 @@ public sealed class WorkerClient : IAsyncDisposable
                 if(currentInputFile is {} previous){await Task.Run(()=>{if(File.Exists(previous))ThumbnailCache.DeleteOwned(previous);},token).ConfigureAwait(false);currentInputFile=null;}
                 currentInput=Guid.NewGuid().ToString("N");currentPath=dataOnly?null:path;currentLength=sourceStamp?.Length;currentWrite=sourceStamp?.ModifiedUtcTicks;currentSignature=sourceStamp?.SourceSignature;currentVersion=context.FileVersion;currentAllowCloud=allowCloud;
                 currentInputFile=Path.Combine(taskDirectory!,currentInput+".input.json");
-                object approved=dataOnly?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud,currentSignature);
+                object approved=dataOnly&&operation!="mediaRange"?new ApprovedTextInput(path!,sourceStamp?.Length,sourceStamp?.ModifiedUtcTicks,allowCloud):new ApprovedInput(path!,currentLength,currentWrite,allowCloud,currentSignature);
                 try{await File.WriteAllTextAsync(currentInputFile,JsonSerializer.Serialize(approved,WorkerProtocol.Json),token).ConfigureAwait(false);}catch{currentPath=null;throw;}
             }
             string requestId=Guid.NewGuid().ToString("N");
