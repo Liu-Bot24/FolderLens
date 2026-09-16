@@ -9,7 +9,7 @@ internal static class AppPaths
         string directory=await ResolveDataDirectory(args);
         // This runs before the instance broker or catalog can create any files.
         if(args.Contains("--verify-refresh"))
-        foreach(string option in new[]{"--verify-image-switch","--verify-gallery","--verify-category-switch","--verify-bitmap-assets"})
+        foreach(string option in new[]{"--verify-image-switch","--verify-gallery","--verify-category-switch","--verify-directory-source","--verify-bitmap-assets"})
         {
             int index=Array.IndexOf(args,option);if(index<0)continue;
             if(index+1>=args.Length)throw new ArgumentException("缺少只读源目录。");

@@ -10,6 +10,8 @@ public sealed class DiagnosticPathsTests
     [InlineData("--verify-image-switch",true)]
     [InlineData("--verify-gallery",false)]
     [InlineData("--verify-category-switch",true)]
+    [InlineData("--verify-directory-source",false)]
+    [InlineData("--verify-directory-source",true)]
     public async Task ReadOnlySourceRejectsDataAtOrBelowSourceBeforeStartup(string option,bool child)
     {
         string source=Path.Combine(Path.GetTempPath(),"FolderLens-path-only");
