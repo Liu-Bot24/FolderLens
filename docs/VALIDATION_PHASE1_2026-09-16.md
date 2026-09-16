@@ -24,6 +24,8 @@
 | 8 个公开 RAW 样本 | 48 次真实 worker 操作 PASS，源文件前后 SHA 不变；不代表所有相机／色彩变体 | `artifacts/phase1-raw-family/raw-family-results.json` |
 | 百万条真实 SQLite 查询库 | 快照 13.935s；100 次首批查询 P95 0.843ms、深页 P95 0.642ms；并发 59 批写入；查询阶段 WAL 峰值 9.0MiB | `artifacts/phase1-benchmarks/Database-20260916T074451352Z/query-20260916-074452-545/result.json` |
 | 1GiB／5GiB 有效文本 | 非稀疏 UTF-8；100 次窗口读取 P95 0.937／0.959ms；5GiB 文件实际定位超过 4GiB | `artifacts/phase1-benchmarks/Text1GiB-20260916T074536937Z/result.json`、`Text5GiB-20260916T074538306Z/result.json` |
+| 256MiB 真实单行文本 | 新增专项 1 PASS；实际 Content.Worker 完成有界窗口、跨块中文／emoji 搜索、完整未命中搜索、第二行定位，并拒绝追加／截断后的旧观察 | `artifacts/tests/phase1-single-line/single-line.trx`、`artifacts/phase1-single-line-test.log` |
+| 1GiB／5GiB 离屏 WinUI 阅读 | 功能 PASS；每文件 100 次首块／深位置读取与实际 TextBox 布局、翻块返回、源哈希／mtime 不变；5GiB 实际偏移 4,294,967,303 | `artifacts/phase1-native-large-text/native-refresh.json`、`artifacts/phase1-native-large-text-run.*` |
 | 10,000 次切图／32.7 分钟混合操作 | 流程完成且无崩溃、未超测试预算；100 轮文本、Markdown 本地图片、静音 WAV 和筛选切换 | `artifacts/phase1-soak-30min/native-refresh.json` |
 
 39＋43 项原生回归共同使用的 App DLL SHA-256 为 `1CE806E5C430A84B06FF8B9AE03A5F08EE2F1F325DD2ABC075E39A5EF4385DF0`。构建日志为 `artifacts/phase1-validation-build4.log`，0 个错误；NU1900（漏洞数据源不可达）仍存在，不能声称依赖漏洞检查通过。
@@ -31,6 +33,10 @@
 长稳运行使用本轮较早的预取修复构建，后续多页 TIFF／大规模分组修复另有针对性验证及短混合回归，不能把长稳结果自动继承为最终构建的完整验收。夹具图片只有 64×48，不代表大图／RAW／视频长稳。应用私有内存约 207–322MiB，末次 313MiB；进程树峰值约 862MiB，句柄 2421–2774、线程 167–176。私有内存有上升，未做静置回收和堆归属分析，**A054a 的“无持续阶梯增长”仍未证明**。
 
 数据库和文本测量使用生成后的热缓存，期间并发轻量长稳工作；不是冷 OS 缓存，也不是 WinUI 实际首屏呈现。百万条是索引记录，不是百万实体文件枚举。参考机全性能门禁保留 NOT_RUN。
+
+后补离屏 WinUI 文本检查使用 App DLL `10B483E9CB953E71EA42485F0731CE7AE155B98C03A8B6293901E7AC2FE295F9`，生产逻辑与 `482bb64` 相同，仅增加验证入口。1GiB／5GiB 首次选择至阅读布局分别 1155.50／85.20ms；各 100 次首块与深位置交替读取的 P50/P95/P99 分别为 57.59/100.32/106.15ms 与 90.94/136.98/163.89ms。结束时间为 `UpdateLayout`，不等于物理显示 Present；首次打开只有一次样本，且 1GiB 超过 500ms 目标，不能据此宣布首屏性能 PASS。运行时另有混合长稳任务，OS 缓存为生成后的热缓存。没有新增物理键鼠、实际滚动帧时或文本增量内存 192MiB 的完整验收结论。
+
+256MiB 单行专项的读取、搜索和索引阶段耗时 4042.8ms，输入初始 SHA-256 为 `2B7B7E5256CB674E215693C569BBAEC0871C0CBA9EA83B47066770C1F630A6E3`。完整读取验证后才由测试本身追加和截断文件，以验证旧观察被拒绝；不把这两次受控修改算成应用写入源文件。它补充 A036b 的后台链路，物理阅读布局仍另验。
 
 ## 保留的失败证据
 
@@ -51,3 +57,5 @@
 使用 `scripts/Verify-Regression.ps1` 与 `scripts/Verify-Extended.ps1`，分别提供实际 AppRoot 和新的 EvidenceRoot。长稳为应用参数 `--verify-refresh --verify-deployed --verify-soak --data-dir <新的隔离目录>`；`--verify-soak-smoke` 只做短检查。部署七项验证使用 `scripts/Verify-Startup.ps1`。这些原生程序默认离屏、不激活，不代替物理 UI 验收。
 
 长稳可另加 `--verify-soak-memory` 记录托管堆与 GC 次数，并在全部计时操作结束后单独记录静置、诊断性完整 GC 前后的内存。该 GC 只用于分析，不在计时工作负载中运行，也不作为正常运行会自动回收的证明。
+
+大文件原生专项参数为 `--verify-refresh --verify-deployed --verify-large-text --data-dir <新的隔离目录>`，需要至少 8GiB 可用空间，生成约 6GiB 真实文本。256MiB 单行专项为 `dotnet test --filter FullyQualifiedName~LargeTextAcceptanceTests`；二者均不需要占用前台。

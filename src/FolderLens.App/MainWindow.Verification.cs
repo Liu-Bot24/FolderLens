@@ -117,6 +117,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-press-gesture")){await VerifyPressGesture(source,report);return;}
             if(arguments.Contains("--verify-fit-lock")){await VerifyFitLock(source,report);return;}
             if(arguments.Contains("--verify-first-page")){await VerifyFirstPage(source,report);return;}
+            if(arguments.Contains("--verify-large-text")){await VerifyLargeText(source,report);return;}
             if(arguments.Contains("--verify-text-reader")){await VerifyTextReader(source,report);return;}
             if(arguments.Contains("--verify-markdown-demand")){await VerifyMarkdownDemand(source,report);return;}
             if(arguments.Contains("--verify-selection-appearance")){await VerifySelectionAppearance(source,report);return;}
