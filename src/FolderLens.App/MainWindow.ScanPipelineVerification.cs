@@ -106,15 +106,17 @@ public sealed partial class MainWindow
         await RefreshQuery();
         if(resultHandle?.Count!=12)throw new InvalidOperationException("Browser did not publish all 12 files.");
         report["phase"]="scanFailureFeedback";
+        string acceptedRoot=rootId,rejectedRoot=Path.Combine(dataDirectory,"rejected-root");Directory.CreateDirectory(rejectedRoot);
         verifyScanWorkerExecutable=Path.Combine(source,"missing-worker.exe");
         try
         {
-            await OpenRoot(Path.Combine(source,"B"));await RefreshQuery();
-            if(browserScanError is null||replacingRoot||FilesGrid.Items.Count!=0||BrowserEmptyTitle.Text!="暂时无法显示浏览结果")
-                throw new InvalidOperationException("Worker failure was hidden by a loading/empty/success state.");
+            await OpenRoot(rejectedRoot);await RefreshQuery();
+            bool visible=Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar&&bar.IsOpen;
+            if(browserScanError is null||replacingRoot||rootId!=acceptedRoot||FilesGrid.Items.Count!=12||!visible)
+                throw new InvalidOperationException("Rejected root admission lost the accepted results or hid the scan error.");
         }
         finally{verifyScanWorkerExecutable=null;}
-        await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
+        await RefreshCurrentRoot();if(metadataTask is not null)await metadataTask;await RefreshQuery();
         if(browserScanError is not null||resultHandle?.Count!=12)throw new InvalidOperationException("Browser did not recover after a failed root open.");
         report["scanFailureVisibleAndRecovery"]=true;
         report["phase"]="complete";report["status"]="PASS";
