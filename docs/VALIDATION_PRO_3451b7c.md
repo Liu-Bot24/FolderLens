@@ -28,3 +28,9 @@
 干净 Windows／低内存机器按用户要求 SKIP。前台输入、DPI、Explorer／外部播放器和安装界面因用户禁止占用前台保持 BLOCKED；真实网络／云范围按既有决定暂缓。完整色彩、GPU、大媒体和性能矩阵未验证项继续保留，不以小图片夹具或离屏测试代替。
 
 可重跑入口为 `scripts/Test-PortableIntegrity.ps1`、`scripts/Verify-Regression.ps1`、`scripts/Verify-Extended.ps1` 和常规单元测试命令。内存归因可加 `--verify-soak-fast --verify-soak-mix=filters|text|markdown|audio --verify-soak-memory`；这些分项只用于诊断，不替代正式 30 分钟混合验收。
+
+## 原入口部署与后续诊断
+
+代码提交 `37d5625` 已更新原便携入口，构建标识 `0.1.0-development-a65f470bcb18`。七项实际部署启动验证与媒体能力探测 PASS；926 个原便携数据文件清单未变。最终运行清单 1498 文件逐项 SHA 校验 PASS，构建符号移入本地证据而不留在运行目录。证据 `artifacts/current-entry-pro-37d5625/update-result.json`、`final-hash-check.json` 及其中各部署日志。
+
+单独筛选负载的诊断在 9200 次采样后中止，不能计为长稳通过。日志记录新图片预览过程中又清空选择并出现未加载行，报错“请选择当前结果中的文件”；证据 `artifacts/phase1-memory-filters-only/native-refresh.json` 与 `logs/scan.jsonl`。需继续核对搜索防抖与测试等待条件，以及这是否包含生产竞态；不凭此前 42＋43 项通过否定新失败，也不把剩余内存增长标为已修复。
