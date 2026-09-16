@@ -7,7 +7,7 @@ if(Test-Path -LiteralPath $EvidenceRoot){throw 'Use a new evidence directory for
 foreach($required in Get-RequiredWorkerFiles){if(-not(Test-Path -LiteralPath (Join-Path $AppRoot $required) -PathType Leaf)){throw "Incomplete application worker: $required"}}
 $null=Invoke-LoggedProcess (Join-Path $AppRoot 'FolderLens.App.exe') @('--verify-refresh','--verify-deployed','--data-dir',$EvidenceRoot) ($EvidenceRoot+'-startup') -TimeoutSeconds $TimeoutSeconds
 $report=Get-Content -LiteralPath (Join-Path $EvidenceRoot 'native-refresh.json') -Raw | ConvertFrom-Json
-if($report.status -ne 'PASS' -or -not $report.directoryTreeAndHistory -or -not $report.recursiveEnableScannedChildren -or $report.missingThumbnailFrames -ne 0){throw 'Published folder browsing, thumbnail, preview and navigation verification failed.'}
+if($report.status -ne 'PASS' -or -not $report.directoryTreeAndHistory -or -not $report.browseDepthReusesScannedChildren -or $report.missingThumbnailFrames -ne 0){throw 'Published folder browsing, thumbnail, preview and navigation verification failed.'}
 function Assert-DeployedComponents($Report) {
  if(-not $Report.deployedVerification){throw 'Startup verification allowed development fallback.'}
  $expected=@{media='workers/FolderLens.Media.Worker.exe';content='content-worker/FolderLens.Content.Worker.exe';scan='scan-worker/FolderLens.Scan.Worker.exe';ffprobe='native/ffmpeg/ffprobe.exe'}
