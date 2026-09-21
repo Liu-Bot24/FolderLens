@@ -13,7 +13,8 @@ public sealed record ScanDirectoryPacket(string State,ScanEntry[] Entries,string
 /// <summary>One directory only; its caller owns the persistent disk-backed traversal queue.</summary>
 public static class ScanDirectoryReader
 {
-    public static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud=false)
+    public static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud=false)=>Read(directory,allowCloud,false);
+    internal static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud,bool legacyIdentity)
     {
         directory=PathRules.ValidateSource(directory);
         FileAttributes attributes=default;bool missing=false;
@@ -35,14 +36,14 @@ public static class ScanDirectoryReader
         {yield return new("excluded",[],"DeferredOffline");yield break;}
         using var directoryHandle=CreateFileW(LongPath(directory),0x81,7,IntPtr.Zero,3,0x02000000|0x00200000|0x00100000,IntPtr.Zero);
         if(directoryHandle.IsInvalid)throw FileError(Marshal.GetLastWin32Error());
-        var identity=FileAllocation.InspectMetadata(directoryHandle,resolveLocation:true);
+        var identity=FileAllocation.InspectMetadata(directoryHandle,resolveLocation:true,legacyIdentity:legacyIdentity);
         if(identity.Attributes is not {} actualAttributes||(actualAttributes&0x10)==0)throw new IOException("DirectoryChanged");
         if(!allowCloud&&FileAllocation.IsDeferred(actualAttributes)){yield return new("excluded",[],"DeferredOffline");yield break;}
         if((actualAttributes&0x400)!=0&&(identity.ReparseTag is null||!FileAllocation.IsCloudTag(identity.ReparseTag.Value)))
         {yield return new("excluded",[],"LinkDirectorySkipped");yield break;}
         void VerifyLocation()
         {
-            var current=FileAllocation.InspectMetadata(directory,resolveLocation:true);
+            var current=FileAllocation.InspectMetadata(directory,resolveLocation:true,legacyIdentity:legacyIdentity);
             if(identity.PhysicalIdentity is null||current.PhysicalIdentity!=identity.PhysicalIdentity||current.ResolvedLocation!=identity.ResolvedLocation)
                 throw new IOException("DirectoryChanged");
         }
@@ -53,23 +54,24 @@ public static class ScanDirectoryReader
         const int capacity=64*1024;IntPtr buffer=Marshal.AllocHGlobal(capacity);
         try
         {
-            bool extended=true;var batch=new List<ScanEntry>(128);
+            bool legacy=identity.VolumeIdentity?.StartsWith("legacy:",StringComparison.Ordinal)==true;
+            int informationClass=legacy?10:19;var batch=new List<ScanEntry>(128);
             while(true)
             {
                 VerifyLocation();
-                if(!ReadDirectoryInformation(directoryHandle,extended?19:14,buffer,capacity))
+                if(!ReadDirectoryInformation(directoryHandle,informationClass,buffer,capacity))
                 {
                     int error=Marshal.GetLastWin32Error();
                     if(error==18)break;
                     // Providers without extended IDs still return coherent metadata
                     // through the same directory handle; unknown identity stays unknown.
-                    if(extended&&error is 50 or 87){extended=false;continue;}
+                    if(informationClass!=14&&error is 50 or 87){informationClass=14;continue;}
                     throw FileError(error);
                 }
                 int offset=0;
                 while(true)
                 {
-                    int nameOffset=extended?88:68;
+                    int nameOffset=informationClass switch{19=>88,10=>104,_=>68};
                     if(offset<0||offset>capacity-nameOffset)throw new IOException("InvalidDirectoryRecord");
                     IntPtr record=IntPtr.Add(buffer,offset);int next=Marshal.ReadInt32(record),nameBytes=Marshal.ReadInt32(record,60);
                     if(nameBytes<0||(nameBytes&1)!=0||nameBytes>capacity-offset-nameOffset)throw new IOException("InvalidDirectoryRecord");
@@ -77,13 +79,18 @@ public static class ScanDirectoryReader
                     if(name is not ("." or ".."))
                     {
                         uint flags=unchecked((uint)Marshal.ReadInt32(record,56));bool isDirectory=(flags&0x10)!=0,deferred=FileAllocation.IsDeferred(flags),reparse=(flags&0x400)!=0;
-                        uint? tag=extended?unchecked((uint)Marshal.ReadInt32(record,68)):null;
+                        uint? tag=informationClass==19?unchecked((uint)Marshal.ReadInt32(record,68)):null;
                         bool cloud=reparse&&tag is {} value&&FileAllocation.IsCloudTag(value);
                         string? skip=reparse&&!cloud?isDirectory?"LinkDirectorySkipped":"LinkFileSkipped":!allowCloud&&deferred&&isDirectory?"DeferredOffline":null;
                         long creation=Marshal.ReadInt64(record,8),write=Marshal.ReadInt64(record,24),change=Marshal.ReadInt64(record,32),bytes=Marshal.ReadInt64(record,40),allocated=Marshal.ReadInt64(record,48);
                         if(bytes<0)throw new IOException("InvalidDirectoryLength");
-                        string? fileIdentity=extended&&identity.VolumeIdentity is {} volume&&!volume.StartsWith("legacy:",StringComparison.Ordinal)&&creation>0&&!deferred&&skip is null
+                        string? fileIdentity=informationClass==19&&identity.VolumeIdentity is {} volume&&!legacy&&creation>0&&!deferred&&skip is null
                             ?$"{volume}:{unchecked((ulong)Marshal.ReadInt64(record,72)):X16}{unchecked((ulong)Marshal.ReadInt64(record,80)):X16}:{creation:X16}":null;
+                        if(informationClass==10&&legacy&&creation>0&&!deferred&&skip is null)
+                        {
+                            ulong fileId=unchecked((ulong)Marshal.ReadInt64(record,96));
+                            if(fileId!=0)fileIdentity=$"{identity.VolumeIdentity}:{fileId:X16}:{creation:X16}";
+                        }
                         batch.Add(new(name,isDirectory,isDirectory?0:bytes,ToTicks(write),ToTicks(creation),flags,deferred?"placeholder":"local",skip,
                             deferred||skip is not null||allocated<0?null:allocated,fileIdentity,deferred||skip is not null||change<=0?null:change));
                         if(batch.Count==128){VerifyLocation();yield return new("batch",batch.ToArray());batch.Clear();}

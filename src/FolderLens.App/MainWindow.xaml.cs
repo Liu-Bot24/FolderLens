@@ -99,6 +99,7 @@ public sealed partial class MainWindow : Window
         animationTimer=DispatcherQueue.CreateTimer();animationTimer.IsRepeating=false;animationTimer.Tick+=async(_,_)=>await AdvanceAnimation(false);
         AppWindow.Changed+=(_,_)=>{if(!AppWindow.IsVisible||AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter {State:Microsoft.UI.Windowing.OverlappedPresenterState.Minimized})PauseAnimationForDetail();};
         InitializeAudio();
+        InitializeVideoInteraction();
         InitializeMarquee();
         WorkerResources.Shared.MemoryPressure+=OnPrefetchMemoryPressure;
         StartupStage("constructWindow");

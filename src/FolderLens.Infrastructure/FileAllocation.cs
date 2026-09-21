@@ -10,19 +10,20 @@ public static class FileAllocation
         var result=InspectMetadata(path);return(result.Allocated,result.PhysicalIdentity);
     }
     /// <summary>Attribute-only access, shared with readers/writers/deleters. Never follows the final reparse point or recalls data.</summary>
-    public static FileIdentityMetadata InspectMetadata(string path,bool resolveLocation=false)
+    public static FileIdentityMetadata InspectMetadata(string path,bool resolveLocation=false)=>InspectMetadata(path,resolveLocation,false);
+    internal static FileIdentityMetadata InspectMetadata(string path,bool resolveLocation,bool legacyIdentity)
     {
         using var handle=CreateFileW(path,0x80,7,IntPtr.Zero,3,0x02000000|0x00200000|0x00100000,IntPtr.Zero);
-        return InspectMetadata(handle,resolveLocation);
+        return InspectMetadata(handle,resolveLocation,legacyIdentity);
     }
-    internal static FileIdentityMetadata InspectMetadata(SafeFileHandle handle,bool resolveLocation=false)
+    internal static FileIdentityMetadata InspectMetadata(SafeFileHandle handle,bool resolveLocation=false,bool legacyIdentity=false)
     {
         if(handle.IsInvalid)return new(null,null,null,null,"unknown",null);
         bool hasBasic=GetBasicInformation(handle,0,out BasicInfo basic,Marshal.SizeOf<BasicInfo>());
         long? allocated=GetFileInformationByHandleEx(handle,1,out StandardInfo standard,Marshal.SizeOf<StandardInfo>()) && standard.Allocation>=0?standard.Allocation:null;
         string? identity=null,volume=null;
         // A file ID can be reused after deletion. Creation identity must participate in the cache identity.
-        if(hasBasic && basic.Creation>0 && GetFileIdInformation(handle,18,out IdInfo id,Marshal.SizeOf<IdInfo>()))
+        if(!legacyIdentity && hasBasic && basic.Creation>0 && GetFileIdInformation(handle,18,out IdInfo id,Marshal.SizeOf<IdInfo>()))
         {volume=$"{id.Volume:X16}";identity=$"{volume}:{id.Low:X16}{id.High:X16}:{basic.Creation:X16}";}
         else if(hasBasic && basic.Creation>0)
         {

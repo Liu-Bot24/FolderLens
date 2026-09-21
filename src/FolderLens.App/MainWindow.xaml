@@ -442,6 +442,9 @@
           </ScrollViewer>
           <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
           <ContentControl x:Name="VideoHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" PointerWheelChanged="ViewerWheel" />
+          <Button x:Name="VideoPosterPlay" MinWidth="0" MinHeight="0" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" Click="PlayVideo" AutomationProperties.Name="播放视频" ToolTipService.ToolTip="点击播放视频">
+            <Button.Template><ControlTemplate TargetType="Button"><Grid Background="Transparent"><Viewbox HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="56" MaxHeight="56"><Border Width="56" Height="56" CornerRadius="28" Background="#B820242B"><FontIcon Glyph="&#xE768;" FontSize="24" Foreground="White" /></Border></Viewbox></Grid></ControlTemplate></Button.Template>
+          </Button>
         </local:ViewerSurface>
         <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
           <Button x:Name="CopyPreviewPathButton" Tag="path" Click="CopyPreviewLabel" Visibility="Collapsed" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制完整文件路径" AutomationProperties.Name="复制完整文件路径"><TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.Name="文件路径" /></Button>
