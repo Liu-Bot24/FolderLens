@@ -1,27 +1,29 @@
 # Text thumbnail validation — 2026-09-22
 
-Baseline: `bb04083`.
+Current adjustment baseline: `4c42827`. Initial implementation baseline: `bb04083`.
 
 ## Behavior and resource bounds
 
-Text and Markdown cards show a plain-text prefix at readable sizes. Cards below 144 DIPs retain the file icon without requesting an excerpt. The fixed 13-DIP font and 18-DIP line spacing determine a capped line count from the card size; WinUI wraps and trims inside the existing thumbnail frame. Markdown markup is displayed as text, with no renderer, network resource loading or image decoding.
+MD/TXT and other text cards show a plain-text prefix. Cards below 144 DIPs retain the icon without requesting an excerpt. The slider now reaches 300, including saved-setting restoration. The text uses a 12-DIP font and 16-DIP line spacing. Empty and whitespace-only lines are removed from the displayed excerpt before applying its character limit; indentation and line breaks between nonempty lines remain. Source files and the full document reader are unchanged.
 
-The UI requests a 256/512/768/1024-byte prefix budget according to card size. Encoding detection uses the same bounded sample rather than the normal reader's 256 KiB sample. The existing reader then decodes one bounded window at a valid character boundary. Thus the two reads total at most 2 KiB plus a few boundary bytes, irrespective of source size; this is not a one-read or entire-document operation. Small documents may naturally fit within that bound.
+Layout follows the actual filled card width, capped at 320 DIPs for budgeting, with at most 512 displayed UTF-16 units. WinUI wraps and trims at the calculated line limit. Markdown markup is plain text: no renderer, image loading or network requests.
 
-Requests run serially on a separate visible-priority Content Worker, within the shared process/resource budget, with a five-second request deadline. Existing thumbnail admission, cancellation, file-version ownership, source signatures and cloud approval remain in effect. No source reads run on the UI thread. The worker closes the excerpt reader after each response, builds no line index and retains no open source handle between excerpts.
+The worker receives a size-dependent prefix budget rounded to 256-byte increments, at most 2048 bytes. Both encoding detection and the single text window are limited to that budget, so the two reads total at most 4 KiB plus a few boundary bytes, regardless of source size. Empty-line removal only examines this bounded prefix; it does not search an entire blank-heavy file for later content.
 
-Slider changes use a 180 ms debounce. Existing excerpts serve smaller cards immediately; larger cards request more only if the cached byte budget is insufficient and EOF was not reached. Cache retention is limited to currently realized cards plus 128 offscreen excerpts, independent of WinUI's retained row identities. Switching result roots clears the cache. No excerpt is persisted to disk.
+Requests run serially on a separate visible-priority Content Worker with a five-second deadline and the existing shared resource budget, thumbnail admission, cancellation, file-version ownership, source signatures and cloud approval. No source reads execute on the UI thread. The reader closes after each excerpt and does not build a line index.
 
-## Verification
+Slider changes use a 180 ms debounce. Existing prefixes serve smaller cards; larger cards read again only if their budget exceeds cached data and EOF was not reached. Retention is limited to realized cards plus 128 offscreen excerpts. Root changes clear this cache. No excerpts are persisted to disk.
 
-Evidence: local ignored `artifacts/text-thumbnails-20260922/`.
+## Latest verification
 
-- Release build passed; existing NU1900 package vulnerability-feed access warnings remain.
-- Targeted text/layout tests: 20 passed before the final cache addition.
-- Final complete unit suite: **588/588 passed**, `tests/all.trx`.
-- Remote worker tests cover UTF-8, UTF-16LE/BE and GB18030, multibyte boundaries, an 8 MiB file with an invalid distant tail, empty files, binary prefix rejection, source replacement with preserved size/time, cancellation and budget rejection. The invalid distant tail is a negative control against inadvertently reading/detecting the full document.
-- Real WinUI hidden-window verification: `final-text-thumbnails/native-refresh.json` passes. Minimum-size cards request no excerpts. Slider 160 yields four lines (actual filled card width 166); slider 240 yields seven lines (width 242). Reads are two 512-byte budgets and one 1024-byte budget; the small complete Markdown file needs no second read. Shrinking and regrowing reuses cached content. File-version/error state and bounded offscreen cache eviction pass.
-- Actual card renders at sizes 100/160/240 were inspected; wrapping and clipping remain within the card. Screenshot data is synthetic.
-- Existing native text reader and Markdown demand-loading checks pass in `final-text-reader` and `final-markdown-demand`.
+Local ignored evidence: `artifacts/text-thumbnails-compact-20260922/`.
 
-These are real WinUI control/render checks in hidden windows. Physical mouse dragging, the full font/encoding matrix and SMB-server performance were not separately measured. Passing the checks above does not establish overall release acceptance. Deployment status and verification, when executed, are recorded separately under `deployment/` and `deployed-*`.
+- Release build passed; existing NU1900 vulnerability-feed warnings remain.
+- Full unit suite: **589/589 passed**, `tests/all.trx`.
+- Empty-line cases cover CRLF/LF/CR, whitespace-only lines, leading blanks, preserved indentation, unchanged nonempty lines and surrogate boundaries.
+- Remote worker cases cover UTF-8, UTF-16LE/BE, GB18030, 512-byte and 2048-byte windows over an 8 MiB file with an invalid distant tail, empty/binary content, replacement with preserved size/time, cancellation and rejection beyond the hard budget.
+- Real hidden WinUI verification: `native/native-refresh.json` passes. Slider 160 displays 5 lines, 240 displays 8, and 300 displays 11 at actual filled widths 166/242/312. The slider reaches the requested value; rendered excerpts have no empty lines. Screenshots at all sizes were inspected.
+- Minimum-size cards request no excerpts; shrinking and regrowing reuse data. The offscreen cache remains bounded, replaced file versions clear old excerpts, and errors remain distinct.
+- Previous complete checks, including native full-text reading and Markdown demand loading, remain under `artifacts/text-thumbnails-20260922/`.
+
+These checks use real WinUI controls and rendering in hidden windows. Physical mouse dragging and SMB-server performance were not separately measured. Deployment and deployed-native checks are recorded separately under `deployment/` and `deployed-*`; these results do not establish overall release acceptance.

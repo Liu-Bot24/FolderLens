@@ -19,7 +19,7 @@
           <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="6">
             <Grid>
               <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
-              <TextBlock x:Name="TextCardExcerpt" Text="{x:Bind TextExcerpt, Mode=OneWay}" Visibility="{x:Bind TextExcerptVisibility, Mode=OneWay}" Margin="12" VerticalAlignment="Top" FontSize="13" LineHeight="18" LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="{x:Bind TextExcerptLines, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" IsHitTestVisible="False" />
+              <TextBlock x:Name="TextCardExcerpt" Text="{x:Bind TextExcerpt, Mode=OneWay}" Visibility="{x:Bind TextExcerptVisibility, Mode=OneWay}" Margin="12" VerticalAlignment="Top" FontSize="12" LineHeight="16" LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="{x:Bind TextExcerptLines, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" IsHitTestVisible="False" />
               <StackPanel Visibility="{x:Bind FileIconVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="5" ToolTipService.ToolTip="{x:Bind FileTypeLabel, Mode=OneWay}">
                 <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" />
                 <TextBlock Text="{x:Bind FileTypeBadge, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" />
@@ -399,7 +399,7 @@
           </Grid.ColumnDefinitions>
           <TextBlock x:Name="ResultSummary" Text="尚未打开目录" VerticalAlignment="Center" FontSize="11" TextTrimming="CharacterEllipsis" />
           <CheckBox x:Name="ShowPaths" Grid.Column="1" Content="相对路径" Click="PresentationChanged" FontSize="11" MinHeight="28" />
-          <Slider x:Name="ThumbnailSize" Grid.Column="2" Minimum="100" Maximum="240" Value="144" StepFrequency="8" ValueChanged="ThumbnailSizeChanged" ToolTipService.ToolTip="缩略图大小" />
+          <Slider x:Name="ThumbnailSize" Grid.Column="2" Minimum="100" Maximum="300" Value="144" StepFrequency="8" ValueChanged="ThumbnailSizeChanged" ToolTipService.ToolTip="缩略图大小" />
         </Grid>
       </Grid>
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">

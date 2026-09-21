@@ -38,8 +38,9 @@ public sealed class TextRemoteTests
         Assert.StartsWith("开头文字😀第一行",page.Text);Assert.StartsWith(page.Text,content,StringComparison.Ordinal);
         Assert.InRange(page.Next-page.Start,508,512);Assert.False(page.AtEnd);Assert.Equal(8L<<20,page.Length);
         Assert.DoesNotContain('\uFFFD',page.Text);Assert.False(char.IsHighSurrogate(page.Text[^1]));
+        var larger=await remote.ReadExcerpt(2048);Assert.True(larger.Text.Length>page.Text.Length);Assert.InRange(larger.Next-larger.Start,2044,2048);
         Assert.Null(remote.IndexProgress);Assert.Equal(written,File.GetLastWriteTimeUtc(f.Path));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>remote.ReadExcerpt(2048));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>remote.ReadExcerpt(4096));
         using var cancel=new CancellationTokenSource();cancel.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>remote.ReadExcerpt(512,cancel.Token));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(f.Root,"worker"),"*.png",SearchOption.AllDirectories));

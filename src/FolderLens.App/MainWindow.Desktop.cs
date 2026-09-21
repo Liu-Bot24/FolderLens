@@ -118,7 +118,7 @@ public sealed partial class MainWindow
         await RestoreDetailWidths();
         if(await settings.Load<DesktopState>("desktop.json") is {} state)
         {
-            ThumbnailSize.Value=Math.Clamp(state.ThumbnailSize,100,240);gridShowPaths=state.ShowPaths;UpdatePathPresentationControl();
+            ThumbnailSize.Value=Math.Clamp(state.ThumbnailSize,100,300);gridShowPaths=state.ShowPaths;UpdatePathPresentationControl();
             SetPreviewSplit(state.TreeFraction);PreviewColumn.Width=new GridLength(double.IsFinite(state.SidebarWidth)?Math.Clamp(state.SidebarWidth,220,650):300);DetailsMode.IsChecked=state.Details;ToggleView(this,new());
         }
         await RestorePlayerPreferences();

@@ -34,7 +34,7 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
         ApprovedInput.CheckAccess(File.GetAttributes(requestedPath),approved.AllowCloud);
         if(request.Operation=="textExcerpt")
         {
-            if(options.MaxBytes>1024||options.ByteOffset!=0)throw new InvalidDataException("TextExcerptBudget");
+            if(options.MaxBytes>2048||options.ByteOffset!=0)throw new InvalidDataException("TextExcerptBudget");
             await CloseDocument();
             using var excerpt=new BoundedTextReader(requestedPath,options.Encoding,cancellation,
                 new ApprovedInput(requestedPath,approved.ExpectedLength,approved.ExpectedLastWriteTicks,approved.AllowCloud,approved.SourceSignature),options.MaxBytes);

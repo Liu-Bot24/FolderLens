@@ -30,7 +30,7 @@ public sealed class RemoteTextClient
     }
     public Task<TextWindow> ReadExcerpt(int maxBytes,CancellationToken cancellation=default)
     {
-        if(maxBytes is <16 or >1024)throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        if(maxBytes is <16 or >2048)throw new ArgumentOutOfRangeException(nameof(maxBytes));
         return ReadPage("textExcerpt",0,maxBytes,cancellation);
     }
     public Task<TextWindow> ReadWindow(long byteOffset,int maxBytes=64*1024,CancellationToken cancellation=default)
