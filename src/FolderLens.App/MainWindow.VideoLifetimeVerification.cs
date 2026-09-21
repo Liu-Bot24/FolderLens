@@ -37,9 +37,45 @@ public sealed partial class MainWindow
         SetVideoTransportVisible(false);
         if(videoElement!.TransportControls.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("移出视频后进度控件未隐藏。");
         SetVideoTransportVisible(true);
-        if(videoElement.TransportControls.Visibility!=Visibility.Visible||!IsVideoTransportTarget(videoElement.TransportControls))throw new InvalidOperationException("视频进度控件不可用或点击会触发画面播放。");
-        VideoSurfaceTapped(VideoHost,new Microsoft.UI.Xaml.Input.TappedRoutedEventArgs());
+        if(videoElement.TransportControls.Visibility!=Visibility.Visible)throw new InvalidOperationException("视频进度控件不可用或点击会触发画面播放。");
+        PreviewSurface.UpdateLayout();
+        static IEnumerable<DependencyObject> Descendants(DependencyObject node)
+        {
+            for(int i=0;i<Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node);i++)
+            {var child=Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node,i);yield return child;foreach(var nested in Descendants(child))yield return nested;}
+        }
+        var center=PreviewSurface.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(PreviewSurface.ActualWidth/2,PreviewSurface.ActualHeight/3));
+        var hits=Microsoft.UI.Xaml.Media.VisualTreeHelper.FindElementsInHostCoordinates(center,PreviewSurface).ToArray();
+        report["videoSurfaceHitTypes"]=hits.Take(10).Select(element=>element.GetType().Name+":"+(element as FrameworkElement)?.Name).ToArray();
+        report["videoSurfaceFilteredAsTransport"]=hits.FirstOrDefault() is {} topHit&&IsVideoTransportTarget(topHit);
+        var buttons=Descendants(videoElement.TransportControls).OfType<Microsoft.UI.Xaml.Controls.Primitives.ButtonBase>().ToArray();
+        report["transportButtons"]=buttons.Select(button=>button.Name).ToArray();
+        var toggle=buttons.First(button=>button.Name=="PlayPauseButtonOnLeft"&&button.ActualWidth>0);
+        var togglePeer=FrameworkElementAutomationPeer.CreatePeerForElement(toggle);
+        void ToggleNativePlayback()
+        {
+            if(togglePeer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggleProvider)toggleProvider.Toggle();
+            else if(togglePeer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invokeProvider)invokeProvider.Invoke();
+            else throw new InvalidOperationException("原生播放按钮没有可操作的自动化模式。");
+        }
+        ToggleNativePlayback();
+        await WaitUntil(()=>videoPlayer?.PlaybackSession.PlaybackState==MediaPlaybackState.Paused,TimeSpan.FromSeconds(3));
+        report["nativeTransportPauseWorks"]=true;
+        ToggleNativePlayback();
+        await WaitUntil(()=>videoPlayer?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing,TimeSpan.FromSeconds(3));
+        if(hits.Length==0||IsVideoTransportTarget(hits[0]))throw new InvalidOperationException("视频画面命中被误判成播放条操作。");
+        await ToggleVideoFromSource(hits[0]);
         await WaitUntil(()=>videoPlayer?.PlaybackSession.PlaybackState==MediaPlaybackState.Paused&&(string)PreviewExternalPlayer.Content=="播放",TimeSpan.FromSeconds(3));
+        if(!IsVideoTransportTarget(toggle))throw new InvalidOperationException("原生按钮点击会重复触发画面切换。");
+        await ToggleVideoFromSource(toggle);
+        if(videoPlayer!.PlaybackSession.PlaybackState!=MediaPlaybackState.Paused)throw new InvalidOperationException("播放条点击触发了第二次切换。");
+        var sliders=Descendants(videoElement.TransportControls).OfType<Microsoft.UI.Xaml.Controls.Slider>().ToArray();
+        report["transportSliders"]=sliders.Select(slider=>slider.Name).ToArray();
+        var progress=sliders.Single(slider=>slider.Name=="ProgressSlider");
+        var range=(IRangeValueProvider)FrameworkElementAutomationPeer.CreatePeerForElement(progress).GetPattern(PatternInterface.RangeValue);
+        double seek=range.Minimum+(range.Maximum-range.Minimum)*.25;range.SetValue(seek);
+        await WaitUntil(()=>Math.Abs(videoPlayer.PlaybackSession.Position.TotalSeconds-videoPlayer.PlaybackSession.NaturalDuration.TotalSeconds*.25)<.3,TimeSpan.FromSeconds(3));
+        report["nativeProgressSeekWorks"]=true;
         await CaptureVideoPreview("video-paused-hover");
         if(VideoPosterPlay.Visibility!=Visibility.Collapsed)throw new InvalidOperationException("暂停后出现遮挡画面的首次播放入口。");
         var upper=(IInvokeProvider)new ButtonAutomationPeer(PreviewExternalPlayer).GetPattern(PatternInterface.Invoke);
@@ -55,7 +91,7 @@ public sealed partial class MainWindow
         {
             await PlayVideoCore();
             if(videoPlayer is null)throw new InvalidOperationException("Video player was not created.");
-            await WaitUntil(()=>videoPlayer?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing,TimeSpan.FromSeconds(8));
+            await WaitUntil(()=>videoPlayer?.PlaybackSession.PlaybackState==MediaPlaybackState.Playing&&videoOpenTimer?.IsRunning==false,TimeSpan.FromSeconds(8));
             if(i%2==0)StopVideo();
             else
             {

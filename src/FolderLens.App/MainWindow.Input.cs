@@ -16,7 +16,7 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
-    private enum ViewerAction { RenameFile,DeleteFile, Previous,Next,First,Last,Left,Right,Up,Down,Fit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
+    private enum ViewerAction { RenameFile,DeleteFile, Previous,Next,First,Last,Left,Right,Up,Down,Fit,ToggleFit,Actual,ZoomIn,ZoomOut,FitWidth,FitHeight,LockSizing,Rotate,RotateCounterclockwise,CopyFilePath,Help,ToggleFullScreen,ToggleBrowser,ToggleWindowViewer,ReturnBrowser,ContextMenu,Find,OpenFolder,FocusPath,Refresh,Slideshow,BackFolder,ForwardFolder,ParentFolder }
     private enum ViewerSizing { Automatic,Locked }
     private enum ViewerScaleIntent { Default,Fit,Width,Height,Custom }
     private enum ViewerGesture { None,Pressed,Dragging,Magnifier }
@@ -29,9 +29,9 @@ public sealed partial class MainWindow
         new(VirtualKey.F11,0,ViewerAction.ToggleFullScreen),new(VirtualKey.Escape,0,ViewerAction.ReturnBrowser),new(VirtualKey.Enter,0,ViewerAction.ToggleBrowser),
         new(VirtualKey.Left,0,ViewerAction.Left),new(VirtualKey.Right,0,ViewerAction.Right),new(VirtualKey.Up,0,ViewerAction.Up),new(VirtualKey.Down,0,ViewerAction.Down),
         new(VirtualKey.PageDown,0,ViewerAction.Next),new(VirtualKey.Space,0,ViewerAction.Next),new(VirtualKey.PageUp,0,ViewerAction.Previous),new(VirtualKey.Back,0,ViewerAction.Previous),
-        new(VirtualKey.Home,0,ViewerAction.First),new(VirtualKey.End,0,ViewerAction.Last),new(VirtualKey.B,0,ViewerAction.Fit),new(VirtualKey.Multiply,0,ViewerAction.Fit),
+        new(VirtualKey.Home,0,ViewerAction.First),new(VirtualKey.End,0,ViewerAction.Last),new(VirtualKey.B,0,ViewerAction.ToggleFit),new(VirtualKey.Multiply,0,ViewerAction.ToggleFit),
         new(VirtualKey.Add,0,ViewerAction.ZoomIn),new((VirtualKey)187,0,ViewerAction.ZoomIn),new((VirtualKey)187,VirtualKeyModifiers.Shift,ViewerAction.ZoomIn),
-        new(VirtualKey.Subtract,0,ViewerAction.ZoomOut),new((VirtualKey)189,0,ViewerAction.ZoomOut),new(VirtualKey.Number8,VirtualKeyModifiers.Shift,ViewerAction.Fit),
+        new(VirtualKey.Subtract,0,ViewerAction.ZoomOut),new((VirtualKey)189,0,ViewerAction.ZoomOut),new(VirtualKey.Number8,VirtualKeyModifiers.Shift,ViewerAction.ToggleFit),
         new(VirtualKey.Number0,VirtualKeyModifiers.Control,ViewerAction.Actual),new(VirtualKey.NumberPad0,VirtualKeyModifiers.Control,ViewerAction.Actual),
         new(VirtualKey.W,VirtualKeyModifiers.Shift,ViewerAction.FitWidth),new(VirtualKey.H,VirtualKeyModifiers.Shift,ViewerAction.FitHeight),
         new(VirtualKey.L,VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift,ViewerAction.LockSizing),
@@ -206,8 +206,13 @@ public sealed partial class MainWindow
                     if(ViewerHasOverflow())
                     {float step=(float)Math.Max(32,Math.Min(ImageCanvas.ActualWidth,ImageCanvas.ActualHeight)*.08);PanViewerScreen(action==ViewerAction.Left?new(step,0):action==ViewerAction.Right?new(-step,0):action==ViewerAction.Up?new(0,step):new(0,-step));await RefreshViewerPixels();}
                     else if(action==ViewerAction.Left)Navigate(-1);else if(action==ViewerAction.Right)Navigate(1);return;
+                case ViewerAction.ToggleFit:
+                    if(viewerScaleIntent is ViewerScaleIntent.Default or ViewerScaleIntent.Fit && !ViewerHasOverflow())
+                    {viewerScaleIntent=ViewerScaleIntent.Width;ApplyViewerScaleIntent();PanViewerToStart(vertical:true);}
+                    else{viewerScaleIntent=ViewerScaleIntent.Fit;zoom=0;pan=Vector2.Zero;}
+                    break;
                 case ViewerAction.Fit: viewerScaleIntent=ViewerScaleIntent.Fit;zoom=0;pan=Vector2.Zero;break;
-                case ViewerAction.Actual: if(offlinePreview){QualityLabel.Text="原文件离线，无法读取真正的100%。";return;}await ZoomViewerAt(1/Shell.XamlRoot.RasterizationScale,new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
+                case ViewerAction.Actual: if(offlinePreview){QualityLabel.Text="原文件离线，无法读取真正的100%。";return;}pan=Vector2.Zero;await ZoomViewerAt(1/Shell.XamlRoot.RasterizationScale,new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
                 case ViewerAction.ZoomIn: await ZoomViewerAt(EffectiveScale()*1.2,new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
                 case ViewerAction.ZoomOut: await ZoomViewerAt(EffectiveScale()/1.2,new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2));return;
                 case ViewerAction.FitWidth: viewerScaleIntent=ViewerScaleIntent.Width;ApplyViewerScaleIntent();PanViewerToStart(vertical:true);break;
@@ -443,7 +448,7 @@ public sealed partial class MainWindow
         viewerContextMenu=new();
         viewerContextMenu.Opened+=(_,_)=>SetViewerMenuNotice(true);
         viewerContextMenu.Closed+=(_,_)=>SetViewerMenuNotice(false);
-        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适应屏幕 · B",ViewerAction.Fit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("旋转画面（不修改原文件） · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
+        foreach(var option in new[]{("上一张 · PageUp",ViewerAction.Previous),("下一张 · Space",ViewerAction.Next),("适应屏幕 · B",ViewerAction.ToggleFit),("100% · Ctrl+0",ViewerAction.Actual),("适合宽度 · Shift+W",ViewerAction.FitWidth),("适合高度 · Shift+H",ViewerAction.FitHeight),("锁定缩放 · Ctrl+Shift+L",ViewerAction.LockSizing),("旋转画面（不修改原文件） · R",ViewerAction.Rotate),("全屏 / 窗口查看 · F11",ViewerAction.ToggleFullScreen),("返回浏览列表",ViewerAction.ReturnBrowser)})
         {
             if(IsImageViewerAction(option.Item2)&&selected?.Kind!="image")continue;
             string label=selected?.Kind!="image"&&option.Item2==ViewerAction.Previous?"上一个文件 · PageUp":selected?.Kind!="image"&&option.Item2==ViewerAction.Next?"下一个文件 · PageDown":option.Item1;
@@ -460,7 +465,7 @@ public sealed partial class MainWindow
         var open=new MenuFlyoutItem{Text=FileCommandLabels.ExternalOpen,IsEnabled=selected?.Item is not null};open.Click+=ExternalOpen;viewerContextMenu.Items.Add(open);
         var copy=new MenuFlyoutItem{Text=FileCommandLabels.CopyPath,IsEnabled=selected?.Item is not null};copy.Click+=CopyPath;viewerContextMenu.Items.Add(copy);var reveal=new MenuFlyoutItem{Text=FileCommandLabels.Reveal,IsEnabled=selected?.Item is not null};reveal.Click+=Reveal;viewerContextMenu.Items.Add(reveal);
     }
-    private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.LockSizing or ViewerAction.Slideshow;
+    private static bool IsImageViewerAction(ViewerAction action)=>action is ViewerAction.Fit or ViewerAction.ToggleFit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.Rotate or ViewerAction.LockSizing or ViewerAction.Slideshow;
     private void ShowViewerContextMenu(Point at){PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();BuildViewerContextMenu();viewerContextMenu!.ShowAt(ImageCanvas,new FlyoutShowOptions{Position=at});}
     private void SetViewerWheelBehavior(string mode)
     {

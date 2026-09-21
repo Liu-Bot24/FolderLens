@@ -23,6 +23,10 @@
                 <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" />
                 <TextBlock Text="{x:Bind FileTypeBadge, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" />
               </StackPanel>
+              <StackPanel Visibility="{x:Bind AudioOnlyVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" ToolTipService.ToolTip="此文件仅包含音频，没有视频画面" AutomationProperties.Name="仅音频，无视频画面">
+                <FontIcon Glyph="&#xE8D6;" FontSize="24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="仅音频" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+              </StackPanel>
               <StackPanel Visibility="{x:Bind ThumbnailErrorVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6" ToolTipService.ToolTip="{x:Bind ThumbnailError, Mode=OneWay}" AutomationProperties.Name="{x:Bind ThumbnailError, Mode=OneWay}">
                 <FontIcon Glyph="&#xE783;" FontSize="22" Foreground="{ThemeResource BrowserWarningBrush}" />
                 <TextBlock Text="{x:Bind ThumbnailErrorLabel, Mode=OneWay}" FontSize="11" />
@@ -422,8 +426,8 @@
           <Button x:Name="PreviewReturn" Width="Auto" MinWidth="100" Padding="8,2" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭窗口预览，保留目录和浏览位置（Esc）" />
           <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
           <Button Click="Next" ToolTipService.ToolTip="下一个文件（PageDown）" AutomationProperties.Name="下一个文件"><FontIcon Glyph="&#xE72A;" FontSize="16" /></Button>
-          <Button x:Name="PreviewFit" Width="Auto" MinWidth="64" Padding="6,2" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="完整显示图片（B）" />
-          <Button x:Name="PreviewActual" Width="Auto" MinWidth="48" Padding="6,2" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示（Ctrl+0）" />
+          <Button x:Name="PreviewFit" Width="Auto" MinWidth="64" Padding="6,2" Content="适应屏幕" Click="Fit" ToolTipService.ToolTip="切换完整图片 / 等宽阅读；等宽时从顶部开始（B）" />
+          <Button x:Name="PreviewActual" Width="Auto" MinWidth="48" Padding="6,2" Content="100%" Click="Actual" ToolTipService.ToolTip="按原图实际像素显示，并定位到图片中心（Ctrl+0）" />
           <Button x:Name="PreviewRotate" Click="Rotate" ToolTipService.ToolTip="顺时针旋转画面，不修改原文件（R）" AutomationProperties.Name="旋转画面"><FontIcon Glyph="&#xE7AD;" FontSize="16" /></Button>
           <Button x:Name="PreviewExternalPlayer" Content="播放" Width="Auto" MinWidth="52" Padding="8,2" Visibility="Collapsed" Click="PlayVideo" ToolTipService.ToolTip="在预览窗口播放或暂停视频" />
           <Button x:Name="VideoExternalOpen" Content="外部播放" Width="Auto" Padding="8,2" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用设置中的外部播放器打开视频" />

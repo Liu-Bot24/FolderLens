@@ -12,7 +12,7 @@ public sealed partial class MainWindow
             ViewerAction.Previous or ViewerAction.First=>file&&selected!.Ordinal>0,
             ViewerAction.Next or ViewerAction.Last=>file&&selected!.Ordinal<(results?.Count??firstPageSequence.Length)-1,
             ViewerAction.ReturnBrowser=>immersive||fullScreen,
-            ViewerAction.Fit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.LockSizing or ViewerAction.Rotate or ViewerAction.RotateCounterclockwise=>file&&selected!.Kind=="image"&&fitBitmap is not null&&sourceWidth>0&&sourceHeight>0&&!previewLoading,
+            ViewerAction.Fit or ViewerAction.ToggleFit or ViewerAction.Actual or ViewerAction.FitWidth or ViewerAction.FitHeight or ViewerAction.LockSizing or ViewerAction.Rotate or ViewerAction.RotateCounterclockwise=>file&&selected!.Kind=="image"&&fitBitmap is not null&&sourceWidth>0&&sourceHeight>0&&!previewLoading,
             ViewerAction.Slideshow=>slideShow||file&&selected!.Kind=="image"&&!previewLoading,
             _=>file
         };

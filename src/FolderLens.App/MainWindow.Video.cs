@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Media.Core;
@@ -32,15 +33,17 @@ public sealed partial class MainWindow
     private static bool IsVideoTransportTarget(DependencyObject? target)
     {
         for(var current=target;current is not null;current=VisualTreeHelper.GetParent(current))
-            if(current is MediaTransportControls)return true;
+            if(current is ButtonBase or RangeBase or ComboBox or ListViewBase)return true;
         return false;
     }
     private async void VideoSurfaceTapped(object sender,TappedRoutedEventArgs args)
     {
         if(selected?.Kind!="video"||IsVideoTransportTarget(args.OriginalSource as DependencyObject))return;
         args.Handled=true;
-        try{await PlayVideoCore();}catch(Exception error){if(!closing)ShowError(error);}
+        try{await ToggleVideoFromSource(args.OriginalSource as DependencyObject);}catch(Exception error){if(!closing)ShowError(error);}
     }
+    private Task ToggleVideoFromSource(DependencyObject? target)
+        =>selected?.Kind=="video"&&!IsVideoTransportTarget(target)?PlayVideoCore():Task.CompletedTask;
     private void SetVideoTransportVisible(bool visible)
     {
         videoPointerInside=visible;
@@ -89,7 +92,7 @@ public sealed partial class MainWindow
             if(current!=selection||closing)return;
             StopAudio();
             var player=new MediaPlayer{AutoPlay=false,Volume=.5};videoPlayer=player;
-            player.CommandManager.IsEnabled=false;
+            player.CommandManager.IsEnabled=true; // Native transport controls use this command link.
             videoElement=new MediaPlayerElement{AreTransportControlsEnabled=true,AutoPlay=false};
             videoElement.TransportControls.IsCompact=true;
             videoElement.TransportControls.ShowAndHideAutomatically=false;

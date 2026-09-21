@@ -838,7 +838,7 @@ public sealed partial class MainWindow : Window
                 var info=await media!.ReadCover(path,output,signature,prefetchSourceProbe,token,edge,allowCloud,WorkerPriority.Foreground);
                 if(current!=selection||token.IsCancellationRequested||resources!=imageResourceRevision)return;
                 string description=$"{info.VideoCodec??info.AudioCodec??"编码未知"} · {(info.DurationMs is {} ms?TimeSpan.FromMilliseconds(ms).ToString():"时长未知")}";
-                if(info.VideoStream is null&&!info.HasCover){QualityLabel.Text=description;return;}
+                if(info.VideoStream is null&&!info.HasCover){QualityLabel.Text="仅音频 · 无视频画面 · "+description;return;}
                 var bitmap=await LoadLocalBitmap(output);
                 try{await MediaTools.VerifySource(prefetchSourceProbe,path,signature,token,allowCloud);}
                 catch{bitmap.Dispose();throw;}
@@ -935,7 +935,7 @@ public sealed partial class MainWindow : Window
         catch(Exception ex){if(current==selection)ShowPreviewError(ex);}
         finally{tileGate.Release();if(tileReloadPending&&!closing){tileReloadPending=false;_=LoadVisibleTiles();}}
     }
-    private async void Fit(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.Fit);
+    private async void Fit(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.ToggleFit);
     private async void Actual(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.Actual);
     private async void Rotate(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.Rotate);
     private async void ContainerChanged(ListViewBase sender,ContainerContentChangingEventArgs e)
@@ -1027,7 +1027,7 @@ public sealed partial class MainWindow : Window
                 if(info.Details is {} mediaDetails)await catalog.ApplyFileDetails(expected.EntryId,expected.Version,expected.SourceRootId??activeId,expected.SourceRootEpoch??activeEpoch,mediaDetails,"ffprobe-v1",token);
                 if(!OwnsRow())return;
                 await ResolveRow(row,activeId,token);
-                if(kind=="audio"&&!info.HasCover)return;
+                if(info.VideoStream is null&&!info.HasCover)return;
                 await MediaTools.VerifySource(prefetchSourceProbe,source,properties.SourceSignature,token,allowCloud);
             }
             else return;
