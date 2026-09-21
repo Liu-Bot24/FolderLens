@@ -5,7 +5,7 @@
       <local:NavigationNodeConverter x:Key="NavigationNodeConverter" />
       <Style x:Key="ViewerPanelStyle" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource BrowserSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{ThemeResource BrowserLineBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource AppearanceChromeLineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
       </Style>
 
@@ -71,7 +71,7 @@
         </Grid>
       </DataTemplate>
       <Style x:Key="ColumnResizeGrip" TargetType="Thumb">
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Width="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" HorizontalAlignment="Center" /></Grid></ControlTemplate></Setter.Value></Setter>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Opacity="{ThemeResource AppearanceDividerOpacity}" Width="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" HorizontalAlignment="Center" /></Grid></ControlTemplate></Setter.Value></Setter>
       </Style>
       <Style x:Key="PreviewActionButtonStyle" TargetType="Button" BasedOn="{StaticResource NavigationButtonStyle}">
         <Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" />
@@ -231,16 +231,16 @@
         </TreeView>
       </Grid>
       <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="3" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
-        <Border Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
+        <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
       </local:ResizeDivider>
-      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearancePaneBorder}" CornerRadius="{ThemeResource AppearancePanelRadius}" Margin="{ThemeResource AppearanceBrowserMargin}">
+      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="{ThemeResource AppearancePaneBorder}" CornerRadius="{ThemeResource AppearancePanelRadius}" Margin="{ThemeResource AppearanceBrowserMargin}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <Grid x:Name="BrowserToolbar" Padding="10,10" ColumnSpacing="7" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,0,0,1">
+        <Grid x:Name="BrowserToolbar" Padding="10,10" ColumnSpacing="7" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,0,0,1">
           <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
@@ -386,7 +386,7 @@
             <Button x:Name="BrowserEmptyOpen" Content="打开文件夹" Click="PickRoot" HorizontalAlignment="Center" Margin="0,8,0,0" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" />
           </StackPanel>
         </ScrollViewer>
-        <Grid x:Name="BrowserStatusBar" Grid.Row="3" Background="{ThemeResource BrowserSurfaceBrush}" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0">
+        <Grid x:Name="BrowserStatusBar" Grid.Row="3" Background="{ThemeResource BrowserSurfaceBrush}" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -398,9 +398,9 @@
         </Grid>
       </Grid>
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
-        <Border Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
+        <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
       </local:VerticalResizeDivider>
-      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
+      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="10,10" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />

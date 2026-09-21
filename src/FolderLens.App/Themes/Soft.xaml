@@ -7,11 +7,13 @@
   <Thickness x:Key="AppearanceTreeMargin">8,4,0,4</Thickness>
   <Thickness x:Key="AppearancePreviewMargin">8,4,8,4</Thickness>
   <Thickness x:Key="AppearanceBrowserMargin">2,4,8,4</Thickness>
+  <x:Double x:Key="AppearanceDividerOpacity">0</x:Double>
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Light">
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#E3E7EF" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#D2D8E4" />
+      <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="Transparent" />
       <SolidColorBrush x:Key="ThumbnailMatBrush" Color="#F1F3F9" />
       <SolidColorBrush x:Key="MediaBadgeBackgroundBrush" Color="#E820242B" />
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="#FFFFFF" />
@@ -42,6 +44,7 @@
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#191C24" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#252A35" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#434B5D" />
+      <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="Transparent" />
       <SolidColorBrush x:Key="ThumbnailMatBrush" Color="#303746" />
       <SolidColorBrush x:Key="MediaBadgeBackgroundBrush" Color="#E820242B" />
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="#FFFFFF" />
@@ -69,10 +72,12 @@
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="#252A35" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="HighContrast">
+      <x:Double x:Key="AppearanceDividerOpacity">1</x:Double>
       <Thickness x:Key="AppearancePaneBorder">1</Thickness>
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+      <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="ThumbnailMatBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="MediaBadgeBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="{ThemeResource SystemColorWindowTextColor}" />

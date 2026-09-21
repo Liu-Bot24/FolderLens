@@ -69,6 +69,17 @@ public sealed partial class MainWindow
         if(((SolidColorBrush)viewerTop.Background).Color==oldPanelColor||Contrast(viewerCaption.Foreground,viewerTop.Background)<4.5||Contrast(viewerInformation.Foreground,viewerRight.Background)<4.5)throw new InvalidOperationException("查看浮层没有正确切换主题。");
         Shell.RequestedTheme=ElementTheme.Default;Shell.UpdateLayout();await Task.Delay(50);
         if(Shell.ActualTheme!=expected||!ReferenceEquals(originalSource,FilesGrid.ItemsSource))throw new InvalidOperationException("恢复系统主题改变了浏览源或主题。");
+        void CheckStructuralLines()
+        {
+            bool soft=appearance.Style=="soft";
+            foreach(var panel in new[]{BrowserToolbar,BrowserStatusBar,PreviewPane})
+                if((((SolidColorBrush)panel.BorderBrush).Color.A==0)!=soft)throw new InvalidOperationException("分区线没有随外观正确切换。");
+            foreach(var divider in new Microsoft.UI.Xaml.Controls.Border[]{(Microsoft.UI.Xaml.Controls.Border)PaneDivider.Children[0],(Microsoft.UI.Xaml.Controls.Border)PreviewHeightDivider.Children[0]})
+                if(divider.Opacity!=(soft?0:1))throw new InvalidOperationException("分栏线没有随外观正确切换。");
+            if(!PaneDivider.IsHitTestVisible||!PreviewHeightDivider.IsHitTestVisible||PaneDivider.ActualWidth<=0||PreviewHeightDivider.ActualHeight<=0)
+                throw new InvalidOperationException("隐藏分栏线破坏了拖动区域。");
+        }
+        CheckStructuralLines();
         var originalResult=results;var originalEpoch=epoch;var originalRoot=root;var originalSelection=selected;
         var originalGeneration=generation;var originalQueryRequest=queryRequest;var originalFilter=System.Text.Json.JsonSerializer.Serialize(CurrentFilter());
         var initialRadius=BrowserPane.CornerRadius;
@@ -76,10 +87,10 @@ public sealed partial class MainWindow
         var alternateAppearance=new FolderLens.Core.AppearancePreferences(appearance.Style=="soft"?"native":"soft");
         for(int pass=0;pass<3;pass++)
         {
-            ApplyAppearance(alternateAppearance);Shell.UpdateLayout();await Task.Delay(30);
+            ApplyAppearance(alternateAppearance);Shell.UpdateLayout();await Task.Delay(30);CheckStructuralLines();
             if(BrowserPane.CornerRadius==initialRadius)throw new InvalidOperationException("切换外观没有更新布局资源。");
             if(Contrast(ResultSummary.Foreground,BrowserPane.Background)<4.5||Contrast(ActiveFilterSummary.Foreground,BrowserPane.Background)<4.5)throw new InvalidOperationException("外观切换后文字对比度不足。");
-            ApplyAppearance(initialAppearance);Shell.UpdateLayout();await Task.Delay(30);
+            ApplyAppearance(initialAppearance);Shell.UpdateLayout();await Task.Delay(30);CheckStructuralLines();
             if(BrowserPane.CornerRadius!=initialRadius||((SolidColorBrush)BrowserPane.Background).Color!=initialColor)throw new InvalidOperationException("切回原外观后资源未恢复。");
         }
         report["appearanceState"]=new{sameResults=ReferenceEquals(originalResult,results),sameItems=ReferenceEquals(originalSource,FilesGrid.ItemsSource),sameEpoch=epoch==originalEpoch,sameRoot=root==originalRoot,sameSelection=ReferenceEquals(originalSelection,selected),originalGeneration,generation,originalQueryRequest,queryRequest,sameFilter=originalFilter==System.Text.Json.JsonSerializer.Serialize(CurrentFilter()),queryBusy};
