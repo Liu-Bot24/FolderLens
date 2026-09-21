@@ -8,7 +8,7 @@ namespace FolderLens.UnitTests;
 
 public sealed class TextRemoteTests
 {
-    [Theory][InlineData("window")][InlineData("find")][InlineData("index")]
+    [Theory][InlineData("window")][InlineData("find")][InlineData("index")][InlineData("excerpt")]
     public async Task FirstOperationRejectsReplacementAgainstApprovedSignature(string operation)
     {
         var f=Fixture("first\r\nsecond","utf-8");var observed=FileReadObservation.Read(f.Path);
@@ -18,10 +18,40 @@ public sealed class TextRemoteTests
         File.Move(f.Path,f.Path+".old");File.WriteAllBytes(f.Path,bytes);File.SetLastWriteTimeUtc(f.Path,written);
         await Assert.ThrowsAsync<IOException>(async()=>
         {
-            if(operation=="window")await remote.ReadWindow(0);
+            if(operation=="excerpt")await remote.ReadExcerpt(512);
+            else if(operation=="window")await remote.ReadWindow(0);
             else if(operation=="find")await remote.FindNext("first");
             else await remote.IndexStep();
         });
+    }
+    [Theory][InlineData("utf-8")][InlineData("utf-16")][InlineData("utf-16BE")][InlineData("gb18030")]
+    public async Task ExcerptUsesOnlyBoundedPrefixAndKeepsCompleteCharacters(string name)
+    {
+        string content=string.Concat(Enumerable.Repeat("开头文字😀第一行，第二行。\r\n",400));var f=Fixture(content,name);
+        // The unrelated tail is deliberately invalid text. An unbounded detection
+        // sample or document read would reject this file instead of returning its prefix.
+        using(var file=new FileStream(f.Path,FileMode.Open,FileAccess.Write)){file.SetLength(8L<<20);}
+        var observed=FileReadObservation.Read(f.Path);DateTime written=File.GetLastWriteTimeUtc(f.Path);
+        await using var worker=new WorkerClient(Worker(),Path.Combine(f.Root,"worker"));
+        var remote=new RemoteTextClient(worker,f.Path,new("root",1,1,1,1,1),sourceStamp:new(observed.Length,observed.ModifiedUtcTicks,observed.Signature));
+        var page=await remote.ReadExcerpt(512);
+        Assert.StartsWith("开头文字😀第一行",page.Text);Assert.StartsWith(page.Text,content,StringComparison.Ordinal);
+        Assert.InRange(page.Next-page.Start,508,512);Assert.False(page.AtEnd);Assert.Equal(8L<<20,page.Length);
+        Assert.DoesNotContain('\uFFFD',page.Text);Assert.False(char.IsHighSurrogate(page.Text[^1]));
+        Assert.Null(remote.IndexProgress);Assert.Equal(written,File.GetLastWriteTimeUtc(f.Path));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>remote.ReadExcerpt(2048));
+        using var cancel=new CancellationTokenSource();cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>remote.ReadExcerpt(512,cancel.Token));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(f.Root,"worker"),"*.png",SearchOption.AllDirectories));
+    }
+    [Fact] public async Task ExcerptPreservesEmptyAndBinaryStates()
+    {
+        var f=Fixture("","utf-8");
+        await using var worker=new WorkerClient(Worker(),Path.Combine(f.Root,"worker"));
+        var empty=await new RemoteTextClient(worker,f.Path,new("root",1,1,1,1,1)).ReadExcerpt(256);
+        Assert.Empty(empty.Text);Assert.True(empty.AtEnd);
+        File.WriteAllBytes(f.Path,new byte[512]);
+        await Assert.ThrowsAsync<InvalidDataException>(()=>new RemoteTextClient(worker,f.Path,new("root",1,1,1,2,1)).ReadExcerpt(256));
     }
     private static string Worker()
     {

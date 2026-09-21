@@ -144,7 +144,7 @@ public sealed partial class MainWindow : Window
             providerIdentity=await thumbnailWorker.GetProviderIdentity(lifetime.Token);
             StartupStage("providerIdentity");
             capabilityTask=ReadRuntimeCapabilities();
-            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","markdown"));
+            string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","markdown"));textThumbnailWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","text-thumbnails"),WorkerPriority.Visible);
             verificationComponents["content"]=Path.GetRelativePath(AppContext.BaseDirectory,contentExecutable);
             verificationComponents["scan"]=Path.GetRelativePath(AppContext.BaseDirectory,ScanWorkerClient.FindExecutable()??Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"));
             string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!deployedVerification&&!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
@@ -958,7 +958,7 @@ public sealed partial class MainWindow : Window
             if(--visibleConsumerCounts[old]==0)
             {
                 verifyRowRecycling?.Invoke(old,"last-consumer");
-                visibleConsumerCounts.Remove(old);visible.Remove(old);
+                visibleConsumerCounts.Remove(old);visible.Remove(old);TrimTextExcerpts();
                 // A group move temporarily recycles containers before the same
                 // visible rows are realized at their restored scroll position.
                 if(publicationRows?.Contains(old)!=true)
@@ -979,7 +979,7 @@ public sealed partial class MainWindow : Window
         if(row.Thumbnail is not null||row.ThumbnailError.Length>0||thumbnailRequests.ContainsKey(row))return;
         thumbnailWorkCount++;var request=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);thumbnailRequests[row]=request;var token=request.Token;string activeRoot=root,activeId=rootId;long activeEpoch=epoch,activeGeneration=generation;bool slot=false;ThumbnailCacheLease? cacheLease=null;ImageReply? produced=null;WorkerClient? decoder=null;string? coverAsset=null;
         long stageStart=verifyThumbnailStage is null?0:Stopwatch.GetTimestamp();
-        bool pipeline=false;ImageReply? metadataReply=null;
+        bool pipeline=false;ImageReply? metadataReply=null;int excerptRequestedBytes=0;
         SnapshotItem? requestedItem=null;
         bool OwnsRequest()=>!closing&&activeId==rootId&&activeEpoch==epoch&&!token.IsCancellationRequested
             &&visible.Contains(row)&&(firstPageRows.Contains(row)||results?.Contains(row)==true)
@@ -997,6 +997,24 @@ public sealed partial class MainWindow : Window
             decoder=thumbnailPool.Dequeue();
             var properties=await ResolveRow(row,activeId,token);Mark("properties");
             string kind=row.Kind,source=SourcePath(row),asset;
+            if(row.IsTextCard)
+            {
+                ReturnDecoder();
+                if(row.HasTextExcerpt)RememberTextExcerpt(row);
+                if(!row.NeedsTextExcerpt||properties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row)))return;
+                await textThumbnailSlot.WaitAsync(token);
+                try
+                {
+                    if(!OwnsRow()||!row.NeedsTextExcerpt)return;
+                    excerptRequestedBytes=row.TextLayout.ReadBytes;
+                    var client=new RemoteTextClient(textThumbnailWorker!,source,new(activeId,activeEpoch,activeGeneration,1,row.Item!.Version,1),sourceStamp:Stamp(row),allowCloud:approvedCloud.Contains(CloudKey(row)));
+                    verifyTextExcerptRead?.Invoke(row,excerptRequestedBytes);
+                    var page=await client.ReadExcerpt(excerptRequestedBytes,token);
+                    if(OwnsRow()){row.SetTextExcerpt(page.Text,excerptRequestedBytes,page.AtEnd);RememberTextExcerpt(row);}
+                }
+                finally{textThumbnailSlot.Release();}
+                return;
+            }
             if(kind is not ("image" or "video" or "audio"))return;
             int edge=kind=="image"?ThumbnailCache.SelectEdge(Math.Max(256,ThumbnailSize.Value*Shell.XamlRoot.RasterizationScale)):ThumbnailSize.Value*Shell.XamlRoot.RasterizationScale>512?1024:512;
             var stat=(Length:properties.LogicalBytes,Modified:properties.ModifiedUtcTicks);
@@ -1047,7 +1065,9 @@ public sealed partial class MainWindow : Window
         }
         catch(OperationCanceledException){}
         catch(Exception ex){if(OwnsRow()||(requestedItem is null&&OwnsRequest()))row.FailThumbnail(ex);}
-        finally{try{cacheLease?.Dispose();if(coverAsset is not null&&File.Exists(coverAsset))File.Delete(coverAsset);if(produced is not null)await decoder!.ReleaseAsset(produced);}catch(Exception ex){ShowError(ex);}finally{ReturnDecoder();if(pipeline)thumbnailPipelines.Release();if(thumbnailRequests.TryGetValue(row,out var value)&&ReferenceEquals(value,request)){thumbnailRequests.Remove(row);request.Dispose();}if(--thumbnailWorkCount==0&&closing)thumbnailsIdle.TrySetResult();}}
+        finally{try{cacheLease?.Dispose();if(coverAsset is not null&&File.Exists(coverAsset))File.Delete(coverAsset);if(produced is not null)await decoder!.ReleaseAsset(produced);}catch(Exception ex){ShowError(ex);}finally{ReturnDecoder();if(pipeline)thumbnailPipelines.Release();if(thumbnailRequests.TryGetValue(row,out var value)&&ReferenceEquals(value,request)){thumbnailRequests.Remove(row);request.Dispose();}if(--thumbnailWorkCount==0&&closing)thumbnailsIdle.TrySetResult();
+            if(excerptRequestedBytes>0&&!closing&&!token.IsCancellationRequested&&visible.Contains(row)&&row.NeedsTextExcerpt&&row.ThumbnailError.Length==0)_=LoadThumbnail(sender,row);
+        }}
     }
     private async Task LoadRowProperties(FileRow row,bool refresh=false)
     {
@@ -1109,6 +1129,7 @@ public sealed partial class MainWindow : Window
     }
     private void CancelThumbnails()
     {
+        ClearTextExcerpts();
         firstPageRows.Clear();
         firstPageSequence=[];firstPageFilter=null;
         foreach(var token in thumbnailRequests.Values){token.Cancel();token.Dispose();}
@@ -1258,7 +1279,7 @@ public sealed partial class MainWindow : Window
         try
         {
             SavedView? lastSession=null;await Cleanup(()=>{lastSession=CaptureClosingView();return Task.CompletedTask;});
-            foreach(Action action in new Action[]{()=>lifetime.Cancel(),()=>scanStop.Cancel(),()=>queryStop.Cancel(),()=>selectionStop.Cancel(),()=>prefetchStop.Cancel(),()=>physicalTreeStop.Cancel(),()=>ResetViewerGesture(),()=>fitResizeTimer?.Stop(),()=>viewerIdleTimer?.Stop(),()=>viewerGroupTimer?.Stop(),CancelThumbnails,()=>searchTimer?.Stop(),()=>slideTimer?.Stop(),()=>monitor?.Dispose(),()=>animationTimer?.Stop(),StopVideo,StopAudio})
+            foreach(Action action in new Action[]{()=>lifetime.Cancel(),()=>scanStop.Cancel(),()=>queryStop.Cancel(),()=>selectionStop.Cancel(),()=>prefetchStop.Cancel(),()=>physicalTreeStop.Cancel(),()=>ResetViewerGesture(),()=>fitResizeTimer?.Stop(),()=>viewerIdleTimer?.Stop(),()=>viewerGroupTimer?.Stop(),CancelThumbnails,()=>textThumbnailResizeTimer?.Stop(),()=>searchTimer?.Stop(),()=>slideTimer?.Stop(),()=>monitor?.Dispose(),()=>animationTimer?.Stop(),StopVideo,StopAudio})
                 await Cleanup(()=>{action();return Task.CompletedTask;});
             await Cleanup(CloseCapacityWindow);
             if(lastSession is not null)await Cleanup(()=>SaveLastSession(lastSession));if(settings is not null)await Cleanup(()=>settings.Save("desktop.json",new DesktopState(ThumbnailSize.Value,gridShowPaths,PreviewColumn.Width.Value,DetailsMode.IsChecked==true,treeFraction)));
@@ -1272,7 +1293,7 @@ public sealed partial class MainWindow : Window
             if(catalog is not null&&resultHandle is {} displayed){resultHandle=null;await Cleanup(()=>catalog.ReleaseSnapshot(displayed.Id));}
             if(verifyClosingState is not null)await Cleanup(verifyClosingState);
             await Cleanup(()=>prefetchSourceProbe.DisposeAsync().AsTask());
-            foreach(var worker in new[]{prefetchWorker,previewWorker,thumbnailWorker,secondThumbnailWorker,metadataWorker,contentWorker}.Concat(extraThumbnailWorkers))if(worker is not null)await Cleanup(()=>worker.DisposeAsync().AsTask());
+            foreach(var worker in new[]{prefetchWorker,previewWorker,thumbnailWorker,secondThumbnailWorker,metadataWorker,contentWorker,textThumbnailWorker}.Concat(extraThumbnailWorkers))if(worker is not null)await Cleanup(()=>worker.DisposeAsync().AsTask());
             if(thumbnailCache is not null)await Cleanup(()=>thumbnailCache.DisposeAsync().AsTask());
             if(browsingStorage is not null)await Cleanup(()=>browsingStorage.DisposeAsync().AsTask());else if(catalog is not null)await Cleanup(()=>catalog.DisposeAsync().AsTask());
         }

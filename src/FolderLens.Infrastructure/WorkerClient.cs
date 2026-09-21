@@ -105,7 +105,7 @@ public sealed class WorkerClient : IAsyncDisposable
     public Task<ImageReply> ReadMediaRange(string path,string? range,RequestContext context,SourceFileStamp sourceStamp,CancellationToken cancellation)=>RequestCore(path,"mediaRange",context,new{range},cancellation,sourceStamp,true);
     public Task<ImageReply> RequestData(string path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)
     {
-        if(operation is not("textWindow" or "textFind" or "textLinePosition" or "textIndexStep"))throw new ArgumentException("未知文本工作进程操作。",nameof(operation));
+        if(operation is not("textExcerpt" or "textWindow" or "textFind" or "textLinePosition" or "textIndexStep"))throw new ArgumentException("未知文本工作进程操作。",nameof(operation));
         return RequestCore(path,operation,context,parameters,cancellation,sourceStamp,true,allowCloud:allowCloud);
     }
     private async Task<ImageReply> RequestCore(string? path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp,bool dataOnly,bool fileless=false,bool allowCloud=false)
@@ -121,7 +121,7 @@ public sealed class WorkerClient : IAsyncDisposable
             await gate.WaitAsync(cancellation).ConfigureAwait(false);ownsGate=true;
             await idleReclaimTask.ConfigureAwait(false);
             deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lease.PressureCancellation);
-            double seconds=operation=="markdownRender"?3:operation=="capabilities"||dataOnly?30:priority!=WorkerPriority.Foreground?10:60;
+            double seconds=operation=="textExcerpt"?5:operation=="markdownRender"?3:operation=="capabilities"||dataOnly?30:priority!=WorkerPriority.Foreground?10:60;
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));var token=deadline.Token;
             long memoryLimit=operation=="markdownRender"||dataOnly?1L<<30:2L<<30;
             memoryLimit=Math.Min(memoryLimit,Math.Max(256L<<20,resources.Snapshot.HardLimitBytes/2));

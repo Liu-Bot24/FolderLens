@@ -20,11 +20,25 @@ public sealed class FileRow : ObservableObject
     public bool QuickCollectEnabled=>Item is not null&&!quickCollectBusy;
     public void SetCollected(bool value){if(SetProperty(ref isCollected,value)){OnPropertyChanged(nameof(IsCollected));OnPropertyChanged(nameof(CollectionGlyph));OnPropertyChanged(nameof(CollectionHint));}}
     public void SetQuickCollectBusy(bool value){quickCollectBusy=value;OnPropertyChanged(nameof(QuickCollectEnabled));}
+    private string textExcerpt="";
+    private int textExcerptBytes;
+    private bool textExcerptAtEnd;
+    public bool HasTextExcerpt=>textExcerptBytes>0;
+    public bool IsTextCard=>Kind is "text" or "markdown";
+    public TextThumbnailLayout TextLayout=>TextThumbnailLayout.ForWidth(CardWidth);
+    public bool NeedsTextExcerpt=>IsTextCard&&TextLayout.ReadBytes>0&&!textExcerptAtEnd&&textExcerptBytes<TextLayout.ReadBytes;
+    public string TextExcerpt=>TextLayout.Display(textExcerpt);
+    public int TextExcerptLines=>Math.Max(1,TextLayout.Lines);
+    public Visibility TextExcerptVisibility=>IsTextCard&&TextLayout.Lines>0&&textExcerpt.Length>0&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
+    public void SetTextExcerpt(string text,int bytes,bool atEnd)
+    {textExcerpt=text;textExcerptBytes=bytes;textExcerptAtEnd=atEnd;NotifyTextExcerpt();}
+    private void NotifyTextExcerpt()
+    {OnPropertyChanged(nameof(TextExcerpt));OnPropertyChanged(nameof(TextExcerptLines));OnPropertyChanged(nameof(TextExcerptVisibility));OnPropertyChanged(nameof(FileIconVisibility));}
     private bool audioOnly;
     public bool IsAudioOnly {get=>audioOnly;private set{if(SetProperty(ref audioOnly,value)){OnPropertyChanged(nameof(AudioOnlyVisibility));OnPropertyChanged(nameof(FileIconVisibility));}}}
     public Visibility AudioOnlyVisibility=>IsAudioOnly&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     private string thumbnailError="";
-    public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(AudioOnlyVisibility));OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
+    public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(AudioOnlyVisibility));OnPropertyChanged(nameof(TextExcerptVisibility));OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
     public string ThumbnailErrorLabel=>Kind=="video"?"视频封面不可用":"缩略图不可用";
     public Visibility ThumbnailErrorVisibility=>ThumbnailError.Length==0?Visibility.Collapsed:Visibility.Visible;
     public void FailThumbnail(Exception error)
@@ -45,11 +59,11 @@ public sealed class FileRow : ObservableObject
     public string SourceSignature {get;private set;}="";
     public string? HydrationState {get;private set;}
     private string kind="other";
-    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){if(value=="other")Thumbnail=null;OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}}}
+    public string Kind {get=>kind;private set{if(SetProperty(ref kind,value)){if(value=="other")Thumbnail=null;NotifyTextExcerpt();OnPropertyChanged(nameof(VideoBadgeVisibility));OnPropertyChanged(nameof(ThumbnailErrorLabel));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}}}
     public string SizeText=>Item is {} item?FormatBytes(item.Bytes):"";
     private double cardWidth=144;
     private Visibility pathVisibility=Visibility.Collapsed;
-    public double CardWidth {get=>cardWidth;private set{if(SetProperty(ref cardWidth,value))OnPropertyChanged(nameof(ThumbnailHeight));}}
+    public double CardWidth {get=>cardWidth;private set{if(SetProperty(ref cardWidth,value)){OnPropertyChanged(nameof(ThumbnailHeight));NotifyTextExcerpt();}}}
     public double ThumbnailHeight=>Math.Round(CardWidth*0.68);
     public Visibility PathVisibility {get=>pathVisibility;private set=>SetProperty(ref pathVisibility,value);}
     public void SetPresentation(double width,bool showPath){CardWidth=width;PathVisibility=showPath?Visibility.Visible:Visibility.Collapsed;}
@@ -64,7 +78,7 @@ public sealed class FileRow : ObservableObject
     public string Detail {get=>detail;private set=>SetProperty(ref detail,value);}
     public string CardInfo {get=>cardInfo;private set=>SetProperty(ref cardInfo,value);}
     public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value)){OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(AudioOnlyVisibility));}}}
-    public Visibility FileIconVisibility=>!IsAudioOnly&&Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
+    public Visibility FileIconVisibility=>TextExcerptVisibility!=Visibility.Visible&&!IsAudioOnly&&Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     public string FileTypeLabel=>FileTypeDisplay.Label(Name,Kind);
     public string FileTypeBadge=>FileTypeDisplay.Badge(Name,Kind);
     public SnapshotItem? Item {get;private set;}
@@ -76,7 +90,7 @@ public sealed class FileRow : ObservableObject
             throw new InvalidOperationException("文件列表已变化，请刷新后重试。");
         Item=item;Ordinal=item.Ordinal;OnPropertyChanged(nameof(QuickCollectEnabled));
     }
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){IsAudioOnly=false;DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){SetTextExcerpt("",0,false);IsAudioOnly=false;DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";CardInfo="请刷新后重试";Detail=UserMessages.Error(error);}
     public void DescribeImage(int width,int height,string format){CardInfo=$"{width:N0} × {height:N0}  {format.ToUpperInvariant()}";Detail=$"{CardInfo} · {SizeText}";}
     public void UpdateProperties(FileProperties file,bool updateCollection=true)

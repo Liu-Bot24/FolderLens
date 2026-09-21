@@ -15,7 +15,7 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
     private CancellationTokenSource? searchCancellation;
     private TextWorkerParameters? searchParameters;
     private TextSearchBatch? finishedSearch;
-    public static bool Supports(string? operation)=>operation is "textWindow" or "textFind" or "textLinePosition" or "textIndexStep";
+    public static bool Supports(string? operation)=>operation is "textExcerpt" or "textWindow" or "textFind" or "textLinePosition" or "textIndexStep";
     private string Key=>reader!.Snapshot.Key(path!,reader.EncodingName,fileVersion);
     public async Task<TextWorkerResponse> Execute(WorkerEnvelope request)
     {
@@ -32,6 +32,17 @@ internal sealed class ContentTextSession(string taskDirectory) : IAsyncDisposabl
         if(!Path.IsPathFullyQualified(approved.Path)||approved.Path.Any(c=>char.IsControl(c)))throw new InvalidDataException("InvalidTextPath");
         string requestedPath=Path.GetFullPath(approved.Path);
         ApprovedInput.CheckAccess(File.GetAttributes(requestedPath),approved.AllowCloud);
+        if(request.Operation=="textExcerpt")
+        {
+            if(options.MaxBytes>1024||options.ByteOffset!=0)throw new InvalidDataException("TextExcerptBudget");
+            await CloseDocument();
+            using var excerpt=new BoundedTextReader(requestedPath,options.Encoding,cancellation,
+                new ApprovedInput(requestedPath,approved.ExpectedLength,approved.ExpectedLastWriteTicks,approved.AllowCloud,approved.SourceSignature),options.MaxBytes);
+            if(options.ExpectedSnapshot is {} expected&&expected!=excerpt.Snapshot)throw new IOException("FileChanged");
+            var page=excerpt.ReadWindow(0,options.MaxBytes,cancellation);
+            return new(excerpt.Snapshot,excerpt.EncodingName,excerpt.Snapshot.Key(requestedPath,excerpt.EncodingName,request.Context.FileVersion),
+                Window:new(page.Start,page.Next,page.Length,page.Text,page.Encoding,page.AtEnd,page.OriginalByteOffsets));
+        }
         if(reader is null || path!=requestedPath || selectedEncoding!=options.Encoding || fileVersion!=request.Context.FileVersion)
         {
             await CloseDocument();path=requestedPath;selectedEncoding=options.Encoding;fileVersion=request.Context.FileVersion;

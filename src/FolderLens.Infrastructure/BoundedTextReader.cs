@@ -27,15 +27,16 @@ public sealed class BoundedTextReader : IDisposable
     public int BomLength {get;}
     public TextFileSnapshot Snapshot {get;}
     public string VersionKey=>Snapshot.Key(path,EncodingName);
-    public BoundedTextReader(string path,string? selectedEncoding=null,CancellationToken cancellation=default,FolderLens.Contracts.ApprovedInput? approved=null)
+    public BoundedTextReader(string path,string? selectedEncoding=null,CancellationToken cancellation=default,FolderLens.Contracts.ApprovedInput? approved=null,int detectionBytes=256*1024)
     {
+        if(detectionBytes is <16 or >256*1024)throw new ArgumentOutOfRangeException(nameof(detectionBytes));
         this.path=Path.GetFullPath(path);
-        stream=new FileStream(this.path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete,64*1024,FileOptions.RandomAccess|FileOptions.Asynchronous);
+        stream=new FileStream(this.path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete,detectionBytes<64*1024?1:64*1024,FileOptions.RandomAccess|FileOptions.Asynchronous);
         try
         {
             cancellation.ThrowIfCancellationRequested();Snapshot=TextFileSnapshot.Capture(stream);
             approved?.Observe(new FolderLens.Contracts.FileReadObservation(Snapshot.Length,DateTime.FromFileTimeUtc(Snapshot.LastWriteTicks).Ticks,Snapshot.SourceSignature!));
-            byte[] sample=new byte[(int)Math.Min(256*1024,Length)];ReadExactly(sample,cancellation);
+            byte[] sample=new byte[(int)Math.Min(detectionBytes,Length)];ReadExactly(sample,cancellation);
             var selection=TextEncodingPolicy.Detect(sample,Length==sample.Length,selectedEncoding);encoding=selection.Encoding;BomLength=selection.BomLength;
             checkpoints.Add(BomLength);CheckVersion();
         }

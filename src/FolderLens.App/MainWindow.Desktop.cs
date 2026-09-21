@@ -202,6 +202,7 @@ public sealed partial class MainWindow
         results?.SetPresentation(width,gridShowPaths);
         if(FilesGrid.ItemsSource is FileRow[] initial)
             foreach(var row in initial)row.SetPresentation(width,gridShowPaths);
+        ScheduleTextThumbnails();
     }
     private void PresentationChanged(object sender,RoutedEventArgs e)
     {

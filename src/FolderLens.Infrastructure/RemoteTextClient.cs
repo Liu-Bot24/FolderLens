@@ -28,10 +28,17 @@ public sealed class RemoteTextClient
     {
         this.allowCloud=allowCloud;this.worker=worker;this.path=Path.GetFullPath(path);this.context=context;this.encoding=encoding;stamp=sourceStamp;
     }
-    public async Task<TextWindow> ReadWindow(long byteOffset,int maxBytes=64*1024,CancellationToken cancellation=default)
+    public Task<TextWindow> ReadExcerpt(int maxBytes,CancellationToken cancellation=default)
+    {
+        if(maxBytes is <16 or >1024)throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        return ReadPage("textExcerpt",0,maxBytes,cancellation);
+    }
+    public Task<TextWindow> ReadWindow(long byteOffset,int maxBytes=64*1024,CancellationToken cancellation=default)
+        =>ReadPage("textWindow",byteOffset,maxBytes,cancellation);
+    private async Task<TextWindow> ReadPage(string operation,long byteOffset,int maxBytes,CancellationToken cancellation)
     {
         if(byteOffset<0 || maxBytes is <16 or >64*1024)throw new ArgumentOutOfRangeException(nameof(byteOffset));
-        var reply=await Send("textWindow",new(encoding,ByteOffset:byteOffset,MaxBytes:maxBytes),cancellation).ConfigureAwait(false);
+        var reply=await Send(operation,new(encoding,ByteOffset:byteOffset,MaxBytes:maxBytes),cancellation).ConfigureAwait(false);
         var page=reply.Window??throw new InvalidDataException("文本工作进程未返回窗口。");
         if(page.Start<0 || page.Next<page.Start || page.Next>page.Length || page.Next-page.Start>maxBytes || page.OriginalByteOffsets.Length!=page.Text.Length+1 || page.OriginalByteOffsets[0]!=0 || page.OriginalByteOffsets[^1]!=page.Next-page.Start)
             throw new InvalidDataException("文本工作进程窗口边界无效。");
