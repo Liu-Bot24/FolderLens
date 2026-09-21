@@ -851,10 +851,11 @@ public sealed partial class MainWindow : Window
             }
             finally{if(File.Exists(output))File.Delete(output);}
         }
-        catch(Exception) when(request.IsCancellationRequested)
+        catch(Exception error) when(request.IsCancellationRequested)
         {
             // Playing or switching superseded this cover request. Its result
             // (including decoder failure) no longer owns the preview surface.
+            if(error is not OperationCanceledException)scanLog?.Write("cancelled-cover-cleanup-error",new{request=current,type=error.GetType().FullName,error.HResult,message=error.Message});
             RecordPreviewStage(current,"coverCancelled");
         }
         finally{if(ReferenceEquals(mediaCoverStop,request))mediaCoverStop=null;}

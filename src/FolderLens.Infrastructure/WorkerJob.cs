@@ -27,6 +27,10 @@ internal sealed class WorkerJob : IDisposable
             if(!AssignProcessToJobObject(handle,process.Handle))throw new Win32Exception(Marshal.GetLastWin32Error());
             processId=process.Id;WorkerResources.Shared.Register(process);
         }
+        // AssignProcessToJobObject returns access denied for an already-exited
+        // child. Its output/exit code still belongs to the caller; a live child
+        // must never bypass job assignment or its resource limits.
+        catch(Win32Exception error) when(error.NativeErrorCode==5&&process.HasExited){}
         catch{if(!process.HasExited)process.Kill(entireProcessTree:true);throw;}
     }
     internal static void EnsureAggregateLimit()

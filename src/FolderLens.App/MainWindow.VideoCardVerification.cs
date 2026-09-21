@@ -102,5 +102,21 @@ public sealed partial class MainWindow
             report["widths"]=widths;report["durationBindingAndVersionGuard"]=true;report["imageUnaffected"]=true;report["status"]="PASS";
         }
         finally{Shell.Children.Remove(panel);}
+        string batch=Path.Combine(source,"bulk-videos");Directory.CreateDirectory(batch);
+        for(int i=0;i<24;i++)File.Copy(args[option+1],Path.Combine(batch,$"clip-{i:D2}.mp4"));
+        await OpenRoot(batch);
+        await WaitUntil(()=>results?.Count==24,TimeSpan.FromSeconds(20));
+        for(int i=0;i<24;i++)
+        {
+            var row=(FileRow)results![i]!;FilesGrid.ScrollIntoView(row);
+            await WaitUntil(()=>row.Thumbnail is not null||row.ThumbnailError.Length>0,TimeSpan.FromSeconds(20));
+            if(row.Thumbnail is null)throw new InvalidOperationException($"批量视频封面失败 {i}: {row.ThumbnailError}");
+            if(i%4==0)
+            {
+                await SelectPreview(row);
+                if(previewReadySelection!=selection||fitBitmap is null)throw new InvalidOperationException("批量封面期间前台预览失败。");
+            }
+        }
+        report["coldVideoCards"]=24;report["foregroundCoversDuringBatch"]=6;
     }
 }

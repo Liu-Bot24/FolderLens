@@ -3,6 +3,7 @@ namespace FolderLens.Infrastructure;
 /// <summary>Bounded, cancellable source attribute reads, including mapped drives, in the scan process.</summary>
 public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=null):IAsyncDisposable
 {
+    internal SourceFileProbe(ScanWorkerClient client):this(){worker=client;}
     private readonly SemaphoreSlim gate=new(1,1);
     private ScanWorkerClient? worker;
     private bool disposed;

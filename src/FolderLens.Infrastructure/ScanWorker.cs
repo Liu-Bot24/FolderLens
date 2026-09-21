@@ -105,6 +105,8 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
     private Process? process;private NamedPipeServerStream? pipe;private WorkerJob? job;
     private readonly string instance=Guid.NewGuid().ToString("N"),nonce=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private int busy;
+    private bool stopRequired;
+    internal Func<Process,bool>? WaitForExitOverride {get;set;}
     public int? ProcessId=>process is {HasExited:false}?process.Id:null;
     // A shared scan worker holds at most eight suspended OS enumerators. Only
     // the requested cursor advances; it cannot prefetch an old directory while paused.
@@ -129,6 +131,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool completed=false;
         try
         {
+            if(stopRequired)await Stop().ConfigureAwait(false);
             if(process is null)
             {
                 if(type!="cursorOpen")throw new ScanWorkerUnavailableException("目录扫描上下文已丢失，请刷新后重试。");
@@ -144,7 +147,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         }
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new ScanWorkerUnavailableException("目录扫描批次 I/O 超时，保留未完成范围。");}
         catch(IOException error){throw new ScanWorkerUnavailableException("目录扫描连接中断，保留未完成范围。",error);}
-        finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
+        finally{try{if(!completed)await Stop().ConfigureAwait(false);}finally{Interlocked.Exchange(ref busy,0);}}
     }
     public async IAsyncEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud,[EnumeratorCancellation]CancellationToken cancellation)
     {
@@ -154,6 +157,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool terminal=false;
         try
         {
+            if(stopRequired)await Stop().ConfigureAwait(false);
             if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");
             try{await ScanWorkerProtocol.Write(pipe!,new("directory",instance,nonce,request,PathRules.ValidateSource(directory),allowCloud),timeout.Token).ConfigureAwait(false);}
@@ -179,8 +183,8 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         finally
         {
             // If the consumer stops enumeration before its terminal packet, unread frames cannot contaminate the next directory.
-            if(!terminal || timeout.IsCancellationRequested || cancellation.IsCancellationRequested)await Stop().ConfigureAwait(false);
-            Interlocked.Exchange(ref busy,0);
+            try{if(!terminal || timeout.IsCancellationRequested || cancellation.IsCancellationRequested)await Stop().ConfigureAwait(false);}
+            finally{Interlocked.Exchange(ref busy,0);}
         }
     }
     public async Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation,bool allowCloud=false)
@@ -190,6 +194,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool completed=false;
         try
         {
+            if(stopRequired)await Stop().ConfigureAwait(false);
             if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");await ScanWorkerProtocol.Write(pipe!,new("stat",instance,nonce,request,PathRules.ValidateSource(path),allowCloud),timeout.Token).ConfigureAwait(false);
             var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
@@ -197,7 +202,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
             completed=true;return reply.Packet;
         }
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("路径身份核验超时。");}
-        finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
+        finally{try{if(!completed)await Stop().ConfigureAwait(false);}finally{Interlocked.Exchange(ref busy,0);}}
     }
     public async Task<string> ResolveImage(string root,string document,string relativeUrl,CancellationToken cancellation)
     {
@@ -206,6 +211,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         bool completed=false;
         try
         {
+            if(stopRequired)await Stop().ConfigureAwait(false);
             if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
             string request=Guid.NewGuid().ToString("N");
             await ScanWorkerProtocol.Write(pipe!,new("resolveImage",instance,nonce,request,PathRules.ValidateSource(root),Document:PathRules.ValidateSource(document),RelativeUrl:relativeUrl),timeout.Token).ConfigureAwait(false);
@@ -221,7 +227,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
             };
         }
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("Markdown 图片路径核验超时。");}
-        finally{if(!completed)await Stop().ConfigureAwait(false);Interlocked.Exchange(ref busy,0);}
+        finally{try{if(!completed)await Stop().ConfigureAwait(false);}finally{Interlocked.Exchange(ref busy,0);}}
     }
     private async Task Start(CancellationToken cancellation,CancellationToken callerCancellation)
     {
@@ -252,13 +258,25 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
     }
     private async Task Stop()
     {
-        pipe?.Dispose();pipe=null;job?.Dispose();job=null;
+        stopRequired=true;
+        pipe?.Dispose();pipe=null;
+        try
+        {
+            if(process is not null&&!process.HasExited)
+            {
+                try{process.Kill(entireProcessTree:true);}
+                catch(InvalidOperationException) when(process.HasExited){} // Exited between the check and termination.
+            }
+        }
+        finally{job?.Dispose();job=null;}
         if(process is not null)
         {
-            if(!process.HasExited)process.Kill(entireProcessTree:true);
-            if(!await Task.Run(()=>process.WaitForExit(5000)).ConfigureAwait(false))throw new TimeoutException("目录扫描进程未能在终止后退出。");
+            if(!await Task.Run(()=>WaitForExitOverride?.Invoke(process)??process.WaitForExit(5000)).ConfigureAwait(false))throw new TimeoutException("目录扫描进程未能在终止后退出。");
             process.Dispose();process=null;
         }
+        // A failed wait retains the old process. Finish its cleanup before
+        // accepting another request; never reuse its closed pipe or orphan it.
+        stopRequired=false;
     }
     public async ValueTask DisposeAsync()=>await Stop().ConfigureAwait(false);
 }
