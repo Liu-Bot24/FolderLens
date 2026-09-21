@@ -11,7 +11,7 @@
 
       <Style x:Key="NavigationButtonStyle" TargetType="Button">
         <Setter Property="MinWidth" Value="32" /><Setter Property="MinHeight" Value="32" />
-        <Setter Property="Padding" Value="7" /><Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="7" /><Setter Property="CornerRadius" Value="{ThemeResource AppearanceControlRadius}" />
         <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
       </Style>
       <DataTemplate x:Key="Card" x:DataType="local:FileRow">
@@ -82,7 +82,7 @@
         <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="9,4" />
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="CornerRadius" Value="{ThemeResource AppearanceControlRadius}" />
       </Style>
       <Style TargetType="ToggleButton">
         <Setter Property="ToolTipService.ToolTip" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
@@ -129,6 +129,11 @@
         <MenuFlyoutItem Text="移动到…" Tag="MoveFile" Click="MoveFile" />
         <MenuFlyoutItem Text="删除…  Delete" Tag="DeleteFile" Click="DeleteFile" /></MenuBarItem>
       <MenuBarItem Title="查看">
+        <MenuFlyoutSubItem Text="主题">
+          <RadioMenuFlyoutItem x:Name="NativeAppearance" Text="原生" Tag="native" GroupName="Appearance" IsChecked="True" Click="ChooseAppearance" />
+          <RadioMenuFlyoutItem x:Name="SoftAppearance" Text="柔和" Tag="soft" GroupName="Appearance" Click="ChooseAppearance" />
+        </MenuFlyoutSubItem>
+        <MenuFlyoutSeparator />
         <MenuFlyoutItem Text="窗口预览 / 返回列表" Tag="TogglePreview" Click="TogglePreview" />
         <MenuFlyoutItem Text="全屏 / 窗口查看  F11" Tag="ToggleFullScreen" Click="ToggleFullScreen" />
         <MenuFlyoutItem Text="幻灯片设置…" Click="ConfigureSlideshow" />
@@ -206,7 +211,7 @@
         <ColumnDefinition Width="6" />
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
-      <Grid x:Name="TreePane" Background="{ThemeResource BrowserChromeBrush}">
+      <Grid x:Name="TreePane" Background="{ThemeResource AppearanceSidebarBrush}" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearanceTreeMargin}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
@@ -228,7 +233,7 @@
       <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="3" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
         <Border Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
       </local:ResizeDivider>
-      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="8" Margin="2,0,8,0">
+      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearancePaneBorder}" CornerRadius="{ThemeResource AppearancePanelRadius}" Margin="{ThemeResource AppearanceBrowserMargin}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -358,10 +363,10 @@
           <ListView x:Name="FilesList" SizeChanged="ClipBrowserViewport" Grid.Row="1" SelectionMode="Extended" ItemTemplate="{StaticResource DetailRow}" SelectionChanged="SelectFile" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollMode="Enabled" AutomationProperties.AutomationId="FileList">
             <ListView.Resources><ResourceDictionary><ResourceDictionary.ThemeDictionaries>
               <ResourceDictionary x:Key="Light">
-                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#CFE4FF" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#BDD9FA" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#A9CCF5" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="{ThemeResource BrowserDetailsSelectedColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="{ThemeResource BrowserDetailsHoverColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="{ThemeResource BrowserDetailsPressedColor}" />
               </ResourceDictionary>
               <ResourceDictionary x:Key="Dark">
-                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#174A78" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#205E94" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#2469A3" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="{ThemeResource BrowserDetailsSelectedColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="{ThemeResource BrowserDetailsHoverColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="{ThemeResource BrowserDetailsPressedColor}" />
               </ResourceDictionary>
               <ResourceDictionary x:Key="HighContrast">
                 <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="{ThemeResource SystemColorHighlightColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="{ThemeResource SystemColorHighlightColor}" /><SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="{ThemeResource SystemColorHighlightColor}" />
@@ -395,7 +400,7 @@
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
         <Border Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
       </local:VerticalResizeDivider>
-      <Grid x:Name="PreviewPane" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource BrowserChromeBrush}" Grid.Row="2">
+      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="10,10" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />

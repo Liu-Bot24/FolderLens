@@ -82,7 +82,7 @@ public static class ScanDirectoryReader
                         string? skip=reparse&&!cloud?isDirectory?"LinkDirectorySkipped":"LinkFileSkipped":!allowCloud&&deferred&&isDirectory?"DeferredOffline":null;
                         long creation=Marshal.ReadInt64(record,8),write=Marshal.ReadInt64(record,24),change=Marshal.ReadInt64(record,32),bytes=Marshal.ReadInt64(record,40),allocated=Marshal.ReadInt64(record,48);
                         if(bytes<0)throw new IOException("InvalidDirectoryLength");
-                        string? fileIdentity=extended&&identity.VolumeIdentity is {} volume&&creation>0&&!deferred&&skip is null
+                        string? fileIdentity=extended&&identity.VolumeIdentity is {} volume&&!volume.StartsWith("legacy:",StringComparison.Ordinal)&&creation>0&&!deferred&&skip is null
                             ?$"{volume}:{unchecked((ulong)Marshal.ReadInt64(record,72)):X16}{unchecked((ulong)Marshal.ReadInt64(record,80)):X16}:{creation:X16}":null;
                         batch.Add(new(name,isDirectory,isDirectory?0:bytes,ToTicks(write),ToTicks(creation),flags,deferred?"placeholder":"local",skip,
                             deferred||skip is not null||allocated<0?null:allocated,fileIdentity,deferred||skip is not null||change<=0?null:change));

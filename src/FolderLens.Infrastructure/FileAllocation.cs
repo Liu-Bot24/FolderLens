@@ -24,6 +24,12 @@ public static class FileAllocation
         // A file ID can be reused after deletion. Creation identity must participate in the cache identity.
         if(hasBasic && basic.Creation>0 && GetFileIdInformation(handle,18,out IdInfo id,Marshal.SizeOf<IdInfo>()))
         {volume=$"{id.Volume:X16}";identity=$"{volume}:{id.Low:X16}{id.High:X16}:{basic.Creation:X16}";}
+        else if(hasBasic && basic.Creation>0)
+        {
+            // SMB providers may expose only the legacy 64-bit file index. Read it
+            // from the same handle; a path or timestamp alone is not an identity.
+            (identity,volume)=ReadLegacyIdentity(handle,basic.Creation);
+        }
         string mode=GetCaseInformation(handle,23,out CaseInfo sensitivity,Marshal.SizeOf<CaseInfo>())?(sensitivity.Flags&1)!=0?"sensitive":"insensitive":"unknown";
         uint? tag=GetTagInformation(handle,9,out TagInfo tags,Marshal.SizeOf<TagInfo>())?tags.Tag:null;
         string? locator=null;
@@ -36,6 +42,15 @@ public static class FileAllocation
         }
         return new(allocated,identity,volume,hasBasic&&basic.Change>0?basic.Change:null,mode,tag){ResolvedLocation=locator,Attributes=hasBasic?basic.Attributes:null};
     }
+    internal static (string? Identity,string? Volume) ReadLegacyIdentity(SafeFileHandle handle,long creation)
+    {
+        if(creation<=0||!GetFileInformationByHandle(handle,out LegacyInfo info))return(null,null);
+        ulong fileIndex=((ulong)info.IndexHigh<<32)|info.IndexLow;
+        long observedCreation=unchecked((long)(((ulong)info.CreationHigh<<32)|info.CreationLow));
+        if(fileIndex==0||observedCreation!=creation)return(null,null);
+        string volume=$"legacy:{info.Volume:X8}";
+        return($"{volume}:{fileIndex:X16}:{creation:X16}",volume);
+    }
     public static bool IsDeferred(long attributes)=>(attributes&(0x1000|0x40000|0x400000))!=0;
     // Cloud tags vary in bits 12..15; they are not junction/symlink tags.
     public static bool IsCloudTag(uint tag)=>(tag&0xFFFF0FFF)==0x9000001A;
@@ -46,6 +61,9 @@ public static class FileAllocation
     [StructLayout(LayoutKind.Sequential)]private struct TagInfo{public uint Attributes,Tag;}
     [StructLayout(LayoutKind.Sequential)]private struct StandardInfo{public long Allocation,EndOfFile;public uint Links;public byte DeletePending,Directory;}
     [StructLayout(LayoutKind.Sequential)]private struct IdInfo{public ulong Volume,Low,High;}
+    [StructLayout(LayoutKind.Sequential)]private struct LegacyInfo
+    {public uint Attributes,CreationLow,CreationHigh,AccessLow,AccessHigh,WriteLow,WriteHigh,Volume,SizeHigh,SizeLow,Links,IndexHigh,IndexLow;}
+    [DllImport("kernel32.dll",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GetFileInformationByHandle(SafeFileHandle handle,out LegacyInfo info);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
     [DllImport("kernel32.dll",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle,int kind,out StandardInfo info,int size);
     [DllImport("kernel32.dll",EntryPoint="GetFileInformationByHandleEx",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GetFileIdInformation(SafeFileHandle handle,int kind,out IdInfo info,int size);

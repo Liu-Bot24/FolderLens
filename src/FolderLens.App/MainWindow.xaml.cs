@@ -118,6 +118,7 @@ public sealed partial class MainWindow : Window
             if(closing)return;
             StartupStage("catalog");
             settings=new AtomicSettings(Path.Combine(dataDirectory,"config"));InitializeScanDiagnostics();
+            await RestoreAppearance();
             await RefreshCollectionsTree();
             await RestoreDesktop();
             StartupStage("desktopAndCollections");
