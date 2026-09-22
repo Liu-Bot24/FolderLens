@@ -36,7 +36,7 @@ public sealed partial class MainWindow
     {
         // Assigning image src before the document's load event makes navigation
         // completion wait for decoding and defeats body-first rendering.
-        if(markdownLoading||markdownViewportBusy||closing||MarkdownHost.Visibility!=Microsoft.UI.Xaml.Visibility.Visible||markdown?.CoreWebView2 is not {} core)return;
+        if(markdownLoading||markdownViewportBusy||closing||!MarkdownPresentationRequested||MarkdownHost.Visibility!=Microsoft.UI.Xaml.Visibility.Visible||markdown?.CoreWebView2 is not {} core)return;
         markdownViewportBusy=true;
         try
         {
@@ -65,7 +65,7 @@ public sealed partial class MainWindow
         try
         {
             e.Response=Response([],403,"Forbidden","Content-Type: text/plain");
-            if(!ReferenceEquals(markdown,view)||closing)return;
+            if(!ReferenceEquals(markdown,view)||closing||!MarkdownPresentationRequested)return;
             if(e.ResourceContext==CoreWebView2WebResourceContext.Document&&e.Request.Uri==markdownDocumentUrl)
             {e.Response=Response(markdownDocument,200,"OK","Content-Type: text/html; charset=utf-8");return;}
             if(!Uri.TryCreate(e.Request.Uri,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host!="folderlens.local"||!uri.AbsolutePath.StartsWith("/assets/",StringComparison.Ordinal))return;
@@ -124,7 +124,7 @@ public sealed partial class MainWindow
         {
             Failed(error is TimeoutException||error is IOException and not (FileNotFoundException or DirectoryNotFoundException));
             RecordWebView("MarkdownResourceFailure "+error.GetType().Name);
-            if(!closing&&requestedSelection==selection&&requestedDocument==markdownDocumentUrl&&ReferenceEquals(markdown,view))Status.Text="部分 Markdown 媒体无法显示；文档正文仍可阅读。";
+            if(!closing&&requestedResource?.Token.IsCancellationRequested!=true&&MarkdownPresentationRequested&&requestedSelection==selection&&requestedDocument==markdownDocumentUrl&&ReferenceEquals(markdown,view))Status.Text="部分 Markdown 媒体无法显示；文档正文仍可阅读。";
         }
         finally{if(slot)markdownResourceGate.Release();if(counted)markdownResourceRequests--;}
     }

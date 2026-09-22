@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     private Border? loadingBadge;
     private TextBlock? loadingText;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? fitResizeTimer;
+    private long previewLayoutRevision;
     private void InitializePreviewState()
     {
         ImageCanvas.CreateResources+=ImageResourcesCreated;
@@ -21,8 +22,15 @@ public sealed partial class MainWindow
         loadingBadge=new Border{Child=loadingText,Background=new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(210,35,35,35)),Padding=new Thickness(12,7,12,7),CornerRadius=new CornerRadius(4),Margin=new Thickness(12),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,IsHitTestVisible=false,Visibility=Visibility.Collapsed};
         PreviewSurface.Children.Add(loadingBadge);
         fitResizeTimer=DispatcherQueue.CreateTimer();fitResizeTimer.Interval=TimeSpan.FromMilliseconds(180);fitResizeTimer.IsRepeating=false;
-        fitResizeTimer.Tick+=async(_,_)=>{if(selected is null||previewLoading||animationRunning||zoom>0||closing)return;try{await EnsureFitResolution(selected,selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}};
+        fitResizeTimer.Tick+=async(_,_)=>await RefreshFitAfterResize();
         ImageCanvas.SizeChanged+=(_,_)=>{fitResizeTimer.Stop();fitResizeTimer.Start();};
+    }
+    private async Task RefreshFitAfterResize()
+    {
+        if(selected is null||previewLoading||animationRunning||zoom>0||closing)return;
+        long current=selection,layout=previewLayoutRevision;var token=selectionStop.Token;
+        try{await EnsureFitResolution(selected,current,token);}
+        catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&layout==previewLayoutRevision&&!token.IsCancellationRequested)ShowPreviewError(ex);}
     }
     private void PreparePreview()
     {
@@ -45,6 +53,7 @@ public sealed partial class MainWindow
     private async Task EnsureFitResolution(FileRow row,long current,CancellationToken cancellation)
     {
         using var operation=browserWork.Enter();if(operation is null||closing)return;
+        if(verifyPreviewUpdateBarrier is not null)await verifyPreviewUpdateBarrier("fit",cancellation);
         if(rawPreviewOnly){await EnsureEmbeddedRawResolution(row,current,cancellation);return;}
         if(fitBitmap is null||!animationNeedsOpen||sourceWidth<=0||sourceHeight<=0||zoom>0||row.Kind!="image")return;
         double raster=Shell.XamlRoot.RasterizationScale,scale=EffectiveScale()*raster;var actual=fitBitmap.SizeInPixels;

@@ -64,10 +64,13 @@ public sealed partial class MainWindow
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
     }
-    private async void ReadCloudFile(object sender,RoutedEventArgs e)
+    private async void ReadCloudFile(object sender,RoutedEventArgs e)=>await ReadCloudPreview();
+    private async Task ReadCloudPreview()
     {
-        if(selected?.Item is null)return;var row=selected;long current=selection;
-        try{if(!await EnsureCloudRead(row,current,force:true))return;PreparePreview();await RenderSelectedContent(row,current,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}finally{if(current==selection)FinishPreview();}
+        if(selected?.Item is null)return;var row=selected;long current=selection;var token=selectionStop.Token;
+        try{if(!await EnsureCloudRead(row,current,force:true)||token.IsCancellationRequested)return;PreparePreview();if(verifyPreviewUpdateBarrier is not null)await verifyPreviewUpdateBarrier("cloudRead",token);await RenderSelectedContent(row,current,token);}
+        catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&!token.IsCancellationRequested)ShowPreviewError(ex);}
+        finally{if(current==selection)FinishPreview();}
     }
     private async Task<bool> EnsureCloudRead(FileRow row,long current,bool force=false)
     {

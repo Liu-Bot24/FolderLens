@@ -79,6 +79,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             while(true)
             {
                 cancellation.ThrowIfCancellationRequested();
+                // A snapshot pins catalog WAL pages. Let its reader finish before
+                // further scan writes exhaust the WAL budget and abort the query.
+                while(catalog.SnapshotUnderPressure)await Task.Delay(50,cancellation).ConfigureAwait(false);
                 if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
                 string priority=Priority.RelativePath;
                 // A directory may contain millions of entries. Reconsider navigation
@@ -146,6 +149,8 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                         var packet=cursor.Packets.Current;
                         PacketReceived?.Invoke(path,packet);
                         cancellation.ThrowIfCancellationRequested();
+                        // Pressure can arise while a remote packet is in flight.
+                        while(catalog.SnapshotUnderPressure)await Task.Delay(50,cancellation).ConfigureAwait(false);
                         if(packet.State=="started")
                         {
                             cursor.PhysicalIdentity=packet.PhysicalIdentity;cursor.ResolvedLocation=packet.ResolvedLocation;

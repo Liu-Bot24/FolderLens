@@ -25,11 +25,12 @@ public sealed partial class MainWindow
     private async void SearchAllText(object sender,RoutedEventArgs e)
     {
         if(selected?.Item is null||string.IsNullOrEmpty(TextQuery.Text))return;
-        textSearchStop.Cancel();textSearchStop.Dispose();textSearchStop=CancellationTokenSource.CreateLinkedTokenSource(selectionStop.Token,textSessionStop.Token);
+        var presentation=BeginOriginalTextPresentation();
+        textSearchStop.Cancel();textSearchStop.Dispose();textSearchStop=CancellationTokenSource.CreateLinkedTokenSource(selectionStop.Token,textSessionStop.Token,presentation);
         var token=textSearchStop.Token;long request=++textSearchGeneration,current=selection;
         ClearTextSearchResults();TextSearchResults.ItemsSource=textSearchRows;
         long revision=textSearchResultsRevision;string term=TextQuery.Text;bool matchCase=TextMatchCase.IsChecked==true;
-        bool IsCurrent()=>!closing&&current==selection&&request==textSearchGeneration;
+        bool IsCurrent()=>!closing&&!token.IsCancellationRequested&&current==selection&&request==textSearchGeneration;
         TextSearchSummary.Text="正在搜索整个文档…";textSearchRunning=true;
         try
         {
@@ -48,17 +49,21 @@ public sealed partial class MainWindow
     }
     private async void OpenTextSearchResult(object sender,ItemClickEventArgs e)
     {
-        if(e.ClickedItem is not TextSearchRow row||row.Revision!=textSearchResultsRevision)return;
-        long current=selection,sessionVersion=textSessionGeneration;
+        if(e.ClickedItem is TextSearchRow row)await OpenTextSearchResultCore(row);
+    }
+    private async Task OpenTextSearchResultCore(TextSearchRow row)
+    {
+        if(row.Revision!=textSearchResultsRevision)return;
+        long current=selection,sessionVersion=textSessionGeneration;var navigation=BeginTextNavigation(selectionStop.Token);
         try
         {
-            await LoadText(row.Match.ByteOffset,current,textSessionStop.Token);
-            if(current!=selection||sessionVersion!=textSessionGeneration||row.Revision!=textSearchResultsRevision)return;
+            await ReadTextWindow(row.Match.ByteOffset,current,navigation);
+            if(current!=selection||sessionVersion!=textSessionGeneration||!OwnsTextNavigation(navigation)||row.Revision!=textSearchResultsRevision)return;
             MarkdownHost.Visibility=Visibility.Collapsed;TextScroll.Visibility=Visibility.Visible;
             TextToolsFlyout.Hide();HighlightTextMatch(row.Match,row.Term);
             QualityLabel.Text=$"搜索结果 · 字节 {row.Match.ByteOffset:N0}";
         }
-        catch(OperationCanceledException){}catch(Exception ex){if(current==selection)ShowPreviewError(ex);}
+        catch(OperationCanceledException){}catch(Exception ex){if(current==selection&&sessionVersion==textSessionGeneration&&OwnsTextNavigation(navigation))ShowPreviewError(ex);}
     }
     private void HighlightTextMatch(TextMatch match,string term)
     {

@@ -227,14 +227,16 @@ public sealed partial class MainWindow
     private async void CloseExpandedPreview(object sender,RoutedEventArgs e)=>await ReturnToBrowser();
     private async Task SetImmersive(bool enabled)
     {
-        if(enabled&&selected is null||!enabled&&!immersive)return;if(enabled&&!immersive)CaptureBrowserPosition();immersive=enabled;
+        if(enabled&&selected is null||!enabled&&!immersive)return;long layout=++previewLayoutRevision;if(enabled&&!immersive)CaptureBrowserPosition();immersive=enabled;
         TreePane.Visibility=BrowserPane.Visibility=PaneDivider.Visibility=PreviewHeightDivider.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         Grid.SetRow(PreviewPane,enabled?0:2);Grid.SetRowSpan(PreviewPane,enabled?3:1);Grid.SetColumnSpan(PreviewPane,enabled?3:1);
         UpdateViewerInformation();PreviewPane.UpdateLayout();ImageCanvas.Invalidate();
         if(!enabled){RestoreBrowserPosition();return;}
         if(selected is not null&&!previewLoading&&selected.Kind=="image")
         {
-            long current=selection;try{if(zoom>0)await LoadVisibleTiles();else if(!animationRunning)await EnsureFitResolution(selected,current,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
+            long current=selection;var token=selectionStop.Token;
+            try{if(zoom>0)await LoadVisibleTiles();else if(!animationRunning)await EnsureFitResolution(selected,current,token);}
+            catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&layout==previewLayoutRevision&&!token.IsCancellationRequested)ShowPreviewError(ex);}
         }
     }
     private async void ToggleFullScreen(object sender,RoutedEventArgs e)

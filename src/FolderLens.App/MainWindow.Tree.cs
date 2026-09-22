@@ -41,9 +41,13 @@ public sealed partial class MainWindow
     private long treePageVersion;
     private string TreeListingDirectory=>Path.Combine(RuntimeDataDirectory,"temp","tree-listings");
 
-    private void ShowTreeRoot(string path)
+    private void ResetTreeWork()
     {
         physicalTreeStop.Cancel();physicalTreeStop.Dispose();physicalTreeStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+    }
+    private void ShowTreeRoot(string path)
+    {
+        ResetTreeWork();
         var existing=new Queue<TreeViewNode>(FolderTree.RootNodes);
         TreeViewNode? closest=null;int closestLength=0;
         while(existing.TryDequeue(out var candidate))
@@ -135,22 +139,22 @@ public sealed partial class MainWindow
     {
         while(treeRefreshPending&&!closing)
         {
-            treeRefreshPending=false;
+            treeRefreshPending=false;long revision=rootChangeVersion;var token=physicalTreeStop.Token;
             try{await RefreshTree();}
             catch(OperationCanceledException){}
-            catch(Exception ex){ShowError(ex);}
+            catch(Exception ex){if(!closing&&revision==rootChangeVersion&&!token.IsCancellationRequested)ShowError(ex);}
         }
     }
     private async Task RefreshTree()
     {
-        if(catalog is null||activeTreeRoot is not {} treeRoot||treeRoot.Content is not FolderNode {CatalogRoot:not null} folder)return;
-        long revision=rootChangeVersion;
+        if(replacingRoot||catalog is null||activeTreeRoot is not {} treeRoot||treeRoot.Content is not FolderNode {CatalogRoot:not null} folder)return;
+        long revision=rootChangeVersion;var token=physicalTreeStop.Token;
         var pending=new Queue<TreeViewNode>();pending.Enqueue(treeRoot);
         while(pending.TryDequeue(out var node))
         {
             if(node.Content is not FolderNode current)continue;
-            await LoadTreeListing(node,current,revision,true,lifetime.Token);
-            if(closing||revision!=rootChangeVersion||activeTreeRoot!=treeRoot)return;
+            await LoadTreeListing(node,current,revision,true,token);
+            if(closing||revision!=rootChangeVersion||activeTreeRoot!=treeRoot||token.IsCancellationRequested)return;
             foreach(var child in node.Children)if(child.IsExpanded)pending.Enqueue(child);
         }
         await PruneTreeListings();
@@ -159,17 +163,17 @@ public sealed partial class MainWindow
     {try{await ExpandFolderNode(e.Node);}catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}}
     private async Task ExpandFolderNode(TreeViewNode node)
     {
-        using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||node.Content is not FolderNode folder)return;
-        long revision=rootChangeVersion;
+        using var operation=browserWork.Enter();if(operation is null||closing||replacingRoot||catalog is null||node.Content is not FolderNode folder)return;
+        long revision=rootChangeVersion;var token=physicalTreeStop.Token;
         try
         {
             if(folder.PageOffset is not null)return;
             if(folder.CatalogRoot!=rootId||!string.Equals(folder.BasePath,root,StringComparison.Ordinal))
-            {await ReadPhysicalChildren(node,revision,physicalTreeStop.Token);return;}
-            await LoadTreeListing(node,folder,revision,true,lifetime.Token);
+            {await ReadPhysicalChildren(node,revision,token);return;}
+            await LoadTreeListing(node,folder,revision,true,token);
         }
         catch(OperationCanceledException){}
-        catch(Exception ex){ShowError(ex);}
+        catch(Exception ex){if(!closing&&revision==rootChangeVersion&&!token.IsCancellationRequested)ShowError(ex);}
     }
     private async Task LoadTreeListing(TreeViewNode node,FolderNode folder,long revision,bool indexed,CancellationToken cancellation)
     {
@@ -178,8 +182,11 @@ public sealed partial class MainWindow
         await treeListingSlots.WaitAsync(cancellation);DirectoryListing? candidate=null;
         try
         {
+            if(closing||revision!=rootChangeVersion||cancellation.IsCancellationRequested||treeListingRequests.GetValueOrDefault(node)!=request)return;
+            if(verifyTreeListingReadBarrier is {} readBarrier)await readBarrier(folder,indexed,cancellation);
             candidate=indexed?await catalog!.ReadChildDirectories(folder.CatalogRoot!,folder.Relative,folder.BasePath,TreeListingDirectory,cancellation)
                 :await FolderChildren.Read(folder.Path,TreeListingDirectory,cancellation);
+            if(verifyTreeListingLoadedBarrier is {} loadedBarrier)await loadedBarrier(folder,indexed,cancellation);
             bool Stale()=>closing||revision!=rootChangeVersion||cancellation.IsCancellationRequested||treeListingRequests.GetValueOrDefault(node)!=request;
             if(Stale())return;
             while(!Stale())
@@ -242,16 +249,16 @@ public sealed partial class MainWindow
     }
     private async Task ChangeTreePage(TreeViewNode node,long start)
     {
-        using var operation=browserWork.Enter();if(operation is null||closing||!treeListings.ContainsKey(node))return;
-        long revision=rootChangeVersion,version=++treePageVersion;treePageIntents[node]=new(version,start);
-        while(!closing&&revision==rootChangeVersion&&treePageIntents.TryGetValue(node,out var intent)&&intent.Version==version&&treeListings.TryGetValue(node,out var previous))
+        using var operation=browserWork.Enter();if(operation is null||closing||replacingRoot||!treeListings.ContainsKey(node))return;
+        long revision=rootChangeVersion,version=++treePageVersion;var token=physicalTreeStop.Token;treePageIntents[node]=new(version,start);
+        while(!closing&&!token.IsCancellationRequested&&revision==rootChangeVersion&&treePageIntents.TryGetValue(node,out var intent)&&intent.Version==version&&treeListings.TryGetValue(node,out var previous))
         {
             start=Math.Min(intent.Start,Math.Max(0,(previous.Listing.Count-1)/DirectoryListing.PageSize*DirectoryListing.PageSize));
             IReadOnlyList<string> paths;
-            try{paths=await previous.Listing.ReadPage(start,lifetime.Token);}
+            try{paths=await previous.Listing.ReadPage(start,token);}
             catch(ObjectDisposedException) when(treeListings.TryGetValue(node,out var replaced)&&!ReferenceEquals(replaced.Listing,previous.Listing)){continue;}
             if(verifyTreePageReadBarrier is not null)await verifyTreePageReadBarrier(start);
-            if(closing||revision!=rootChangeVersion||treePageIntents.GetValueOrDefault(node)?.Version!=version||!treeListings.TryGetValue(node,out var current))return;
+            if(closing||token.IsCancellationRequested||revision!=rootChangeVersion||treePageIntents.GetValueOrDefault(node)?.Version!=version||!treeListings.TryGetValue(node,out var current))return;
             if(!ReferenceEquals(previous.Listing,current.Listing))continue;
             var next=current with{Start=start};ApplyTreePage(node,next,paths);treeListings[node]=next;await PruneTreeListings();return;
         }

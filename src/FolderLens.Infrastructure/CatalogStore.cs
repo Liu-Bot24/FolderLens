@@ -47,6 +47,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private readonly SnapshotLimits limits;
     private readonly SemaphoreSlim snapshotGate = new(1,1);
     private string? activeSessionId;
+    private int snapshotActive;
     private int snapshotUnderPressure;
     private int browsingBudgetReached;
     public bool BrowsingBudgetReached=>Volatile.Read(ref browsingBudgetReached)!=0;
@@ -57,7 +58,10 @@ public sealed partial class CatalogStore : IAsyncDisposable
         try{await Write(c=>{CompactBrowsingCatalog.EnsureWriteHeadroom(c,64L<<10);return true;},cancellation).ConfigureAwait(false);}
         catch(BrowsingBudgetException){MarkBrowsingBudgetReached();throw;}
     }
-    public bool SnapshotUnderPressure => Volatile.Read(ref snapshotUnderPressure) != 0;
+    public bool SnapshotUnderPressure => Volatile.Read(ref snapshotUnderPressure) != 0
+        // Batch admission must observe WAL growth even if the deadline timer
+        // has not been scheduled yet. An idle WAL file must not pause writers.
+        || Volatile.Read(ref snapshotActive) != 0 && FileBytes(catalogPath+"-wal") >= limits.CatalogWalBytes*3/4;
     public CatalogStore(string dataDirectory) : this(dataDirectory, new SnapshotLimits()) { }
     public CatalogStore(string dataDirectory, SnapshotLimits limits,string? playlistPath=null)
     {
@@ -267,12 +271,13 @@ public sealed partial class CatalogStore : IAsyncDisposable
         await snapshotGate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
+            Volatile.Write(ref snapshotActive,1);
             // Capacity readers may retain an older WAL frame. Never wait for them
             // on the scan writer's queue just to prepare a new browsing snapshot.
             await PrepareSnapshotWal(cancellation).ConfigureAwait(false);
             return await reader.Execute(c=>BuildSnapshot(c,filter,epoch,generation,cancellation),cancellation).ConfigureAwait(false);
         }
-        finally { Volatile.Write(ref snapshotUnderPressure,0);snapshotGate.Release(); }
+        finally { Volatile.Write(ref snapshotActive,0);Volatile.Write(ref snapshotUnderPressure,0);snapshotGate.Release(); }
     }
 
     private ResultHandle BuildSnapshot(SqliteConnection c,FilterSpec filter,long epoch,long generation,CancellationToken cancellation)

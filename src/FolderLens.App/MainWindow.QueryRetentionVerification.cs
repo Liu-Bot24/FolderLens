@@ -23,7 +23,7 @@ public sealed partial class MainWindow
                 if(!ReferenceEquals(old,results))retired.Add(new(old));
                 object? current=groupedBrowserSource is not null?groupedBrowserSource:flatBrowserItems;
                 if(view is not null&&!ReferenceEquals(view,current))views.Add(new(view));
-                if(results?.Count!=(i%2==0?10:12))throw new InvalidOperationException("Query retention fixture did not publish expected results.");
+                if(results?.Count!=(i%2==0?10:12))throw new InvalidOperationException($"Query retention fixture did not publish expected results: iteration={i}, grouped={grouped}, count={results?.Count}, first={firstPageSequence.Length}, scanRunning={scanTask is {IsCompleted:false}}, queryBusy={queryBusy}, request={queryRequest}, search={Search.Text}, applied={lastAppliedFilter?.NamePathQuery}, error={browserEmptyError}.");
                 await Task.Delay(10);
             }
         }

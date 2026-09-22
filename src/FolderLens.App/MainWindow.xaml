@@ -101,7 +101,8 @@
       </Style>
       <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="{ThemeResource AppearanceInputRadius}" />
         <Setter Property="MinHeight" Value="32" />
-        <Setter Property="Padding" Value="9,4" />
+        <Setter Property="Padding" Value="9,7,9,3" />
+        <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="FontSize" Value="12" />
       </Style>
       <Style TargetType="TextBlock">
@@ -444,7 +445,7 @@
           <canvas:CanvasControl x:Name="ImageCanvas" Draw="DrawImage" IsHitTestVisible="False" AutomationProperties.AutomationId="ImageCanvas" xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml" />
           <local:CursorInputSurface x:Name="ImageInput" Background="Transparent" Visibility="{Binding Visibility, ElementName=ImageCanvas}" PointerWheelChanged="ViewerWheel" PointerPressed="ViewerPointerDown" PointerMoved="ViewerPointerMove" PointerReleased="ViewerPointerUp" AutomationProperties.Name="图片浏览区域" />
           <ScrollViewer x:Name="TextScroll" Visibility="Collapsed" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" HorizontalScrollBarVisibility="Auto">
-            <TextBox x:Name="TextContent" IsReadOnly="True" AcceptsReturn="True" FontFamily="Segoe UI" FontSize="16" TextWrapping="Wrap" Padding="16,12" BorderThickness="0" AutomationProperties.AutomationId="TextPreview" PreviewKeyDown="TextPreviewKeyDown" SelectionChanged="TextSelectionChanged">
+            <TextBox x:Name="TextContent" IsReadOnly="True" AcceptsReturn="True" VerticalAlignment="Stretch" FontFamily="Segoe UI" FontSize="16" TextWrapping="Wrap" Padding="16,12" BorderThickness="0" AutomationProperties.AutomationId="TextPreview" PreviewKeyDown="TextPreviewKeyDown" SelectionChanged="TextSelectionChanged">
               <TextBox.ContextFlyout><MenuFlyout>
                 <MenuFlyoutItem Text="复制所选文字  Ctrl+C" Tag="CopyTextSelection" Click="CopyTextSelection" />
                 <MenuFlyoutItem Text="全选整个文档  Ctrl+A" Tag="SelectWholeText" Click="SelectWholeText" />

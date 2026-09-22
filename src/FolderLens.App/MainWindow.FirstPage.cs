@@ -12,6 +12,46 @@ public sealed partial class MainWindow
     private Task queryCompletion=Task.CompletedTask;
     private bool BrowserSequenceLocked=>ScanPreviewRefresh.SequenceLocked(resultHandle is not null,selected is not null,immersive,fullScreen,slideShow);
     private bool FirstPageMatches(FilterSpec filter)=>firstPageSequence.Length>0&&firstPageFilter==JsonSerializer.Serialize(filter);
+    private string? RetireMismatchedResults(FilterSpec filter)
+    {
+        bool matches=resultHandle is not null
+            ?lastAppliedFilter is not null&&QueryFilterHash(lastAppliedFilter with{Sort=filter.Sort,Grouping=filter.Grouping})==QueryFilterHash(filter)
+            :firstPageSequence.Length==0||FirstPageMatches(filter);
+        if(matches)return null;
+        // Retaining a failed refresh is useful only for the same filter. Rows
+        // from another category must not remain actionable under the new label.
+        return RetireBrowserResults();
+    }
+    private string? RetireBrowserResults()
+    {
+        ClearResultSelection();CancelThumbnails();AttachBrowserView(null);
+        if(viewerStrip is not null)viewerStrip.ItemsSource=null;
+        groupedBrowserSource?.Dispose();groupedBrowserSource=null;browserGroups=null;flatBrowserItems=null;
+        results?.Dispose();results=null;
+        firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();
+        string? previous=resultHandle?.Id;resultHandle=null;
+        return previous;
+    }
+    private async Task RejectBrowserFilter(Exception error)
+    {
+        // Invalid submitted controls are also a new intent. They must retire a
+        // still-running old query rather than let it repopulate the new category.
+        CancelPendingSearch();generation++;queryRequest++;queryStop.Cancel();metadataDemandStop.Cancel();
+        automaticQueryPending=false;metadataRefreshPending=false;explicitMetadataPending=false;queryBusy=false;
+        string? previous=RetireBrowserResults();submittedSearch=Search.Text;
+        ActiveFilterSummary.Visibility=Microsoft.UI.Xaml.Visibility.Collapsed;
+        ShowBrowserError(error);
+        var attempt=new QueryAttempt(queryRequest,generation,epoch,rootId,false);
+        if(previous is not null&&catalog is not null)
+        {
+            try{await catalog.ReleaseSnapshot(previous);}
+            catch(Exception releaseError)
+            {
+                await RecordQueryFailure(releaseError,"retireInvalidFilter",attempt,previous);
+                if(attempt.Request==queryRequest&&attempt.Generation==generation&&!closing)ShowError(releaseError);
+            }
+        }
+    }
     private void PublishFirstPage(FilterSpec filter,IReadOnlyList<SnapshotItem> items)
     {
         CancelThumbnails();

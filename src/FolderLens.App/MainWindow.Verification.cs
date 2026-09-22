@@ -82,6 +82,9 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-soak")||arguments.Contains("--verify-soak-smoke")||arguments.Contains("--verify-audio-retention")){await VerifySoak(source,report);return;}
             if(arguments.Contains("--verify-startup-profile")){await VerifyStartupProfile(source,report);return;}
             if(arguments.Contains("--verify-preview-completion")){await VerifyPreviewCompletion(source,report);return;}
+            if(arguments.Contains("--verify-preview-state-cancellation")){await VerifyPreviewStateCancellation(source,report);return;}
+            if(arguments.Contains("--verify-markdown-text-only-lifecycle")){await VerifyMarkdownTextOnlyLifecycle(source,report);return;}
+            if(arguments.Contains("--verify-markdown-runtime-lifetime")){await VerifyMarkdownRuntimeLifetime(report);return;}
             if(arguments.Contains("--verify-file-transfer")){await VerifyFileTransfer(source,report);return;}
             if(arguments.Contains("--verify-cache-recovery")){await VerifyCacheRecovery(png,report);return;}
             if(arguments.Contains("--verify-scan-pipeline")){await VerifyScanPipeline(source,report);return;}
@@ -90,6 +93,9 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-pro-scan-closeout")){await VerifyProScanCloseout(source,report);return;}
             if(arguments.Contains("--verify-rejected-root-monitor")){await VerifyRejectedRootMonitor(source,report);return;}
             if(arguments.Contains("--verify-directory-navigation")){await VerifyDirectoryNavigation(source,report);return;}
+            if(arguments.Contains("--verify-tree-navigation-cancellation")){await VerifyTreeNavigationCancellation(source,report);return;}
+            if(arguments.Contains("--verify-navigation-retirement")){await VerifyNavigationRetirement(source,report);return;}
+            if(arguments.Contains("--verify-retired-metadata-error")){await VerifyRetiredMetadataError(source,report);return;}
             if(arguments.Contains("--verify-scan-navigation")){await VerifyScanNavigation(source,report);return;}
             if(arguments.Contains("--verify-scan-navigation-scale")){await VerifyScanNavigationScale(source,report);return;}
             if(arguments.Contains("--verify-query-retention")){await VerifyQueryRetention(source,report);return;}
@@ -120,6 +126,10 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-empty-state")){await VerifyBrowserEmptyState(source,report);return;}
             if(arguments.Contains("--verify-text-thumbnails")){await VerifyTextThumbnails(source,report);return;}
             if(arguments.Contains("--verify-view-controls")){await VerifyViewControls(source,report);return;}
+            if(arguments.Contains("--verify-view-demand")){await VerifyViewDemand(source,report);return;}
+            if(arguments.Contains("--verify-input-alignment")){await VerifyInputAlignment(report);return;}
+            if(arguments.Contains("--verify-category-pending")){await VerifyCategoryPending(source,report);return;}
+            if(arguments.Contains("--verify-invalid-filter-switch")){await VerifyInvalidFilterSwitch(source,report);return;}
             if(arguments.Contains("--verify-switching-group-updates")){await VerifySwitchingGroupUpdates(report);return;}
             if(arguments.Contains("--verify-switching-live-scan")){await VerifySwitchingLiveScan(source,png,report);return;}
             if(arguments.Contains("--verify-group-header-layout")){await VerifyGroupHeaderLayout(source,png,report);return;}
@@ -133,6 +143,8 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-first-page")){await VerifyFirstPage(source,report);return;}
             if(arguments.Contains("--verify-large-text")){await VerifyLargeText(source,report);return;}
             if(arguments.Contains("--verify-text-reader")){await VerifyTextReader(source,report);return;}
+            if(arguments.Contains("--verify-text-navigation-ownership")){await VerifyTextNavigationOwnership(source,report);return;}
+            if(arguments.Contains("--verify-preview-error-ownership")){await VerifyPreviewErrorOwnership(source,report);return;}
             if(arguments.Contains("--verify-markdown-demand")){await VerifyMarkdownDemand(source,report);return;}
             if(arguments.Contains("--verify-markdown-retries")){await VerifyMarkdownRetries(source,report);return;}
             if(arguments.Contains("--verify-selection-appearance")){await VerifySelectionAppearance(source,report);return;}

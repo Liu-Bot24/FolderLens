@@ -153,7 +153,14 @@ public sealed partial class MainWindow
         wasMaximized=AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p&&p.State==Microsoft.UI.Windowing.OverlappedPresenterState.Maximized;
         fullScreen=true;var entering=SetImmersive(true);SetFullScreenChrome(true);AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);FocusIfForeground(ImageCanvas,FocusState.Programmatic);
         await entering;if(revision!=viewerModeRevision||!fullScreen)return;ApplyViewerSizing();
-        if(selected is not null&&!previewLoading&&zoom==0)try{await EnsureFitResolution(selected,selection,selectionStop.Token);}catch(OperationCanceledException){}catch(Exception ex){ShowPreviewError(ex);}
+        await RefreshFullScreenFit(revision);
+    }
+    private async Task RefreshFullScreenFit(long revision)
+    {
+        if(selected is null||previewLoading||zoom!=0)return;
+        long current=selection,layout=previewLayoutRevision;var token=selectionStop.Token;
+        try{await EnsureFitResolution(selected,current,token);}
+        catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&revision==viewerModeRevision&&layout==previewLayoutRevision&&!token.IsCancellationRequested)ShowPreviewError(ex);}
     }
     private async void ExitFullScreen(object sender,RoutedEventArgs e)=>await RunViewerAction(ViewerAction.ReturnBrowser);
     private async Task LeaveFullScreen(bool toBrowser=true)

@@ -84,7 +84,12 @@ public sealed partial class MainWindow
                 if(!BrowserSequenceLocked&&!restoringView)await RefreshQuery(preserveViewport:true,scanPreview:true);
             }
         }
-        catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
+        catch(OperationCanceledException){}
+        catch(Exception ex)
+        {
+            if(Current())ShowError(ex);
+            else RecordWebView("RetiredMetadataError "+ex.GetType().Name+" "+ex.HResult);
+        }
     }
     private async void AdvancedFilters(object sender,RoutedEventArgs e)
     {
