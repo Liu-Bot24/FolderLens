@@ -4,7 +4,7 @@
   <CornerRadius x:Key="AppearanceSidebarRadius">16</CornerRadius>
   <CornerRadius x:Key="AppearanceControlRadius">8</CornerRadius>
   <Thickness x:Key="AppearancePaneBorder">0</Thickness>
-  <Thickness x:Key="AppearanceTreeMargin">8,4,0,4</Thickness>
+  <Thickness x:Key="AppearanceTreeMargin">8,4,8,4</Thickness>
   <Thickness x:Key="AppearancePreviewMargin">8,4,8,4</Thickness>
   <Thickness x:Key="AppearanceBrowserMargin">2,4,8,4</Thickness>
   <x:Double x:Key="AppearanceDividerOpacity">0</x:Double>

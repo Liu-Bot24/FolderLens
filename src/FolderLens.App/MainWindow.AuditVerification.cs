@@ -304,7 +304,7 @@ public sealed partial class MainWindow
             {
                 BrowserPane.Width=width;Shell.UpdateLayout();UpdateBrowserToolbar();Shell.UpdateLayout();await Task.Delay(50);
                 var bounds=new List<(FrameworkElement Element,Windows.Foundation.Rect Bounds)>();
-                foreach(var control in new FrameworkElement[]{Category,SortField,Descending,GroupingButton,Search,QuickFiltersButton,DetailsMode})
+                foreach(var control in new FrameworkElement[]{Category,SortField,Descending,GroupingButton,Search,QuickFiltersButton,ThumbnailMode,DetailsMode})
                 {
                     var box=control.TransformToVisual(BrowserPane).TransformBounds(new(0,0,control.ActualWidth,control.ActualHeight));bounds.Add((control,box));
                     if(box.X<0||box.Right>width+1||box.Width<=0)errors.Add($"{width}: {control.Name}超出可用宽度");

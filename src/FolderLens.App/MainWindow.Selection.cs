@@ -30,6 +30,7 @@ public sealed partial class MainWindow
     private HashSet<FileRow> firstPageRows=[];
     private void AttachBrowserView(object? source)
     {
+        ThumbnailMode.IsChecked=DetailsMode.IsChecked!=true;
         CancelMarquee();
         // A collapsed ListView still receives every notification and may build a
         // nonvirtual item cache. Only the displayed view owns a source subscription.
@@ -70,6 +71,15 @@ public sealed partial class MainWindow
             if(ReferenceEquals(node,view))break;
         }
         return index<view.Items.Count?view.Items[index] as FileRow:null;
+    }
+    private void ChooseBrowserView(object sender,RoutedEventArgs args)
+    {
+        bool details=ReferenceEquals(sender,DetailsMode);
+        bool alreadyVisible=details?DetailsPane.Visibility==Visibility.Visible:FilesGrid.Visibility==Visibility.Visible;
+        DetailsMode.IsChecked=details;ThumbnailMode.IsChecked=!details;
+        // Clicking the selected option must not clear it or rebind the list.
+        if(alreadyVisible)return;
+        ToggleView(DetailsMode,args);
     }
     private void ToggleView(object sender,RoutedEventArgs args)
     {

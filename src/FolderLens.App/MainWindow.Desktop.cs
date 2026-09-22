@@ -47,6 +47,7 @@ public sealed partial class MainWindow
     private void UpdatePathPresentationControl()
     {
         bool details=DetailsMode.IsChecked==true;
+        ThumbnailMode.IsChecked=!details;
         ShowPaths.Content=activeCollectionId is null?"相对路径":"文件路径";
         ShowPaths.IsEnabled=!details;
         ShowPaths.IsChecked=details?detailColumns.Single(c=>c.Field=="path").Visible:gridShowPaths;
@@ -180,7 +181,7 @@ public sealed partial class MainWindow
         Place(SortGroupingToolbar,narrow?1:0,narrow?0:2,narrow?7:compact?5:1);
         Place(Search,narrow?2:compact?1:0,layout==0?3:0,narrow?7:compact?4:1);
         Place(QuickFiltersButton,narrow?3:compact?1:0,narrow?0:4,narrow?2:1);
-        Place(DetailsMode,narrow?3:compact?1:0,narrow?2:5,narrow?2:1);
+        Place(ViewModeSwitcher,narrow?3:compact?1:0,narrow?2:5,narrow?5:1);
     }
     private double GridCardWidth
     {

@@ -337,7 +337,12 @@
               </Flyout>
             </Button.Flyout>
           </Button>
-          <ToggleButton Grid.Column="5" x:Name="DetailsMode" Content="详情" Click="ToggleView" ToolTipService.ToolTip="切换缩略图网格 / 文件详情列表" />
+          <Border Grid.Column="5" x:Name="ViewModeSwitcher" Padding="2" CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Background="{ThemeResource ControlFillColorDefaultBrush}" HorizontalAlignment="Left" AutomationProperties.Name="视图模式">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <ToggleButton x:Name="ThumbnailMode" Content="缩略图" IsChecked="True" Click="ChooseBrowserView" MinWidth="0" Padding="10,5" CornerRadius="5" BorderThickness="0" AutomationProperties.Name="缩略图视图" ToolTipService.ToolTip="显示缩略图" />
+              <ToggleButton x:Name="DetailsMode" Content="详情" Click="ChooseBrowserView" MinWidth="0" Padding="10,5" CornerRadius="5" BorderThickness="0" AutomationProperties.Name="详情视图" ToolTipService.ToolTip="显示文件详情列表" />
+            </StackPanel>
+          </Border>
         </Grid>
           <StackPanel Grid.Row="1">
           <StackPanel x:Name="BrowserLoadingState" Orientation="Horizontal" Spacing="10" Margin="12,8" Visibility="Collapsed">
