@@ -118,6 +118,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-empty-audit")){await VerifyEmptyStateAudit(source,report);return;}
             if(arguments.Contains("--verify-empty-state")){await VerifyBrowserEmptyState(source,report);return;}
             if(arguments.Contains("--verify-text-thumbnails")){await VerifyTextThumbnails(source,report);return;}
+            if(arguments.Contains("--verify-group-header-layout")){await VerifyGroupHeaderLayout(source,png,report);return;}
             if(arguments.Contains("--verify-audio-only")){await VerifyAudioOnly(source,report);return;}
             if(arguments.Contains("--verify-video-card")){await VerifyVideoCard(source,report);return;}
             if(arguments.Contains("--verify-theme")){await VerifyTheme(source,report);return;}
