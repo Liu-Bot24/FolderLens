@@ -1,10 +1,38 @@
 using FolderLens.Infrastructure;
+using FolderLens.Contracts;
 using Xunit;
 
 namespace FolderLens.UnitTests;
 
 public sealed class LegacyFileIdentityTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DecoderObservationMatchesDirectoryScanAndRejectsReplacement(bool legacy)
+    {
+        string root=Path.Combine(Path.GetTempPath(),"FolderLens-decoder-identity",Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string file=Path.Combine(root,"image.jpg");File.WriteAllText(file,"original");
+        try
+        {
+            var entry=Assert.Single(ScanDirectoryReader.Read(root,false,legacy).SelectMany(p=>p.Entries));
+            using var handle=File.OpenHandle(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+            var observation=FileReadObservation.Read(handle,legacy);
+            string scanned=$"{entry.Bytes}:{entry.Modified}:{entry.Created}:{entry.ChangeTime}:{entry.PhysicalIdentity}:{entry.Attributes}";
+            Assert.Equal(scanned,observation.Signature);
+            Assert.Equal(observation,FileReadObservation.Read(handle,legacy));
+            File.Move(file,file+".retired");File.WriteAllText(file,"replaced");
+            File.SetCreationTimeUtc(file,new DateTime(entry.Created,DateTimeKind.Utc));
+            File.SetLastWriteTimeUtc(file,new DateTime(entry.Modified,DateTimeKind.Utc));
+            using var replacement=File.OpenHandle(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+            var changed=FileReadObservation.Read(replacement,legacy);
+            Assert.Equal(observation.Length,changed.Length);
+            Assert.Equal(observation.ModifiedUtcTicks,changed.ModifiedUtcTicks);
+            Assert.NotEqual(observation.Signature,changed.Signature);
+        }
+        finally{Directory.Delete(root,true);}
+    }
     [Fact]
     public void LegacyDirectoryEntriesMatchTheSameFileHandleObservation()
     {

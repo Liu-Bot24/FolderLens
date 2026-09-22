@@ -1277,7 +1277,18 @@ public sealed partial class MainWindow : Window
     private void Navigate(int delta){int count=results?.Count??firstPageSequence.Length;if(count==0)return;int index=selected is null?(delta<0?count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,count-1);var row=results is not null?(FileRow)results[index]!:firstPageSequence[index];RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(row);}}
     private void Previous(object sender,RoutedEventArgs e)=>Navigate(-1);private void Next(object sender,RoutedEventArgs e)=>Navigate(1);
     private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;try{writePreviewClipboard(SourcePath(selected));}catch(Exception error){ShowError(error);}}
-    private void Reveal(object sender,RoutedEventArgs e){if(selected is null)return;var start=new ProcessStartInfo("explorer.exe"){UseShellExecute=false};start.ArgumentList.Add("/select,"+SourcePath(selected));try{Process.Start(start);}catch(Exception ex){ShowError(ex);}}
+    private async void Reveal(object sender,RoutedEventArgs e)
+    {
+        if(selected is not {} row)return;
+        long current=selection;var token=selectionStop.Token;
+        try{await ShellFileLocation.Reveal(SourcePath(row),token);}
+        catch(OperationCanceledException){}
+        catch(Exception ex)
+        {
+            scanLog?.Write("reveal-error",new{type=ex.GetType().Name,ex.HResult,current,stillSelected=current==selection});
+            if(current==selection&&!closing)ShowError(ex);
+        }
+    }
     private async void ExternalOpen(object sender,RoutedEventArgs e)
     {
         if(selected is not {Item:not null} row||catalog is not {} store)return;
