@@ -8,6 +8,7 @@ internal sealed class MarkdownRuntimeLifetime
 {
     private readonly CoreWebView2Environment environment;
     private readonly Action<string> record;
+    private readonly Action? beforeObserve;
     private TaskCompletionSource changed=new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HashSet<int> exited=[];
     private readonly Dictionary<int,Process> browsers=[];
@@ -17,7 +18,7 @@ internal sealed class MarkdownRuntimeLifetime
     private bool exitSubscribed,processesSubscribed;
     public int RecoveredProcessCount {get;private set;}
 
-    public MarkdownRuntimeLifetime(CoreWebView2Environment environment,string ownedFolder,Action<string> record)
+    public MarkdownRuntimeLifetime(CoreWebView2Environment environment,string ownedFolder,Action<string> record,Action? beforeObserve=null)
     {
         // The caller creates a unique session directory and explicitly requests
         // ExclusiveUserDataFolderAccess. Never adopt an environment redirected
@@ -25,7 +26,7 @@ internal sealed class MarkdownRuntimeLifetime
         if(!Path.GetFullPath(environment.UserDataFolder).TrimEnd(Path.DirectorySeparatorChar)
             .Equals(Path.GetFullPath(ownedFolder).TrimEnd(Path.DirectorySeparatorChar),StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Markdown 运行环境未使用当前会话的数据目录。");
-        this.environment=environment;this.record=record;
+        this.environment=environment;this.record=record;this.beforeObserve=beforeObserve;
         try
         {
             environment.BrowserProcessExited+=BrowserExited;exitSubscribed=true;
@@ -48,11 +49,12 @@ internal sealed class MarkdownRuntimeLifetime
     public void CaptureBrowsers()
     {
         if(completed)return;
-        try{ReadBrowsers();}
+        try{ReadBrowsers();observationFailure=null;}
         catch(Exception error){observationFailure=error;record("MarkdownRuntime process observation failed: "+error.GetType().Name);}
     }
     private void ReadBrowsers()
     {
+        beforeObserve?.Invoke();
         foreach(var info in environment.GetProcessInfos())
         {
             if(info.Kind!=CoreWebView2ProcessKind.Browser||browsers.ContainsKey(info.ProcessId))continue;
@@ -77,6 +79,7 @@ internal sealed class MarkdownRuntimeLifetime
 
     public async Task Retire(Task? initialization)
     {
+        if(completed)return;
         Exception? failure=null;
         try
         {
@@ -110,7 +113,9 @@ internal sealed class MarkdownRuntimeLifetime
             record($"MarkdownRuntime retired; recoveredProcesses={RecoveredProcessCount}");
         }
         catch(Exception error){failure=error;}
-        finally{var cleanupFailure=DisposeTracking();failure??=cleanupFailure;}
+        // A failed observation/timeout is not evidence of process exit. Keep
+        // handles and exit-event subscriptions so a later attempt can prove it.
+        if(failure is null)failure=DisposeTracking();
         if(failure is not null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 

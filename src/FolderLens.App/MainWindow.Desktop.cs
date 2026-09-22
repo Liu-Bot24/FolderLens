@@ -152,6 +152,7 @@ public sealed partial class MainWindow
     private void SearchChanged(object sender,TextChangedEventArgs e)
     {
         if(!controlsReady||suppressFilters)return;
+        CancelStaleIncomingPreparation();
         CancelPendingSearch();
         // A delayed TextChanged must not replace an explicitly submitted sequence.
         if(Search.Text==submittedSearch)return;

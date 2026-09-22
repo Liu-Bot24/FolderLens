@@ -14,10 +14,21 @@ public sealed partial class MainWindow
     private bool markdownLoading;
     private MarkdownRuntimeLifetime? markdownRuntime;
     private Task markdownRuntimeRetirement=Task.CompletedTask;
+    private MarkdownRuntimeLifetime? retiringMarkdownRuntime;
+    private Task? retiringMarkdownInitialization;
     private Task? markdownControllerInitialization;
+    private async Task AwaitMarkdownRetirement(CancellationToken token)
+    {
+        // Retry proof of shutdown, never discard a failed task and reuse its
+        // profile blindly. The retained owner still holds original OS handles.
+        if(markdownRuntimeRetirement.IsFaulted&&retiringMarkdownRuntime is {} runtime)
+            markdownRuntimeRetirement=RetireMarkdownRuntime(runtime,retiringMarkdownInitialization,null);
+        await markdownRuntimeRetirement.WaitAsync(token);
+        retiringMarkdownRuntime=null;retiringMarkdownInitialization=null;
+    }
     private async Task<CoreWebView2Environment> CreateMarkdownEnvironment(CancellationToken token)
     {
-        await markdownRuntimeRetirement.WaitAsync(token);
+        await AwaitMarkdownRetirement(token);
         string fixedRuntime=Path.Combine(AppContext.BaseDirectory,"runtime","webview2");
         string folder=Path.Combine(RuntimeDataDirectory,"webview");
         var options=new CoreWebView2EnvironmentOptions{ExclusiveUserDataFolderAccess=true};
@@ -87,6 +98,7 @@ public sealed partial class MainWindow
         {
             markdownRuntime=null;
             var initialization=markdownControllerInitialization;markdownControllerInitialization=null;
+            retiringMarkdownRuntime=runtime;retiringMarkdownInitialization=initialization;
             markdownRuntimeRetirement=RetireMarkdownRuntime(runtime,initialization,closeFailure);
         }
         else if(closeFailure is not null)markdownRuntimeRetirement=Task.FromException(closeFailure);
@@ -100,6 +112,6 @@ public sealed partial class MainWindow
     private async Task DisposeMarkdownView()
     {
         CancelMarkdownPresentation();markdownReleaseTimer?.Stop();await markdownLoadGate.WaitAsync();
-        try{ReleaseMarkdownView();await markdownRuntimeRetirement;}finally{markdownLoadGate.Release();}
+        try{ReleaseMarkdownView();await AwaitMarkdownRetirement(CancellationToken.None);}finally{markdownLoadGate.Release();}
     }
 }

@@ -226,6 +226,7 @@ public sealed partial class MainWindow : Window
         // Validate the draft before retiring work or recording navigation history.
         if(rootId.Length>0&&!TryCurrentFilter(out _))return;
         long navigation=++directoryNavigationRequest;
+        CancelIncomingPreparation();
         CancelPendingSearch();
         SavedView? acceptedView=null;
         var requestedAdvanced=advanced;
@@ -440,6 +441,7 @@ public sealed partial class MainWindow : Window
         if(!browserRootReady)return;
         if(!TryCurrentFilter(out var filter,out var error)){await RejectBrowserFilter(error!);return;}
         if(!scanPreview)submittedSearch=Search.Text;
+        CancelStaleIncomingPreparation();
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
@@ -630,6 +632,7 @@ public sealed partial class MainWindow : Window
     }
     private async void SelectFile(object sender,SelectionChangedEventArgs e)
     {
+        if(!closing&&!updatingBrowser&&!syncingBrowserSelection)CancelIncomingPreparation();
         if(closing||updatingBrowser||sender is not ListViewBase view||SelectionPreview(view) is not FileRow row||ReferenceEquals(selected,row))return;
         await SelectPreview(row);
     }

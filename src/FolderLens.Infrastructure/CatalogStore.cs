@@ -79,6 +79,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     public async Task Initialize(CancellationToken cancellation=default,Action<string>? progress=null)
     {
         await writer.Execute(c=>InitializeSchema(c,"catalog",cancellation,progress),cancellation);
+        await writer.Execute(c=>Execute(c,ReadBindingSchema),cancellation);
         await writer.Execute(InitializeCollectionRevision,cancellation);
         if(playlistPath is not null){await writer.Execute(c=>InitializePlaylist(c,playlistPath),cancellation);await RecoverCompletedFileOperation();}
         await sessionReader.Execute(c=>InitializeSchema(c,"sessions",cancellation,progress),cancellation);

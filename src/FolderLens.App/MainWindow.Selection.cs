@@ -18,6 +18,7 @@ public sealed partial class MainWindow
     }
     private async Task<bool> SelectBrowserOrdinal(VirtualResults source,int index,CancellationToken cancellation)
     {
+        CancelIncomingPreparation();
         long request=++browserSelectionRequest;
         var row=(FileRow)source[index]!;await source.EnsureLoaded(row,cancellation);
         if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||!ReferenceEquals(results,source))return false;
@@ -83,6 +84,7 @@ public sealed partial class MainWindow
     }
     private void ToggleView(object sender,RoutedEventArgs args)
     {
+        if(controlsReady&&!suppressFilters)CancelIncomingPreparation();
         bool details=DetailsMode.IsChecked==true;
         UpdatePathPresentationControl();
         if(controlsReady&&!suppressFilters&&ReferenceEquals(sender,DetailsMode))categoryDetailViews[Tag(Category)]=details;

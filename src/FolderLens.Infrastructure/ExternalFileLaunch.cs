@@ -14,6 +14,11 @@ public static class ExternalFileLaunch
         string path=PathRules.ValidateSource(Path.GetFullPath(Path.Combine(basePath,file.RelativePath)));
         if(!path.StartsWith(basePath,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("文件路径已超出当前根目录。");
         var observed=await probe.Read(path,cancellation,allowCloud).ConfigureAwait(false);
+        if(observed.SourceSignature!=file.SourceSignature||file.HydrationState=="placeholder")
+        {
+            file=await catalog.ResolveFileRead(rootId,entryId,version,probe,allowCloud,cancellation).ConfigureAwait(false);
+            observed=await probe.Read(path,cancellation,allowCloud).ConfigureAwait(false);
+        }
         if(observed!=new SourceFileStamp(file.LogicalBytes,file.ModifiedUtcTicks,file.SourceSignature))throw new IOException("原文件已变化，请刷新后重新打开。");
         var latest=await catalog.ReadFileProperties(rootId,entryId,version,cancellation).ConfigureAwait(false);
         if(latest is null||latest.EntryState!="present"||latest.RelativePath!=file.RelativePath||latest.LogicalBytes!=file.LogicalBytes||latest.ModifiedUtcTicks!=file.ModifiedUtcTicks||latest.Kind!=file.Kind)throw new IOException("文件在打开前发生变化，请重试。");

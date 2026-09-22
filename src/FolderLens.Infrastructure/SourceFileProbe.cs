@@ -7,6 +7,17 @@ public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=nu
     private readonly SemaphoreSlim gate=new(1,1);
     private ScanWorkerClient? worker;
     private bool disposed;
+    internal async Task<ScanDirectoryPacket> ReadPacket(string path,CancellationToken cancellation,bool allowCloud=false,SourceFileStamp? prepare=null)
+    {
+        await gate.WaitAsync(cancellation).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed,this);
+            worker??=new(executable??ScanWorkerClient.FindExecutable()??throw new InvalidOperationException("缺少文件访问组件 FolderLens.Scan.Worker.exe。"),timeout);
+            return await worker.Probe(path,cancellation,allowCloud,prepare).ConfigureAwait(false);
+        }
+        finally{gate.Release();}
+    }
     public async Task<SourceFileStamp> Read(string path,CancellationToken cancellation,bool allowCloud=false)
     {
         var observation=await ReadObservation(path,cancellation,allowCloud).ConfigureAwait(false);

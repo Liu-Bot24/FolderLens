@@ -15,6 +15,7 @@ public sealed record FileProperties
     public required string EntryState {get;init;}
     public long Version {get;init;}
     public string SourceSignature {get;init;}="";
+    public bool ReadObservationBound {get;init;}
     public bool IsCollected {get;init;}
     public long LogicalBytes {get;init;}
     public long? AllocatedBytes {get;init;}
@@ -51,6 +52,8 @@ public sealed partial class CatalogStore
     {
         using var transaction=c.BeginTransaction(deferred:true);using var cmd=c.CreateCommand();cmd.Transaction=transaction;
         cmd.CommandText="SELECT f.*,d.detail_json,EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id)) AS is_collected FROM Files f LEFT JOIN FileDetails d ON d.entry_id=f.entry_id AND d.source_version=f.file_version WHERE f.root_id=$root AND f.entry_id=$entry AND f.file_version=$version";
+        cmd.CommandText=cmd.CommandText.Replace("SELECT f.*", "SELECT f.*,coalesce(rb.source_signature,f.stat_signature) AS read_signature,coalesce(rb.hydration_state,f.hydration_state) AS read_hydration,rb.entry_id IS NOT NULL AS read_bound")
+            .Replace("LEFT JOIN FileDetails",ReadBindingJoin+" LEFT JOIN FileDetails");
         cmd.Parameters.AddWithValue("$root",rootId);cmd.Parameters.AddWithValue("$entry",entryId);cmd.Parameters.AddWithValue("$version",version);
         FileProperties file;
         using(var row=cmd.ExecuteReader())
@@ -59,7 +62,7 @@ public sealed partial class CatalogStore
             string? Text(string field){int i=row.GetOrdinal(field);return row.IsDBNull(i)?null:row.GetString(i);}
             long? Number(string field){int i=row.GetOrdinal(field);return row.IsDBNull(i)?null:row.GetInt64(i);}
             string? json=Text("detail_json");ContentMetadataDetails? details=json is null?null:JsonSerializer.Deserialize<ContentMetadataDetails>(json,WorkerProtocol.Json);
-            file=new(){SourceSignature=Text("stat_signature")!,EntryId=entryId,RootId=rootId,Version=version,RelativePath=Text("relative_path")!,Name=Text("name")!,Kind=Text("kind")!,EntryState=Text("entry_state")!,LogicalBytes=Number("logical_bytes")!.Value,AllocatedBytes=Number("allocated_bytes"),ModifiedUtcTicks=Number("mtime_utc_ticks")!.Value,CreatedUtcTicks=Number("ctime_utc_ticks"),CaptureUtcTicks=Number("capture_utc_ticks"),CaptureWallTicks=Number("capture_wall_ticks"),CaptureOffsetMinutes=(int?)Number("capture_offset_minutes"),Format=Text("format_id"),Raw=Number("is_raw") is {} raw?raw!=0:null,Animated=Number("is_animated") is {} animated?animated!=0:null,Width=Number("display_width"),Height=Number("display_height"),EncodedWidth=Number("encoded_width"),EncodedHeight=Number("encoded_height"),PixelCount=Number("pixel_count"),BitDepth=Number("bit_depth"),FrameCount=Number("frame_count"),PageCount=Number("page_count"),DurationMs=Number("duration_ms"),VideoCodec=Text("video_codec"),AudioCodec=Text("audio_codec"),FrameRateNumerator=Number("fps_num"),FrameRateDenominator=Number("fps_den"),HydrationState=Text("hydration_state"),Details=details,IsCollected=Number("is_collected")==1};
+            file=new(){SourceSignature=Text("read_signature")!,ReadObservationBound=Number("read_bound")==1,EntryId=entryId,RootId=rootId,Version=version,RelativePath=Text("relative_path")!,Name=Text("name")!,Kind=Text("kind")!,EntryState=Text("entry_state")!,LogicalBytes=Number("logical_bytes")!.Value,AllocatedBytes=Number("allocated_bytes"),ModifiedUtcTicks=Number("mtime_utc_ticks")!.Value,CreatedUtcTicks=Number("ctime_utc_ticks"),CaptureUtcTicks=Number("capture_utc_ticks"),CaptureWallTicks=Number("capture_wall_ticks"),CaptureOffsetMinutes=(int?)Number("capture_offset_minutes"),Format=Text("format_id"),Raw=Number("is_raw") is {} raw?raw!=0:null,Animated=Number("is_animated") is {} animated?animated!=0:null,Width=Number("display_width"),Height=Number("display_height"),EncodedWidth=Number("encoded_width"),EncodedHeight=Number("encoded_height"),PixelCount=Number("pixel_count"),BitDepth=Number("bit_depth"),FrameCount=Number("frame_count"),PageCount=Number("page_count"),DurationMs=Number("duration_ms"),VideoCodec=Text("video_codec"),AudioCodec=Text("audio_codec"),FrameRateNumerator=Number("fps_num"),FrameRateDenominator=Number("fps_den"),HydrationState=Text("read_hydration"),Details=details,IsCollected=Number("is_collected")==1};
         }
         using var groups=c.CreateCommand();groups.Transaction=transaction;groups.CommandText="SELECT field_group,state,error_code,provider_version,attempt_count FROM FieldStates WHERE entry_id=$entry AND source_version=$version";groups.Parameters.AddWithValue("$entry",entryId);groups.Parameters.AddWithValue("$version",version);
         var states=new Dictionary<string,MetadataFieldState>();using(var rows=groups.ExecuteReader())while(rows.Read())states.Add(rows.GetString(0),new(rows.GetString(1),rows.IsDBNull(2)?null:rows.GetString(2),rows.IsDBNull(3)?null:rows.GetString(3),rows.GetInt64(4)));

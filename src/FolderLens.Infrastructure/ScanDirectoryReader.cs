@@ -14,7 +14,7 @@ public sealed record ScanDirectoryPacket(string State,ScanEntry[] Entries,string
 public static class ScanDirectoryReader
 {
     public static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud=false)=>Read(directory,allowCloud,false);
-    internal static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud,bool legacyIdentity)
+    internal static IEnumerable<ScanDirectoryPacket> Read(string directory,bool allowCloud,bool legacyIdentity,bool withoutDirectoryIds=false)
     {
         directory=PathRules.ValidateSource(directory);
         FileAttributes attributes=default;bool missing=false;
@@ -55,7 +55,7 @@ public static class ScanDirectoryReader
         try
         {
             bool legacy=identity.VolumeIdentity?.StartsWith("legacy:",StringComparison.Ordinal)==true;
-            int informationClass=legacy?10:19;var batch=new List<ScanEntry>(128);
+            int informationClass=withoutDirectoryIds?14:legacy?10:19;var batch=new List<ScanEntry>(128);
             while(true)
             {
                 VerifyLocation();

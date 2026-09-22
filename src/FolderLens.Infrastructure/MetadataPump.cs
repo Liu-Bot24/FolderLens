@@ -81,7 +81,8 @@ public sealed class MetadataPump(CatalogStore catalog,WorkerClient worker,MediaT
                     {
                         var observation=observations[entry.Id];if(observation.Error is {} error)throw error;
                         string path=observation.Path;var before=observation.Stat;
-                        if(before.Length!=entry.Length || before.ModifiedUtcTicks!=entry.Modified||before.SourceSignature!=entry.Signature)throw new IOException("FileChanged");
+                        var bound=await catalog.ResolveFileRead(entry.RootId,entry.Id,entry.Version,sourceProbe,false,cancellation).ConfigureAwait(false);
+                        if(before.Length!=entry.Length || before.ModifiedUtcTicks!=entry.Modified||before.SourceSignature!=bound.SourceSignature)throw new IOException("FileChanged");
                         // This also avoids racing common download/copy-in-progress files.
                         double remaining=300-System.Diagnostics.Stopwatch.GetElapsedTime(observation.Timestamp).TotalMilliseconds;
                         if(remaining>0)await Task.Delay(TimeSpan.FromMilliseconds(remaining),cancellation).ConfigureAwait(false);

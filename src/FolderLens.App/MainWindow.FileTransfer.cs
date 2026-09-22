@@ -13,6 +13,9 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private Task<IReadOnlyList<IStorageItem>>? incomingDragItems;
+    private CancellationTokenSource? incomingDragStop;
+    private CancellationTokenSource? incomingPreparationStop;
+    private Func<bool>? incomingPreparationCurrent;
     private readonly Dictionary<string,Task<ShellFileAction>> incomingDropDefaults=new(StringComparer.Ordinal);
     private nint FileOperationOwner=>WinRT.Interop.WindowNative.GetWindowHandle(this);
     private string? FileTransferDirectory=>!closing&&!replacingRoot&&!immersive&&activeCollectionId is null&&!string.IsNullOrWhiteSpace(rootId)?BrowsedDirectory:null;
@@ -21,6 +24,17 @@ public sealed partial class MainWindow
     private Task? shellRefreshTask;
     private sealed record ShellRefreshOwner(long RootVersion,long ViewRevision,string RootId,string? Collection,CancellationToken Token);
     private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,scanStop.Token);
+    private Func<bool> CaptureIncomingView()
+    {
+        var owner=CaptureShellRefreshOwner();var view=ActiveBrowser;long selectedVersion=selection;
+        var ranges=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
+        string filter=System.Text.Json.JsonSerializer.Serialize(CurrentFilter());
+        bool wasImmersive=immersive,wasFullScreen=fullScreen;
+        return ()=>!closing&&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision
+            &&owner.RootId==rootId&&owner.Collection==activeCollectionId&&ReferenceEquals(view,ActiveBrowser)&&selectedVersion==selection
+            &&wasImmersive==immersive&&wasFullScreen==fullScreen&&ranges.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)))
+            &&filter==System.Text.Json.JsonSerializer.Serialize(CurrentFilter());
+    }
     private async Task<FileOperationTarget[]> CaptureTransferSelection()
     {
         var targets=new List<FileOperationTarget>();
@@ -144,12 +158,24 @@ public sealed partial class MainWindow
         var deferral=args.GetDeferral();
         try
         {
-            incomingDragItems??=args.DataView.GetStorageItemsAsync().AsTask();var files=await incomingDragItems;
+            var current=CaptureIncomingView();
+            if(incomingDragStop is {IsCancellationRequested:true})ResetIncomingDrag();
+            if(incomingDragStop is null){incomingDragStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);incomingDragStop.CancelAfter(TimeSpan.FromSeconds(30));}
+            var stop=incomingDragStop;var token=stop.Token;
+            incomingDragItems??=args.DataView.GetStorageItemsAsync().AsTask(token);var files=await incomingDragItems.WaitAsync(token);
+            if(!current()||!ReferenceEquals(stop,incomingDragStop))return;
             ValidateIncomingFiles(files,target);
             bool control=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Control)!=0,shift=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Shift)!=0;
             if(control&&shift)return;
-            if(!incomingDropDefaults.TryGetValue(target,out var normal))incomingDropDefaults[target]=normal=Task.Run(()=>ShellTransferPolicy.Choose(files.Select(f=>f.Path).ToArray(),target,false,false));
-            var action=control?ShellFileAction.Copy:shift?ShellFileAction.Move:await normal;
+            ShellFileAction action;
+            if(control)action=ShellFileAction.Copy;
+            else if(shift)action=ShellFileAction.Move;
+            else
+            {
+                if(!incomingDropDefaults.TryGetValue(target,out var normal))incomingDropDefaults[target]=normal=ShellTransferPolicy.ChooseAsync(files.Select(f=>f.Path).ToArray(),target,false,false,ScanWorkerClient.FindExecutable(ScanWorkerDirectory),token);
+                action=await normal;
+            }
+            if(!current()||token.IsCancellationRequested||!ReferenceEquals(stop,incomingDragStop))return;
             var effect=action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy;
             args.AcceptedOperation=(args.AllowedOperations&effect)!=0?effect:DataPackageOperation.None;
             args.DragUIOverride.Caption=(effect==DataPackageOperation.Move?"移动到 ":"复制到 ")+Path.GetFileName(target.TrimEnd('\\'));
@@ -162,42 +188,63 @@ public sealed partial class MainWindow
         var deferral=args.GetDeferral();
         try
         {
-            var files=await args.DataView.GetStorageItemsAsync();
-            ValidateIncomingFiles(files,target);
             bool control=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Control)!=0,shift=(args.Modifiers&Windows.ApplicationModel.DataTransfer.DragDrop.DragDropModifiers.Shift)!=0;
-            var action=await Task.Run(()=>ShellTransferPolicy.Choose(files.Select(f=>f.Path).ToArray(),target,control,shift));
-            var effect=action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy;
-            if((args.AllowedOperations&effect)==0)return;
-            await ReceiveFiles(args.DataView,target,action);
+            await ReceiveFiles(args.DataView,target,null,(control,shift,args.AllowedOperations));
         }
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}finally{ResetIncomingDrag();deferral.Complete();}
     }
-    private void ResetIncomingDrag(){incomingDragItems=null;incomingDropDefaults.Clear();}
+    private void ResetIncomingDrag(){var stop=incomingDragStop;incomingDragStop=null;stop?.Cancel();stop?.Dispose();incomingDragItems=null;incomingDropDefaults.Clear();}
+    private void CancelIncomingPreparation(){incomingPreparationStop?.Cancel();ResetIncomingDrag();}
+    private void CancelStaleIncomingPreparation()
+    {
+        if(incomingPreparationCurrent is not {} current)return;
+        // An invalid draft is also different from the accepted transfer view.
+        bool valid;try{valid=current();}catch(Exception error) when(error is ArgumentException or OverflowException or FormatException){valid=false;}
+        if(!valid)CancelIncomingPreparation();
+    }
     private static void ValidateIncomingFiles(IReadOnlyList<IStorageItem> files,string destination)
     {
         var budget=new FileTransferBudget(files.Count);
         foreach(var file in files)budget.Add(file.Path,destination);
     }
-    private async Task ReceiveFiles(DataPackageView data,string destination,ShellFileAction? requested)
+    private async Task ReceiveFiles(DataPackageView data,string destination,ShellFileAction? requested,(bool Control,bool Shift,DataPackageOperation Allowed)? drop=null)
     {
         if(fileOperationBusy||closing||!data.Contains(StandardDataFormats.StorageItems))return;
         using var work=browserWork.Enter();if(work is null)return;
-        fileOperationBusy=true;UpdateCommandAvailability();
         var refreshOwner=CaptureShellRefreshOwner();
+        var current=CaptureIncomingView();
+        using var preparation=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        preparation.CancelAfter(TimeSpan.FromSeconds(30));var token=preparation.Token;
+        void Check(){token.ThrowIfCancellationRequested();if(!current())throw new OperationCanceledException();}
+        incomingPreparationStop=preparation;incomingPreparationCurrent=current;
+        fileOperationBusy=true;UpdateCommandAvailability();
         try
         {
-            var files=await data.GetStorageItemsAsync();if(closing||files.Count==0)return;
+            var files=await data.GetStorageItemsAsync().AsTask(token).WaitAsync(token);Check();if(files.Count==0)return;
             ValidateIncomingFiles(files,destination);
             var action=requested??(data.RequestedOperation==DataPackageOperation.Move?ShellFileAction.Move:ShellFileAction.Copy);
+            if(drop is {} dragging)
+            {
+                action=await ShellTransferPolicy.ChooseAsync(files.Select(f=>f.Path).ToArray(),destination,dragging.Control,dragging.Shift,ScanWorkerClient.FindExecutable(ScanWorkerDirectory),token);
+                Check();var effect=action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy;
+                if((dragging.Allowed&effect)==0)return;
+            }
             var requests=files.Select(f=>new ShellFileRequest(f.Path,action,destination)).ToArray();
-            await ReturnToBrowser();if(closing)return;ClearResultSelection();
+            // Preparation owns the original browser state. Once committed,
+            // Shell keeps its captured destination and reports partial results.
+            Check();incomingPreparationStop=null;incomingPreparationCurrent=null;ClearResultSelection();
+            if(verifyTransferBarrier is not null)await verifyTransferBarrier("incoming-commit");
             var result=await ShellFileOperations.Execute(requests,FileOperationOwner,lifetime.Token);
             CompleteShellOperation(result,refreshOwner);
             // A partial move must not tell the source to forget every cut item.
             if(!result.Aborted&&result.HResult>=0&&result.Items.All(i=>i.Outcome==ShellItemOutcome.Completed))
                 data.ReportOperationCompleted(action==ShellFileAction.Move?DataPackageOperation.Move:DataPackageOperation.Copy);
         }
-        finally{fileOperationBusy=false;UpdateCommandAvailability();}
+        finally
+        {
+            if(ReferenceEquals(incomingPreparationStop,preparation)){incomingPreparationStop=null;incomingPreparationCurrent=null;}
+            fileOperationBusy=false;UpdateCommandAvailability();
+        }
     }
     private void CompleteShellOperation(ShellBatchResult result,ShellRefreshOwner owner)
     {

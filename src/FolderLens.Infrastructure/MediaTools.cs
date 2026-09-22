@@ -22,19 +22,23 @@ public static class BoundedProcess
 {
     public static Task<string> Run(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation,WorkerPriority priority=WorkerPriority.Metadata)
         =>Task.Run(()=>RunCore(executable,arguments,timeout,maxOutputBytes,cancellation,priority),cancellation);
-    private static async Task<string> RunCore(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation,WorkerPriority priority)
+    internal static async Task<string> RunCore(string executable,IEnumerable<string> arguments,TimeSpan timeout,int maxOutputBytes,CancellationToken cancellation,WorkerPriority priority,Func<Process,WorkerJob>? createJob=null,Action<WorkerJob,Process>? assignJob=null)
     {
         cancellation.ThrowIfCancellationRequested();
         var start=new ProcessStartInfo(executable){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=Path.GetDirectoryName(executable)!};foreach(var arg in arguments)start.ArgumentList.Add(arg);
-        using var process=Process.Start(start)??throw new IOException("Unable to start media tool.");using var job=new WorkerJob(1024L*1024*1024);job.Assign(process);
-        if(priority!=WorkerPriority.Foreground)BackgroundProcessPriority.Apply(process);
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeout);
         async Task<string> ReadBounded(StreamReader reader)
         {
             var result=new StringBuilder();char[] buffer=new char[4096];int count;while((count=await reader.ReadAsync(buffer.AsMemory(),deadline.Token))>0){if(result.Length+count>maxOutputBytes/2)throw new InvalidDataException("Media output exceeded budget.");result.Append(buffer,0,count);}return result.ToString();
         }
+        using var process=Process.Start(start)??throw new IOException("Unable to start media tool.");
         try
         {
+            // Every operation after Start, including Job construction and aggregate
+            // admission, must be covered while this call owns a live child.
+            using var job=createJob is null?new WorkerJob(1024L*1024*1024):createJob(process);
+            if(assignJob is null)job.Assign(process);else assignJob(job,process);
+            if(priority!=WorkerPriority.Foreground)BackgroundProcessPriority.Apply(process);
             Task<string> stdout=ReadBounded(process.StandardOutput),stderr=ReadBounded(process.StandardError);
             var reads=Task.WhenAll(stdout,stderr);
             var exited=process.WaitForExitAsync(deadline.Token);
@@ -42,7 +46,15 @@ public static class BoundedProcess
             await Task.WhenAll(reads,exited);
             if(process.ExitCode!=0)throw new InvalidDataException($"媒体工具无法读取此文件（退出码 {process.ExitCode}）。");return stdout.Result;
         }
-        catch{if(!process.HasExited){process.Kill(entireProcessTree:true);await process.WaitForExitAsync(CancellationToken.None);}if(!cancellation.IsCancellationRequested && deadline.IsCancellationRequested)throw new TimeoutException("媒体处理超时。");throw;}
+        catch(Exception error)
+        {
+            bool timedOut=!cancellation.IsCancellationRequested&&deadline.IsCancellationRequested;
+            deadline.Cancel();
+            try{if(!process.HasExited)process.Kill(entireProcessTree:true);await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));}
+            catch(Exception cleanup){throw new AggregateException("媒体处理失败，且未能确认子进程退出。",error,cleanup);}
+            if(timedOut)throw new TimeoutException("媒体处理超时。",error);
+            throw;
+        }
     }
 }
 public sealed class MediaTools(string ffprobe,string ffmpeg)

@@ -35,7 +35,8 @@ public sealed partial class MainWindow
     private async Task<FileProperties> ResolveRow(FileRow row,string id,CancellationToken token)
     {
         long collectionVersion=collectionChangeVersion;
-        var file=await catalog!.ReadFileProperties(SourceRootId(row),row.Item!.EntryId,row.Item.Version,token)??throw new IOException("文件已改变，请刷新当前结果。");
+        var file=await catalog!.ResolveFileRead(SourceRootId(row),row.Item!.EntryId,row.Item.Version,prefetchSourceProbe,approvedCloud.Contains(CloudKey(row)),token);
+        token.ThrowIfCancellationRequested();
         row.UpdateProperties(file,collectionVersion==collectionChangeVersion);return file;
     }
     private async void ShowProperties(object sender,RoutedEventArgs e)
@@ -68,7 +69,7 @@ public sealed partial class MainWindow
     private async Task ReadCloudPreview()
     {
         if(selected?.Item is null)return;var row=selected;long current=selection;var token=selectionStop.Token;
-        try{if(!await EnsureCloudRead(row,current,force:true)||token.IsCancellationRequested)return;PreparePreview();if(verifyPreviewUpdateBarrier is not null)await verifyPreviewUpdateBarrier("cloudRead",token);await RenderSelectedContent(row,current,token);}
+        try{if(!await EnsureCloudRead(row,current,force:true)||token.IsCancellationRequested)return;PreparePreview();if(verifyPreviewUpdateBarrier is not null)await verifyPreviewUpdateBarrier("cloudRead",token);selectedProperties=await ResolveRow(row,rootId,token);if(current!=selection||token.IsCancellationRequested)return;await RenderSelectedContent(row,current,token);}
         catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&!token.IsCancellationRequested)ShowPreviewError(ex);}
         finally{if(current==selection)FinishPreview();}
     }

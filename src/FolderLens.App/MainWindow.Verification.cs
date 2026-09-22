@@ -101,6 +101,8 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-scan-navigation-scale")){await VerifyScanNavigationScale(source,report);return;}
             if(arguments.Contains("--verify-query-retention")){await VerifyQueryRetention(source,report);return;}
             if(arguments.Contains("--verify-shell-refresh-navigation")){await VerifyShellRefreshNavigation(source,report);return;}
+            if(arguments.Contains("--verify-incoming-transfer-navigation")){await VerifyIncomingTransferNavigation(source,report);return;}
+            if(arguments.Contains("--verify-read-binding")){await VerifyReadBinding(source,report);return;}
             if(arguments.Contains("--verify-video-lifetime")){await VerifyVideoLifetime(source,report);return;}
             if(arguments.Contains("--verify-format-choices")||arguments.Contains("--verify-format-background-race")){await VerifyFormatChoices(source,report);return;}
             if(arguments.Contains("--verify-navigation-roots")){await VerifyNavigationRoots(source,report);return;}

@@ -63,6 +63,7 @@ public sealed partial class MainWindow
         var previous=rootId.Length>0?CaptureView():null;
         bool sameRoot=previous is not null&&browserRootReady&&!replacingRoot&&string.Equals(root,saved.Root,StringComparison.Ordinal)&&previous.Filter.HasSameScanPolicy(saved.Filter);
         restoringView=true;long revision=++viewRestoreRevision,requestedRoot=rootChangeVersion+(sameRoot?0:1);
+        CancelIncomingPreparation();
         pendingViewRestore=new(saved,revision,requestedRoot);
         try
         {

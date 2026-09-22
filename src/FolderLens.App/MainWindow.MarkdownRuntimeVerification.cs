@@ -57,18 +57,19 @@ public sealed partial class MainWindow
             if(answer!="2")throw new InvalidOperationException("哨兵浏览器在清理后不能执行脚本："+stage);
             Record($"sentinel-alive stage={stage} pid={sentinelPid} script={answer}");
         }
-        async Task Cycle(string label,bool closeDuringInitialization)
+        async Task Cycle(string label,bool closeDuringInitialization,bool retryObservation=false)
         {
             CoreWebView2Environment? environment=null;MarkdownRuntimeLifetime? owner=null;
             WebView2? view=null;Task? initialization=null;Process? browser=null;int pid=0;
             bool closed=false,pendingAtClose=false,retired=false;Exception? failure=null;var cleanupFailures=new List<Exception>();
+            bool failObservation=false;
             var exits=new HashSet<int>();
             void BrowserExited(CoreWebView2Environment sender,CoreWebView2BrowserProcessExitedEventArgs args)=>exits.Add(checked((int)args.BrowserProcessId));
             void CloseView(){if(view is null||closed)return;try{view.Close();}finally{closed=true;}}
             try
             {
                 Record("create "+label);
-                environment=await EnvironmentFor(ownedFolder);owner=new MarkdownRuntimeLifetime(environment,ownedFolder,Record);
+                environment=await EnvironmentFor(ownedFolder);owner=new MarkdownRuntimeLifetime(environment,ownedFolder,Record,()=>{if(failObservation)throw new IOException("Injected process observation failure");});
                 environment.BrowserProcessExited+=BrowserExited;
                 view=new WebView2{Width=300,Height=220};Grid.SetColumn(view,1);panel.Children.Add(view);Shell.UpdateLayout();
                 await WaitUntil(()=>view.IsLoaded,TimeSpan.FromSeconds(3));
@@ -94,7 +95,16 @@ public sealed partial class MainWindow
                 try{CloseView();}catch(Exception error){cleanupFailures.Add(error);}
                 if(owner is not null)
                 {
-                    try{await owner.Retire(initialization);retired=true;}
+                    if(retryObservation)
+                    {
+                        failObservation=true;
+                        retiringMarkdownRuntime=owner;retiringMarkdownInitialization=initialization;
+                        markdownRuntimeRetirement=RetireMarkdownRuntime(owner,initialization,null);
+                        try{await markdownRuntimeRetirement;cleanupFailures.Add(new InvalidOperationException("Retirement accepted an unverified browser group."));}
+                        catch(IOException){Record("unverified-retirement-rejected "+label);}
+                        finally{failObservation=false;}
+                    }
+                    try{if(retryObservation)await AwaitMarkdownRetirement(lifetime.Token);else await owner.Retire(initialization);retired=true;}
                     catch(Exception error){cleanupFailures.Add(error);}
                 }
                 bool rawTerminal=initialization?.IsCompleted==true,processExited=false,exitEvent=pid==0||exits.Contains(pid);
@@ -134,6 +144,7 @@ public sealed partial class MainWindow
             for(int i=0;i<3;i++)await Cycle(i==0?"initial-owned":"same-udf-recreation-"+i,false);
             await Cycle("close-pending-initialization",true);
             await Cycle("recovery-after-pending-close",false);
+            await Cycle("recovery-after-observation-failure",false,true);
             await AssertSentinel("all-owned-retirements");
         }
         catch(Exception error){primaryFailure=error;}
