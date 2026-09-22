@@ -11,7 +11,7 @@ namespace FolderLens.Infrastructure;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ScanWorkerMessage(string Type,string Instance,string Nonce,string RequestId="",string? Directory=null,
-    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v6",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null,SourceFileStamp? Expected=null);
+    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v7",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null,SourceFileStamp? Expected=null,SourceParentAuthorization? Parent=null);
 
 public static class ScanWorkerProtocol
 {
@@ -30,7 +30,7 @@ public static class ScanWorkerProtocol
         int length=BinaryPrimitives.ReadInt32LittleEndian(header);if(length is <2 or >1024*1024)throw new InvalidDataException("Invalid scan frame length.");
         byte[] bytes=new byte[length];await stream.ReadExactlyAsync(bytes,cancellation).ConfigureAwait(false);
         var message=JsonSerializer.Deserialize<ScanWorkerMessage>(bytes,Json)??throw new InvalidDataException("Empty scan message.");
-        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v6" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
+        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v7" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
         return message;
     }
     public static async Task Serve(string pipeName,string instance,string nonce,CancellationToken cancellation=default)
@@ -45,7 +45,7 @@ public static class ScanWorkerProtocol
         {
             ScanWorkerMessage message;
             try{message=await Read(pipe,cancellation).ConfigureAwait(false);}catch(EndOfStreamException){return;}
-            if(message.Type is not ("directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type is not ("directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
             if(message.Type is "cursorOpen" or "cursorNext")
             {
                 if(message.Type=="cursorOpen")
@@ -73,12 +73,13 @@ public static class ScanWorkerProtocol
                 catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception or ArgumentException){error="unavailable";}
                 await Write(pipe,new("imagePath",instance,nonce,message.RequestId,ResolvedImage:resolved,ResourceError:error),cancellation).ConfigureAwait(false);continue;
             }
+            if(message.Type=="volume"){await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:ScanPathProbe.ReadVolume(message.Directory)),cancellation).ConfigureAwait(false);continue;}
             if(message.Type=="stat")
             {await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:ScanPathProbe.Read(message.Directory,message.AllowCloud)),cancellation).ConfigureAwait(false);continue;}
             if(message.Type=="prepareRead")
             {
                 ScanDirectoryPacket prepared;
-                try{prepared=SourceReadPreparation.Read(message.Directory,message.Expected??throw new InvalidDataException("Missing preparation version."),message.AllowCloud);}
+                try{prepared=SourceReadPreparation.Read(message.Directory,message.Expected??throw new InvalidDataException("Missing preparation version."),message.AllowCloud,message.Parent);}
                 catch(UnauthorizedAccessException){prepared=new("inaccessible",[],"AccessDenied");}
                 catch(IOException error){prepared=new("offline",[],error.Message=="FileChanged"?"FileChanged":"SourceIoError");}
                 catch(System.Runtime.InteropServices.COMException){prepared=new("offline",[],"CloudReadFailed");}
@@ -196,7 +197,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
             finally{Interlocked.Exchange(ref busy,0);}
         }
     }
-    public async Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation,bool allowCloud=false,SourceFileStamp? prepare=null)
+    public async Task<ScanDirectoryPacket> Probe(string path,CancellationToken cancellation,bool allowCloud=false,SourceFileStamp? prepare=null,bool volumeOnly=false,SourceParentAuthorization? parent=null)
     {
         if(Interlocked.Exchange(ref busy,1)!=0)throw new InvalidOperationException("A scan worker has one active request.");
         using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(operationTimeout??TimeSpan.FromSeconds(20));
@@ -205,7 +206,7 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         {
             if(stopRequired)await Stop().ConfigureAwait(false);
             if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
-            string request=Guid.NewGuid().ToString("N");await ScanWorkerProtocol.Write(pipe!,new(prepare is null?"stat":"prepareRead",instance,nonce,request,PathRules.ValidateSource(path),allowCloud,Expected:prepare),timeout.Token).ConfigureAwait(false);
+            string request=Guid.NewGuid().ToString("N");await ScanWorkerProtocol.Write(pipe!,new(volumeOnly?"volume":prepare is null?"stat":"prepareRead",instance,nonce,request,PathRules.ValidateSource(path),allowCloud,Expected:prepare,Parent:parent),timeout.Token).ConfigureAwait(false);
             var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
             if(reply.Type!="packet"||reply.Instance!=instance||reply.Nonce!=nonce||reply.RequestId!=request||reply.Packet is null||reply.Packet.Entries.Length!=0||reply.Packet.State is not ("present" or "missing" or "offline" or "inaccessible" or "excluded"))throw new InvalidDataException("Invalid stat response.");
             completed=true;return reply.Packet;

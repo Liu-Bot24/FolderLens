@@ -21,9 +21,11 @@ public sealed partial class MainWindow
     private string? FileTransferDirectory=>!closing&&!replacingRoot&&!immersive&&activeCollectionId is null&&!string.IsNullOrWhiteSpace(rootId)?BrowsedDirectory:null;
     private Func<string,Task>? verifyTransferBarrier;
     private CancellationTokenSource? shellRefreshStop;
+    private CancellationTokenSource shellViewStop=new();
     private Task? shellRefreshTask;
     private sealed record ShellRefreshOwner(long RootVersion,long ViewRevision,string RootId,string? Collection,CancellationToken Token);
-    private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,scanStop.Token);
+    private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,shellViewStop.Token);
+    private void RetireShellRefreshView(){shellViewStop.Cancel();shellViewStop.Dispose();shellViewStop=new();}
     private Func<bool> CaptureIncomingView()
     {
         var owner=CaptureShellRefreshOwner();var view=ActiveBrowser;long selectedVersion=selection;
@@ -252,9 +254,9 @@ public sealed partial class MainWindow
         // The Shell operation has ended. Validation is separate cancellable
         // work and must not keep file commands disabled for an entire playlist.
         fileOperationBusy=false;UpdateCommandAvailability();
-        shellRefreshTask=RefreshAfterShellOperation(owner);
+        shellRefreshTask=RefreshAfterShellOperation(owner,result);
     }
-    private async Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null)
+    private async Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null,ShellBatchResult? result=null)
     {
         using var work=browserWork.Enter();if(work is null)return;
         if(closing||catalog is null)return;
@@ -278,6 +280,32 @@ public sealed partial class MainWindow
                     await RefreshQuery(preserveViewport:true,scanPreview:true);
                     if(!Current())return;
                     nextPublication=System.Diagnostics.Stopwatch.GetTimestamp()+System.Diagnostics.Stopwatch.Frequency;
+                }
+                if(Current())await RefreshQuery(preserveViewport:true,scanPreview:true);
+            }
+            else if(scanStop.IsCancellationRequested)
+            {
+                // A stopped scan stays stopped. Only reconcile affected existing
+                // directory entries with a separate view-owned deadline.
+                using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(30));
+                if(scanTask is {} retiring)try{await retiring.WaitAsync(deadline.Token);}catch(OperationCanceledException) when(!deadline.IsCancellationRequested){}
+                deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
+                string currentRoot=root;long currentEpoch=epoch;var exclusions=ScanExclusions();
+                var paths=new HashSet<string>(StringComparer.Ordinal){BrowsedDirectory};
+                if(result is not null)foreach(var item in result.Items)
+                {
+                    if(Path.GetDirectoryName(item.Request.Source) is {} sourceDirectory)paths.Add(sourceDirectory);
+                    if(item.ActualDestination is {} actual&&Path.GetDirectoryName(actual) is {} actualDirectory)paths.Add(actualDirectory);
+                    if(item.Request.Destination is {} destination)paths.Add(destination);
+                }
+                foreach(string path in paths)
+                {
+                    string? relative=DirectoryBrowseScope.Relative(currentRoot,path);if(relative is null)continue;
+                    bool exists=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT 1 FROM Directories WHERE root_id=$root AND canonical_key=$path";cmd.Parameters.AddWithValue("$root",owner.RootId);cmd.Parameters.AddWithValue("$path",relative);return cmd.ExecuteScalar() is not null;},deadline.Token);
+                    if(!exists)continue;
+                    var scanResult=await new DirectoryIndexer(catalog,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Scan(owner.RootId,currentRoot,currentEpoch,true,exclusions,null,deadline.Token,scopeRelative:relative,descendants:false,preserveRootState:true);
+                    deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
+                    if(scanResult.State!="ready")throw new IOException("文件操作已结束，但目录核对未完成，请刷新重试。");
                 }
                 if(Current())await RefreshQuery(preserveViewport:true,scanPreview:true);
             }

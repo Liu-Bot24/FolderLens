@@ -8,6 +8,14 @@ internal static class FileObservationWriter
     private const string changed="(Files.stat_signature<>excluded.stat_signature OR Files.entry_state<>excluded.entry_state OR $force=1)";
     private static readonly string[] metadata=["format_id","is_raw","is_animated","display_width","display_height","long_edge","short_edge","pixel_count","encoded_width","encoded_height","orientation","bit_depth","frame_count","page_count","duration_ms","fps_num","fps_den","video_codec","audio_codec","capture_wall_ticks","capture_offset_minutes","capture_utc_ticks","source_metadata_version"];
     private static readonly string reset=string.Join(",",metadata.Select(field=>$"{field}=CASE WHEN {changed} THEN NULL ELSE Files.{field} END"));
+    internal static void InvalidateContent(SqliteConnection c,SqliteTransaction t,string entry,string name)
+    {
+        long revision=NextRevision(c,t);
+        DirectoryIndexer.Execute(c,t,"UPDATE Files SET file_version=file_version+1,"+string.Join(",",metadata.Select(field=>field+"=NULL"))+",kind=$kind,kind_confidence='extension',observed_revision=$revision,updated_revision=$revision WHERE entry_id=$entry",
+            ("$entry",entry),("$kind",FileKinds.Candidate(name)),("$revision",revision));
+        DirectoryIndexer.Execute(c,t,"DELETE FROM FieldStates WHERE entry_id=$entry",("$entry",entry));
+        DirectoryIndexer.Execute(c,t,"DELETE FROM FileDetails WHERE entry_id=$entry",("$entry",entry));
+    }
     private static readonly string Upsert=$"""
             INSERT INTO Files(entry_id,root_id,directory_id,name,extension,relative_path,canonical_key,path_sort_key,name_sort_key,natural_key_version,stat_signature,kind,kind_confidence,logical_bytes,allocated_bytes,physical_identity,mtime_utc_ticks,ctime_utc_ticks,file_attributes,hydration_state,entry_state,last_seen_scan_id,updated_revision,file_version,observed_revision)
             VALUES($id,$root,$dir,$name,$ext,$path,$path,$pathkey,$namekey,1,$signature,$kind,'extension',$bytes,$allocated,$physical,$modified,$created,$attributes,$hydration,$state,$scan,0,$initialVersion,$observed)

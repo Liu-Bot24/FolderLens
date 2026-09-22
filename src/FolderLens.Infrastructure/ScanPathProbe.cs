@@ -4,6 +4,15 @@ namespace FolderLens.Infrastructure;
 
 internal static class ScanPathProbe
 {
+    public static ScanDirectoryPacket ReadVolume(string path)
+    {
+        path=PathRules.ValidateSource(path);
+        // Attribute handles neither open the data stream nor hydrate placeholders.
+        var metadata=FileAllocation.InspectMetadata(path);
+        if(metadata.Attributes is null)return new("inaccessible",[],"VolumeUnavailable");
+        if((metadata.Attributes&0x400)!=0&&!FileAllocation.IsCloudTag(metadata.ReparseTag??0))return new("excluded",[],"LinkSkipped");
+        return new("present",[],VolumeIdentity:metadata.VolumeIdentity);
+    }
     public static ScanDirectoryPacket Read(string path,bool allowCloud=false)
     {
         path=PathRules.ValidateSource(path);

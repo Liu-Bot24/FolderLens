@@ -35,7 +35,7 @@ public sealed partial class CatalogStore
     {
         var file=await ReadFileProperties(rootId,entryId,version,token).ConfigureAwait(false)??throw new IOException("FileChanged");
         if(file.HydrationState=="placeholder"&&!allowCloud)return file;
-        if(file.ReadObservationBound||file.HydrationState!="placeholder"&&SourceObservationSignature.Parse(file.SourceSignature).Identity.Length>0)return file;
+        if(file.HydrationState!="placeholder"&&SourceObservationSignature.Parse(file.SourceSignature).Identity.Length>0)return file;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(30));var cancellation=deadline.Token;
         var owner=await interactiveReader.Execute(c=>{using var t=c.BeginTransaction(deferred:true);return ReadBindingPosition(c,t,rootId,entryId,version);},cancellation).ConfigureAwait(false)??throw new IOException("FileChanged");
         if(owner.Signature!=file.SourceSignature)throw new IOException("FileChanged");
@@ -44,7 +44,7 @@ public sealed partial class CatalogStore
         if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new IOException("FileChanged");
         string parent=Path.GetDirectoryName(path)!;
         Task<ScanDirectoryPacket> Read(string target,SourceFileStamp? prepare=null)=>ReadBindingProbeOverride is {} test
-            ?test(target,allowCloud,prepare,cancellation):probe.ReadPacket(target,cancellation,allowCloud,prepare);
+            ?test(target,allowCloud,prepare,cancellation):probe.ReadPacket(target,cancellation,allowCloud,prepare,prepare is null?null:new(owner.ParentIdentity!,owner.ParentAnchor!));
         bool ParentMatches(ScanDirectoryPacket packet)=>packet.State=="present"&&packet.FileStamp is null&&owner.ParentIdentity is not null&&owner.ParentAnchor is not null
             &&owner.ParentIdentity==packet.PhysicalIdentity&&owner.ParentAnchor==packet.ResolvedLocation;
         var parentBefore=await Read(parent).ConfigureAwait(false);if(!ParentMatches(parentBefore))throw new IOException("FileChanged");
@@ -52,9 +52,10 @@ public sealed partial class CatalogStore
         if(observed.State!="present"||observed.FileObservation is not {} full||full.SkipReason is not null)throw new IOException(observed.ErrorCode??"SourceIoError");
         var after=await Read(path).ConfigureAwait(false);var parentAfter=await Read(parent).ConfigureAwait(false);
         string signature=FileObservationWriter.Signature(full);
+        if(string.IsNullOrEmpty(full.PhysicalIdentity))throw new IOException("IdentityUnavailable");
         if(after.State!="present"||after.FileObservation is not {} last||signature!=FileObservationWriter.Signature(last)||!ParentMatches(parentAfter)
             ||parentBefore.VolumeIdentity!=parentAfter.VolumeIdentity||parentBefore.CaseMode!=parentAfter.CaseMode)throw new IOException("FileChanged");
-        await writer.Execute(c=>
+        bool contentChanged=await writer.Execute(c=>
         {
             CompactBrowsingCatalog.EnsureWriteHeadroom(c,64L<<10);
             using var t=c.BeginTransaction();if(ReadBindingPosition(c,t,rootId,entryId,version)!=owner)throw new IOException("FileChanged");
@@ -62,11 +63,20 @@ public sealed partial class CatalogStore
             using var previous=c.CreateCommand();previous.Transaction=t;previous.CommandText="SELECT source_signature FROM FileReadBindings WHERE entry_id=$entry AND source_version=$version AND scan_signature=$scan AND root_epoch=$epoch AND location_id=$location AND binding_revision=$binding AND path_revision=$path";
             foreach(var pair in new (string,object)[]{("$entry",entryId),("$version",version),("$scan",owner.Signature),("$epoch",owner.Epoch),("$location",owner.Location),("$binding",owner.Binding),("$path",owner.PathRevision)})previous.Parameters.AddWithValue(pair.Item1,pair.Item2);
             if(previous.ExecuteScalar() is string accepted&&accepted!=signature)throw new IOException("FileChanged");
+            // Request ownership may expire while content identity remains useful.
+            // Compare prior content even across epochs/location revisions.
+            using var continuity=c.CreateCommand();continuity.Transaction=t;
+            continuity.CommandText="SELECT source_signature FROM FileReadBindings WHERE entry_id=$entry AND source_version=$version";
+            continuity.Parameters.AddWithValue("$entry",entryId);continuity.Parameters.AddWithValue("$version",version);
+            bool changed=continuity.ExecuteScalar() is string oldSignature&&oldSignature!=signature;
+            if(changed)FileObservationWriter.InvalidateContent(c,t,entryId,file.Name);
+            long boundVersion=changed?checked(version+1):version;
             DirectoryIndexer.Execute(c,t,"INSERT OR REPLACE INTO FileReadBindings VALUES($entry,$version,$scan,$path,$epoch,$location,$binding,$signature,$hydration)",
-                ("$entry",entryId),("$version",version),("$scan",owner.Signature),("$path",owner.PathRevision),("$epoch",owner.Epoch),("$location",owner.Location),("$binding",owner.Binding),("$signature",signature),("$hydration",full.Hydration));
+                ("$entry",entryId),("$version",boundVersion),("$scan",owner.Signature),("$path",owner.PathRevision),("$epoch",owner.Epoch),("$location",owner.Location),("$binding",owner.Binding),("$signature",signature),("$hydration",full.Hydration));
             DirectoryIndexer.Execute(c,t,"DELETE FROM FieldStates WHERE entry_id=$entry AND source_version=$version AND error_code='FileChanged'",("$entry",entryId),("$version",version));
-            t.Commit();return true;
+            t.Commit();return changed;
         },cancellation).ConfigureAwait(false);
+        if(contentChanged)throw new IOException("FileChanged");
         return await ReadFileProperties(rootId,entryId,version,cancellation).ConfigureAwait(false)??throw new IOException("FileChanged");
     }
 }

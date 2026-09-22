@@ -6,11 +6,13 @@ using Microsoft.Win32.SafeHandles;
 
 namespace FolderLens.Infrastructure;
 
+public sealed record SourceParentAuthorization(string Identity,string ResolvedLocation);
+
 internal static class SourceReadPreparation
 {
     // Executed only in the owned, cancellable scan process. Metadata access
     // does not download a placeholder; hydration requires explicit approval.
-    internal static ScanDirectoryPacket Read(string path,SourceFileStamp expected,bool allowCloud)
+    internal static ScanDirectoryPacket Read(string path,SourceFileStamp expected,bool allowCloud,SourceParentAuthorization? parent=null,Action<SafeFileHandle>? hydrateOverride=null)
     {
         path=PathRules.ValidateSource(path);expected.Validate();
         var packet=ScanPathProbe.Read(path,allowCloud);
@@ -20,14 +22,15 @@ internal static class SourceReadPreparation
         if(expected.Length!=before.Bytes||expected.ModifiedUtcTicks!=before.Modified||!scanned.CanCompleteWith(complete))throw new IOException("FileChanged");
         if(before.Hydration!="placeholder")return packet;
         if(!allowCloud)throw new IOException("CloudReadNotApproved");
+        using var location=new HydrationDirectoryLease(Path.GetDirectoryName(path)!,parent??throw new IOException("MissingParentAuthorization"));
         using var handle=CreateFileW(path,0x80,5,IntPtr.Zero,3,0x02000000|0x00200000|0x00100000,IntPtr.Zero);
         if(handle.IsInvalid)throw new IOException("SourceIoError",new Win32Exception(Marshal.GetLastWin32Error()));
         var metadata=FileAllocation.InspectMetadata(handle);
-        if(!FileAllocation.IsCloudTag(metadata.ReparseTag??0))throw new IOException("UnsupportedCloudProvider");
+        if(hydrateOverride is null&&!FileAllocation.IsCloudTag(metadata.ReparseTag??0))throw new IOException("UnsupportedCloudProvider");
         if(FileReadObservation.Read(handle).Signature!=FileObservationWriter.Signature(before))throw new IOException("FileChanged");
         // Retain the same file handle, excluding concurrent writers. cfapi
         // materializes the approved file without loading it into application RAM.
-        Marshal.ThrowExceptionForHR(CfHydratePlaceholder(handle,0,-1,0,IntPtr.Zero));
+        if(hydrateOverride is not null)hydrateOverride(handle);else Marshal.ThrowExceptionForHR(CfHydratePlaceholder(handle,0,-1,0,IntPtr.Zero));
         var after=FileReadObservation.Read(handle);
         if(!complete.SameFileAfterHydration(SourceObservationSignature.Parse(after.Signature)))throw new IOException("FileChanged");
         packet=ScanPathProbe.Read(path,true);

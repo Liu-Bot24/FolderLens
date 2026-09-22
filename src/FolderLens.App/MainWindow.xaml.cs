@@ -247,6 +247,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){return;}
         catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
         long requested=++rootChangeVersion;
+        RetireShellRefreshView();
         // Each producer owns its cancellation source. Signal them all before
         // waiting for any decoder or previous navigation to finish retiring.
         foreach(var scan in backgroundScans.ToArray())scan.Cancel();

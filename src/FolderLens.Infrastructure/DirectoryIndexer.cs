@@ -30,8 +30,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     public TimeSpan BatchWriteTime { get; private set; }
     public static string StablePathId(string rootId,string relative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rootId+"\0"+relative)));
     public async Task<ScanProgress> Scan(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,
-        IProgress<ScanProgress>? progress,CancellationToken cancellation,bool forceRefresh=false,string? scopeRelative=null,bool descendants=true)
+        IProgress<ScanProgress>? progress,CancellationToken cancellation,bool forceRefresh=false,string? scopeRelative=null,bool descendants=true,bool preserveRootState=false)
     {
+        if(preserveRootState&&(scopeRelative is null||descendants))throw new ArgumentException("保留扫描状态的核对必须限定为单层目录。");
         root=PathRules.ValidateSource(root);
         if(scopeRelative is not null&&(Path.IsPathRooted(scopeRelative)||scopeRelative.Split('\\','/').Any(p=>p is "." or "..")||scopeRelative.Contains(':')))throw new ArgumentException("核对范围必须在根目录内。");
         foreach(var exclusion in exclusions)
@@ -64,7 +65,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 if(scope.ExecuteScalar() is not string existing)throw new DirectoryNotFoundException("待核对目录已不在索引中。");
                 Queue(c,t,scanId,existing,scopeRelative,descendants);
             }
-            Execute(c,t,"UPDATE Roots SET scan_state='scanning' WHERE root_id=$root",("$root",rootId));t.Commit();initialized=true;return true;
+            if(!preserveRootState)Execute(c,t,"UPDATE Roots SET scan_state='scanning' WHERE root_id=$root",("$root",rootId));t.Commit();initialized=true;return true;
         },cancellation).ConfigureAwait(false);
             // Register the running traversal before capturing covered hints, so a
             // periodic tick cannot slip between capture and scan registration.
@@ -177,7 +178,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                             var moves=await renames.Find(rootId,root,id,relative,packet.Entries,cancellation).ConfigureAwait(false);
                             RenameLookupTime+=System.Diagnostics.Stopwatch.GetElapsedTime(started);
                             started=System.Diagnostics.Stopwatch.GetTimestamp();
-                            await CommitBatch(rootId,epoch,id,relative,scanId,packet.Entries,recursive,exclusions,forceRefresh,work.Subtree,moves,cancellation).ConfigureAwait(false);
+                            await CommitBatch(rootId,epoch,id,relative,scanId,packet.Entries,recursive,exclusions,forceRefresh,work.Subtree,preserveRootState,moves,cancellation).ConfigureAwait(false);
                             BatchWriteTime+=System.Diagnostics.Stopwatch.GetElapsedTime(started);
                             files+=packet.Entries.LongCount(e=>!e.Directory&&e.SkipReason is null);directoryEntries+=packet.Entries.Length;
                             incomplete|=packet.Entries.Any(e=>e.Directory&&e.SkipReason=="DeferredOffline");
@@ -244,7 +245,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 using var t=c.BeginTransaction();
                 Execute(c,t,"UPDATE ScanRuns SET state=$state,completed_utc_ticks=$now,error_count=$errors WHERE scan_id=$scan",("$state",outcome=="ready"?"completed":outcome),("$now",DateTime.UtcNow.Ticks),("$errors",errors),("$scan",scanId));
                 Execute(c,t,"UPDATE DirectoryScans SET state=$state,error_code=$error WHERE scan_id=$scan AND state IN ('queued','enumerating')",("$state",outcome=="cancelled"?"cancelled":"failed"),("$error",outcome=="cancelled"?"Cancelled":"ScanTerminated"),("$scan",scanId));
-                Execute(c,t,"UPDATE Roots SET scan_state=$state,availability=$availability,last_checked_utc_ticks=$now WHERE root_id=$root AND root_epoch=$epoch",("$state",outcome),("$availability",availability),("$now",DateTime.UtcNow.Ticks),("$root",rootId),("$epoch",epoch));
+                if(!preserveRootState)Execute(c,t,"UPDATE Roots SET scan_state=$state,availability=$availability,last_checked_utc_ticks=$now WHERE root_id=$root AND root_epoch=$epoch",("$state",outcome),("$availability",availability),("$now",DateTime.UtcNow.Ticks),("$root",rootId),("$epoch",epoch));
                 Execute(c,t,"DELETE FROM temp.ScanQueue WHERE scan_id=$scan",("$scan",scanId));
                 Execute(c,t,"DELETE FROM temp.ScanBranches WHERE scan_id=$scan",("$scan",scanId));
                 Execute(c,t,"DELETE FROM ScanOwners WHERE scan_id=$scan",("$scan",scanId));
@@ -291,7 +292,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         var final=new ScanProgress(files,directories,errors,remaining?"partial":"ready");progress?.Report(final);return final;
     }
 
-    private Task<bool> CommitBatch(string root,long epoch,string directoryId,string relative,string scan,ScanEntry[] entries,bool recursive,ExclusionSpec[] exclusions,bool forceRefresh,bool descendants,Dictionary<string,ScanRename> moves,CancellationToken cancellation)=>catalog.Write(c=>
+    private Task<bool> CommitBatch(string root,long epoch,string directoryId,string relative,string scan,ScanEntry[] entries,bool recursive,ExclusionSpec[] exclusions,bool forceRefresh,bool descendants,bool strictScope,Dictionary<string,ScanRename> moves,CancellationToken cancellation)=>catalog.Write(c=>
     {
         if(catalog.BrowsingBudgetReached)throw new BrowsingBudgetException();
         CompactBrowsingCatalog.EnsureWriteHeadroom(c,(64L<<10)+entries.Sum(item=>1024L+32L*(relative.Length+item.Name.Length)));
@@ -307,7 +308,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
             if(item.Directory)
             {
                 using var known=c.CreateCommand();known.Transaction=t;known.CommandText="SELECT 1 FROM Directories WHERE root_id=$root AND canonical_key=$path AND entry_state='present'";known.Parameters.AddWithValue("$root",root);known.Parameters.AddWithValue("$path",path);bool existed=known.ExecuteScalar() is not null;
-                id=AddDirectory(c,t,root,path,directoryId,scan,item.CaseMode,descendants||!existed,item.PhysicalIdentity);
+                id=AddDirectory(c,t,root,path,directoryId,scan,item.CaseMode,descendants||(!existed&&!strictScope),item.PhysicalIdentity);
                 string? reason=item.SkipReason??(!recursive?"NonRecursive":exclusions.Any(e=>e.Mode=="skipScan"&&Within(path,e.RelativePath))?"ScanExcluded":null);
                 if(reason is not null)Exclude(c,t,root,scan,id,path,reason);
                 continue;

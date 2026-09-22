@@ -12,10 +12,10 @@ public static class ShellTransferPolicy
         try
         {
         await using var worker=new ScanWorkerClient(executable??ScanWorkerClient.FindExecutable()??throw new FileNotFoundException("缺少文件访问组件。"));
-        string? volume=(await worker.Probe(destination,cancellation).ConfigureAwait(false)).VolumeIdentity;
+        string? volume=(await worker.Probe(destination,cancellation,volumeOnly:true).ConfigureAwait(false)).VolumeIdentity;
         if(volume is null||sources.Count==0)return ShellFileAction.Copy;
         foreach(string source in sources)
-            if((await worker.Probe(source,cancellation).ConfigureAwait(false)).VolumeIdentity!=volume)return ShellFileAction.Copy;
+            if((await worker.Probe(source,cancellation,volumeOnly:true).ConfigureAwait(false)).VolumeIdentity!=volume)return ShellFileAction.Copy;
         return ShellFileAction.Move;
         }
         finally{volumeGate.Release();}
