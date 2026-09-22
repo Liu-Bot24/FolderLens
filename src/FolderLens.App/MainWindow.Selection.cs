@@ -90,6 +90,20 @@ public sealed partial class MainWindow
         var next=details?(ListViewBase)FilesList:FilesGrid;
         var ranges=previous.SelectedRanges.ToArray();
         object? source=previous.ItemsSource??next.ItemsSource;
+        if(browserGroups is not null&&groupedBrowserSource is not null&&ReferenceEquals(source,groupedBrowserSource.View))
+        {
+            // Native grouped adapters retain callbacks tied to the consuming
+            // control. Transfer the group models, never the old notification
+            // projection, to a different GridView/ListView consumer.
+            bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
+            try
+            {
+                previous.ItemsSource=null;next.ItemsSource=null;
+                groupedBrowserSource.Dispose();groupedBrowserSource=new(browserGroups);
+                source=groupedBrowserSource.View;
+            }
+            finally{syncingBrowserSelection=prior;}
+        }
         FilesGrid.Visibility=details?Visibility.Collapsed:Visibility.Visible;DetailsPane.Visibility=details?Visibility.Visible:Visibility.Collapsed;
         AttachBrowserView(source);
         if(results is null&&firstPageSequence.Length==0)return;
