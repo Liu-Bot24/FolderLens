@@ -66,6 +66,7 @@ public sealed partial class MainWindow
             if(Environment.GetCommandLineArgs().Contains("--verify-native-ranges")){await VerifyNativeRanges(report);return;}
             if(arguments.Contains("--verify-toolbar-widths")){await VerifyToolbarWidths(report);return;}
             if(arguments.Contains("--verify-preview-layout")){await VerifyPreviewLayout(report);return;}
+            if(arguments.Contains("--verify-fullscreen-chrome")){await VerifyFullScreenChrome(report);return;}
             if(arguments.Contains("--verify-filter-editor")){await VerifyFilterEditor(report);return;}
             if(arguments.Contains("--verify-group-lazy")){await VerifyGroupLaziness(report);return;}
             if(arguments.Contains("--verify-range-publication-cost")){await VerifyRangePublicationCost(report);return;}

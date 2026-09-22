@@ -127,19 +127,23 @@ public sealed partial class MainWindow
         string exif=selected.Kind=="image"&&selectedProperties?.EntryId==selected.Item?.EntryId&&selectedProperties?.Version==selected.Item?.Version?FormatViewerExif(selectedProperties?.Details):"";
         if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}{(exif.Length>0?"\n\n"+exif:"")}\n\n{help}";
     }
-    private (Thickness Padding,Thickness Border)? previewChromeBeforeFullScreen;
     private void SetFullScreenChrome(bool enabled)
     {
         MainMenu.Visibility=AddressToolbar.Visibility=Status.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         PreviewHeader.Visibility=PreviewActions.Visibility=PreviewExtras.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         if(enabled)
         {
-            previewChromeBeforeFullScreen??=(PreviewPane.Padding,PreviewPane.BorderThickness);
-            PreviewPane.Padding=PreviewPane.BorderThickness=new Thickness(0);
+            PreviewPane.Margin=PreviewPane.Padding=PreviewPane.BorderThickness=new Thickness(0);
+            PreviewPane.CornerRadius=new CornerRadius(0);
         }
-        else if(previewChromeBeforeFullScreen is {} previous)
+        else
         {
-            PreviewPane.Padding=previous.Padding;PreviewPane.BorderThickness=previous.Border;previewChromeBeforeFullScreen=null;
+            // Restore the style's live ThemeResource values, not a snapshot that
+            // would pin the previous appearance after a later theme switch.
+            PreviewPane.ClearValue(FrameworkElement.MarginProperty);
+            PreviewPane.ClearValue(Grid.PaddingProperty);
+            PreviewPane.ClearValue(Grid.BorderThicknessProperty);
+            PreviewPane.ClearValue(Grid.CornerRadiusProperty);
         }
         foreach(var panel in new[]{viewerTop,viewerBottom,viewerLeft,viewerRight})if(panel is not null)panel.Visibility=Visibility.Collapsed;
         PreviewSurface.SetCursorHidden(false);viewerPanelsVisible=false;

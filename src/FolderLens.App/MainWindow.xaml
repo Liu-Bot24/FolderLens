@@ -81,6 +81,12 @@
         <Setter Property="Width" Value="32" /><Setter Property="Height" Value="{ThemeResource AppearancePreviewActionHeight}" /><Setter Property="MinHeight" Value="{ThemeResource AppearancePreviewActionHeight}" />
         <Setter Property="Padding" Value="2" /><Setter Property="FontSize" Value="11" />
       </Style>
+      <Style x:Key="PreviewPaneStyle" TargetType="Grid">
+        <Setter Property="CornerRadius" Value="{ThemeResource AppearanceSidebarRadius}" />
+        <Setter Property="Margin" Value="{ThemeResource AppearancePreviewMargin}" />
+        <Setter Property="Padding" Value="{ThemeResource AppearancePreviewPadding}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+      </Style>
       <Style TargetType="Button">
         <Setter Property="ToolTipService.ToolTip" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
         <Setter Property="MinHeight" Value="32" />
@@ -412,7 +418,7 @@
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
         <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
       </local:VerticalResizeDivider>
-      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="{ThemeResource AppearancePreviewPadding}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
+      <Grid x:Name="PreviewPane" Style="{StaticResource PreviewPaneStyle}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
