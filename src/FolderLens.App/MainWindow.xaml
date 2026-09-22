@@ -8,7 +8,6 @@
         <Setter Property="BorderBrush" Value="{ThemeResource AppearanceChromeLineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
       </Style>
-
       <Style x:Key="NavigationButtonStyle" TargetType="Button">
         <Setter Property="MinWidth" Value="32" /><Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="7" /><Setter Property="CornerRadius" Value="{ThemeResource AppearanceControlRadius}" />
@@ -16,7 +15,7 @@
       </Style>
       <DataTemplate x:Key="Card" x:DataType="local:FileRow">
         <StackPanel Width="{x:Bind CardWidth, Mode=OneWay}" Spacing="4" Padding="4,4,4,6">
-          <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="1" CornerRadius="6">
+          <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearanceThumbnailBorder}" CornerRadius="6">
             <Grid>
               <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
               <TextBlock x:Name="TextCardExcerpt" Text="{x:Bind TextExcerpt, Mode=OneWay}" Visibility="{x:Bind TextExcerptVisibility, Mode=OneWay}" Margin="12" VerticalAlignment="Top" FontSize="12" LineHeight="16" LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="{x:Bind TextExcerptLines, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" IsHitTestVisible="False" />
@@ -44,13 +43,13 @@
               </Button>
             </Grid>
           </Border>
-          <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="{ThemeResource AppearanceFileNameSize}" TextTrimming="CharacterEllipsis" />
           <Grid ColumnSpacing="8">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <TextBlock Text="{x:Bind CardInfo, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind CardInfo, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
             <TextBlock Grid.Column="1" Text="{x:Bind SizeText, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" />
           </Grid>
-          <TextBlock Text="{x:Bind DisplayPath, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind NavigationPath, Mode=OneWay}" Visibility="{x:Bind PathVisibility, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{x:Bind DisplayPath, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind NavigationPath, Mode=OneWay}" Visibility="{x:Bind PathVisibility, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource AppearancePathBrush}" TextTrimming="CharacterEllipsis" />
         </StackPanel>
       </DataTemplate>
       <DataTemplate x:Key="DetailRow" x:DataType="local:FileRow">
@@ -79,7 +78,7 @@
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Opacity="{ThemeResource AppearanceDividerOpacity}" Width="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" HorizontalAlignment="Center" /></Grid></ControlTemplate></Setter.Value></Setter>
       </Style>
       <Style x:Key="PreviewActionButtonStyle" TargetType="Button" BasedOn="{StaticResource NavigationButtonStyle}">
-        <Setter Property="Width" Value="32" /><Setter Property="Height" Value="32" />
+        <Setter Property="Width" Value="32" /><Setter Property="Height" Value="{ThemeResource AppearancePreviewActionHeight}" /><Setter Property="MinHeight" Value="{ThemeResource AppearancePreviewActionHeight}" />
         <Setter Property="Padding" Value="2" /><Setter Property="FontSize" Value="11" />
       </Style>
       <Style TargetType="Button">
@@ -95,12 +94,12 @@
         <Setter Property="Padding" Value="9,4" />
         <Setter Property="FontSize" Value="12" />
       </Style>
-      <Style TargetType="ComboBox">
+      <Style TargetType="ComboBox"><Setter Property="CornerRadius" Value="{ThemeResource AppearanceInputRadius}" />
         <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="9,4,0,4" />
         <Setter Property="FontSize" Value="12" />
       </Style>
-      <Style TargetType="TextBox">
+      <Style TargetType="TextBox"><Setter Property="CornerRadius" Value="{ThemeResource AppearanceInputRadius}" />
         <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="9,4" />
         <Setter Property="FontSize" Value="12" />
@@ -337,7 +336,7 @@
               </Flyout>
             </Button.Flyout>
           </Button>
-          <Border Grid.Column="5" x:Name="ViewModeSwitcher" Padding="2" CornerRadius="8" BorderThickness="1" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Background="{ThemeResource ControlFillColorDefaultBrush}" HorizontalAlignment="Left" AutomationProperties.Name="视图模式">
+          <Border Grid.Column="5" x:Name="ViewModeSwitcher" Padding="2" CornerRadius="8" BorderThickness="{ThemeResource AppearanceViewSwitcherBorder}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Background="{ThemeResource ControlFillColorDefaultBrush}" HorizontalAlignment="Left" AutomationProperties.Name="视图模式">
             <StackPanel Orientation="Horizontal" Spacing="2">
               <ToggleButton x:Name="ThumbnailMode" Content="缩略图" IsChecked="True" Click="ChooseBrowserView" MinWidth="0" Padding="10,5" CornerRadius="5" BorderThickness="0" AutomationProperties.Name="缩略图视图" ToolTipService.ToolTip="显示缩略图" />
               <ToggleButton x:Name="DetailsMode" Content="详情" Click="ChooseBrowserView" MinWidth="0" Padding="10,5" CornerRadius="5" BorderThickness="0" AutomationProperties.Name="详情视图" ToolTipService.ToolTip="显示文件详情列表" />
@@ -357,15 +356,15 @@
           <TextBlock x:Name="DirectoryScopeLabel" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
           <Button Grid.Column="1" Content="显示整个根目录" Click="ClearDirectoryScope" ToolTipService.ToolTip="清除目录浏览范围，保留类型、格式及其他筛选；可用返回恢复" />
         </Grid>
-        <TextBlock x:Name="ActiveFilterSummary" Margin="8,4" Foreground="{ThemeResource BrowserWarningBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
+        <TextBlock x:Name="ActiveFilterSummary" Margin="8,4" Foreground="{ThemeResource AppearanceFilterBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
-        <GridView x:Name="FilesGrid" SizeChanged="ClipBrowserViewport" Grid.Row="2" SelectionMode="Extended" ItemTemplate="{StaticResource Card}" SelectionChanged="SelectFile" IsItemClickEnabled="True" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" AutomationProperties.AutomationId="FileGrid" Padding="5">
+        <GridView x:Name="FilesGrid" ItemContainerStyle="{ThemeResource AppearanceGridItemStyle}" SizeChanged="ClipBrowserViewport" Grid.Row="2" SelectionMode="Extended" ItemTemplate="{StaticResource Card}" SelectionChanged="SelectFile" IsItemClickEnabled="True" DoubleTapped="OpenSelected" PointerPressed="ViewerPointerDown" ContainerContentChanging="ContainerChanged" AutomationProperties.AutomationId="FileGrid" Padding="5">
           <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
           <GridView.GroupStyle><GroupStyle HidesIfEmpty="False"><GroupStyle.HeaderTemplate><DataTemplate><Grid Margin="8,10,8,6" ColumnSpacing="8" Background="Transparent" RightTapped="FolderGroupContext"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Click="ToggleFolderGroup" VerticalAlignment="Top" Padding="6" ToolTipService.ToolTip="{Binding ToggleLabel}" AutomationProperties.Name="{Binding ToggleLabel}"><FontIcon Glyph="{Binding ToggleGlyph}" FontSize="12" /></Button><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Title}" /><TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" /></StackPanel></Grid></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></GridView.GroupStyle>
           <!-- Keep headers in their group flow. Sticky headers can overlap cards
                while virtualized groups are recycled during reverse scrolling. -->
           <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" AreStickyGroupHeadersEnabled="False" /></ItemsPanelTemplate></GridView.ItemsPanel>
-          <GridView.ItemContainerStyle><Style TargetType="GridViewItem" BasedOn="{StaticResource GridViewItemExpanded}"><Setter Property="Margin" Value="2" /><Setter Property="Padding" Value="0" /><Setter Property="MinWidth" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></GridView.ItemContainerStyle>
+
         </GridView>
         <Grid x:Name="DetailsPane" Grid.Row="2" Visibility="Collapsed">
           <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
@@ -412,7 +411,7 @@
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
         <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
       </local:VerticalResizeDivider>
-      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="10,10" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
+      <Grid x:Name="PreviewPane" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearancePreviewMargin}" Padding="{ThemeResource AppearancePreviewPadding}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -420,7 +419,7 @@
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <StackPanel Spacing="2" x:Name="PreviewHeader">
-          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,5">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="{ThemeResource AppearancePreviewHeaderMargin}">
             <Button x:Name="WindowPreviewButton" Content="窗口预览" Click="TogglePreview" ToolTipService.ToolTip="在当前窗口内查看所选文件；Esc 返回文件列表" />
             <Button x:Name="FullScreenPreviewButton" Content="全屏预览" Click="ToggleFullScreen" ToolTipService.ToolTip="全屏查看所选文件（F11）；Esc 返回文件列表" />
           </StackPanel>
@@ -429,7 +428,7 @@
           <TextBlock x:Name="QualityLabel" Text="单击文件即可查看" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
         </StackPanel>
         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-        <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,5,0,6" x:Name="PreviewActions">
+        <StackPanel Orientation="Horizontal" Spacing="2" Margin="{ThemeResource AppearancePreviewActionsMargin}" x:Name="PreviewActions">
           <StackPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource PreviewActionButtonStyle}" /></StackPanel.Resources>
           <Button x:Name="PreviewReturn" Width="Auto" MinWidth="100" Padding="8,2" Content="返回文件列表" Visibility="Collapsed" Click="CloseExpandedPreview" ToolTipService.ToolTip="关闭窗口预览，保留目录和浏览位置（Esc）" />
           <Button Click="Previous" ToolTipService.ToolTip="上一个文件（PageUp）" AutomationProperties.Name="上一个文件"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>

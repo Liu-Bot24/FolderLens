@@ -3,6 +3,18 @@
   <CornerRadius x:Key="AppearancePanelRadius">8</CornerRadius>
   <CornerRadius x:Key="AppearanceSidebarRadius">0</CornerRadius>
   <CornerRadius x:Key="AppearanceControlRadius">6</CornerRadius>
+  <CornerRadius x:Key="AppearanceInputRadius">0</CornerRadius>
+  <Thickness x:Key="AppearanceThumbnailBorder">1</Thickness>
+  <Thickness x:Key="AppearanceViewSwitcherBorder">1</Thickness>
+  <Thickness x:Key="AppearancePreviewPadding">10,10</Thickness>
+  <Thickness x:Key="AppearancePreviewActionsMargin">0,5,0,6</Thickness>
+  <Thickness x:Key="AppearancePreviewHeaderMargin">0,0,0,5</Thickness>
+  <x:Double x:Key="AppearancePreviewActionHeight">32</x:Double>
+  <x:Double x:Key="AppearanceFileNameSize">12</x:Double>
+  <Style x:Key="AppearanceGridItemStyle" TargetType="GridViewItem" BasedOn="{StaticResource GridViewItemExpanded}">
+    <Setter Property="Margin" Value="2" /><Setter Property="Padding" Value="0" />
+    <Setter Property="MinWidth" Value="0" /><Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
   <Thickness x:Key="AppearancePaneBorder">1</Thickness>
   <Thickness x:Key="AppearanceTreeMargin">0</Thickness>
   <Thickness x:Key="AppearancePreviewMargin">0</Thickness>
@@ -10,6 +22,7 @@
   <x:Double x:Key="AppearanceDividerOpacity">1</x:Double>
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#F3F4F6" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#E1E4E8" />
@@ -19,12 +32,14 @@
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="ScopeFillBrush" Color="#E8F1FA" />
       <SolidColorBrush x:Key="BrowserWarningBrush" Color="#856100" />
+      <SolidColorBrush x:Key="AppearanceFilterBrush" Color="#856100" />
       <Color x:Key="BrowserDetailsSelectedColor">#CFE4FF</Color>
       <Color x:Key="BrowserDetailsHoverColor">#BDD9FA</Color>
       <Color x:Key="BrowserDetailsPressedColor">#A9CCF5</Color>
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="#F3F4F6" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#202124" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#292B2F" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#41444A" />
@@ -34,12 +49,14 @@
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="ScopeFillBrush" Color="#263D52" />
       <SolidColorBrush x:Key="BrowserWarningBrush" Color="#EBC85A" />
+      <SolidColorBrush x:Key="AppearanceFilterBrush" Color="#EBC85A" />
       <Color x:Key="BrowserDetailsSelectedColor">#174A78</Color>
       <Color x:Key="BrowserDetailsHoverColor">#205E94</Color>
       <Color x:Key="BrowserDetailsPressedColor">#2469A3</Color>
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="#202124" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="HighContrast">
+      <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
@@ -49,6 +66,7 @@
       <SolidColorBrush x:Key="MediaBadgeForegroundBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="ScopeFillBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserWarningBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+      <SolidColorBrush x:Key="AppearanceFilterBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="{ThemeResource SystemColorWindowColor}" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>

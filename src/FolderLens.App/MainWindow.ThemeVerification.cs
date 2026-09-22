@@ -55,6 +55,21 @@ public sealed partial class MainWindow
         double content=Contrast(ResultSummary.Foreground,BrowserPane.Background),scope=Contrast(DirectoryScopeLabel.Foreground,DirectoryScopePanel.Background),filter=Contrast(ActiveFilterSummary.Foreground,BrowserPane.Background);
         report["textContrast"]=new{content,scope,filter};
         if(content<4.5||scope<4.5||filter<4.5)throw new InvalidOperationException("主题文字与背景对比度不足。");
+        if(appearance.Style=="soft")
+        {
+            if(RootPath.CornerRadius!=Search.CornerRadius||Search.CornerRadius.TopLeft<=0||Category.CornerRadius!=Search.CornerRadius)
+                throw new InvalidOperationException("柔和主题输入控件圆角不一致。");
+            var pathBrush=(Brush)Application.Current.Resources["AppearancePathBrush"];
+            double pathContrast=Contrast(pathBrush,BrowserPane.Background);
+            if(pathContrast<4.5)throw new InvalidOperationException("路径文字对比度不足。");
+            var palette=Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries[expected.ToString()] as ResourceDictionary;
+            var accent=((SolidColorBrush)palette!["AccentFillColorDefaultBrush"]).Color;
+            foreach(string key in new[]{"ToggleButtonBackgroundChecked","SliderThumbBackground","SliderTrackValueFill","TreeViewItemSelectionIndicatorForeground","GridViewItemSelectedBorderBrush"})
+                if(((SolidColorBrush)palette[key]).Color!=accent)throw new InvalidOperationException("控件强调色不一致："+key);
+            double accentText=Contrast((Brush)palette["TextOnAccentFillColorPrimaryBrush"],(Brush)palette["AccentFillColorDefaultBrush"]);
+            if(accentText<4.5)throw new InvalidOperationException("选中按钮文字对比度不足。");
+            report["softControls"]=new{pathContrast,accentText,inputRadius=Search.CornerRadius.TopLeft,previewButtonHeight=PreviewFit.ActualHeight};
+        }
         viewerCaption!.Text="图片名称与路径";viewerInformation!.Text="图片信息 · 1920 × 1080";
         viewerTop!.Visibility=viewerRight!.Visibility=Visibility.Visible;Shell.UpdateLayout();
         double caption=Contrast(viewerCaption.Foreground,viewerTop.Background),information=Contrast(viewerInformation.Foreground,viewerRight.Background);
