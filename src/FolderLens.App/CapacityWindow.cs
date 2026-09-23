@@ -13,9 +13,9 @@ public sealed class CapacityDisplayRow(CapacityViewRow row,bool complete=true)
     public CapacityViewRow Value {get;}=row;
     public string Label=>Value.Label;
     private bool UnconfirmedEmpty=>!complete&&Value.Files==0;
-    public string Size=>UnconfirmedEmpty?"未统计完整":FileRow.FormatBytes(Value.KnownBytes);
-    public string Exact=>UnconfirmedEmpty?"尚无已统计文件，不能判断目录为空":$"{Value.KnownBytes:N0} 字节";
-    public string Files=>UnconfirmedEmpty?"—":$"{Value.Files:N0} 文件";
+    public string Size=>UnconfirmedEmpty?"未统计完整":complete?FileRow.FormatBytes(Value.KnownBytes):"≥ "+FileRow.FormatBytes(Value.KnownBytes);
+    public string Exact=>UnconfirmedEmpty?"尚无已统计文件，不能判断目录为空":$"{Value.KnownBytes:N0} 字节"+(complete?"":"（已统计部分）");
+    public string Files=>UnconfirmedEmpty?"—":(complete?"":"≥ ")+$"{Value.Files:N0} 文件";
     public string Percent=>complete?Value.Fraction?.ToString("P1")??"—":"—";
     public double Bar=>100*(Value.Fraction??0);
     public string Detail=>UnconfirmedEmpty?"扫描未完成，不能判断为空":Value.UnknownCount>0?$"{Value.UnknownCount:N0} 项占用空间未知":Value.IsDirectFiles?"当前文件夹中的文件":"双击查看子目录";
@@ -27,6 +27,14 @@ public sealed partial class CapacityWindow : Window
     private readonly Action<string>? preferScan;
     private readonly string rootId;
     private readonly bool currentObservationsOnly;
+    private readonly bool physicalCapacity;
+    private readonly string physicalRoot;
+    private readonly ExclusionSpec[] capacityExclusions;
+    private readonly string? scanWorkerExecutable;
+    private CancellationTokenSource? physicalStop;
+    private Task physicalWork=Task.CompletedTask;
+    private long physicalGeneration;
+    private string? physicalFailure;
     private readonly ResultHandle? snapshot;
     private readonly CancellationTokenSource lifetime;
     private CancellationTokenSource operation=new();
@@ -62,9 +70,10 @@ public sealed partial class CapacityWindow : Window
     private readonly ListView ranking=new(){SelectionMode=ListViewSelectionMode.Single};
     private readonly ItemsControl shares=new();
 
-    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse,Action<string>? preferScan=null,bool currentObservationsOnly=false)
+    public CapacityWindow(CatalogStore catalog,string rootId,string rootPath,ResultHandle? retainedSnapshot,CancellationToken cancellation,Func<string,bool,Task> browse,Action<string>? preferScan=null,bool currentObservationsOnly=false,bool physicalCapacity=false,ExclusionSpec[]? exclusions=null,string? scanWorkerExecutable=null)
     {
         this.currentObservationsOnly=currentObservationsOnly;this.catalog=catalog;this.rootId=rootId;snapshot=retainedSnapshot;this.preferScan=preferScan;
+        this.physicalCapacity=physicalCapacity;physicalRoot=rootPath;capacityExclusions=exclusions??[];this.scanWorkerExecutable=scanWorkerExecutable;
         lifetime=CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Title="目录容量 · FolderLens";AppWindow.Resize(new Windows.Graphics.SizeInt32(1180,820));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory,"Assets","FolderLens.ico"));
@@ -72,12 +81,12 @@ public sealed partial class CapacityWindow : Window
         foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto})root.RowDefinitions.Add(new RowDefinition{Height=height});
         var title=new StackPanel{Spacing=5};title.Children.Add(new TextBlock{Text="目录容量",FontSize=28});
         var rootLabel=new TextBlock{Text=rootPath,TextTrimming=TextTrimming.CharacterEllipsis,Style=(Style)Application.Current.Resources["CapacitySecondaryTextStyle"]};ToolTipService.SetToolTip(rootLabel,rootPath);title.Children.Add(rootLabel);root.Children.Add(title);
-        scope.Items.Add(new ComboBoxItem{Content="整个已扫描目录"});
+        scope.Items.Add(new ComboBoxItem{Content=physicalCapacity?"整个文件夹":"整个已扫描目录"});
         scope.Items.Add(new ComboBoxItem{Content="打开窗口时的筛选结果",IsEnabled=snapshot is not null});scope.SelectedIndex=0;
         ToolTipService.SetToolTip(scope,"统计打开此窗口时的筛选结果；之后在主窗口更改筛选，不会改变这里的统计");
         ToolTipService.SetToolTip(allocation,"只统计已知占用空间，无法读取的项单列；不代表删除后可释放的空间");
         ToolTipService.SetToolTip(descendants,"显示各层子文件夹；上一级包含下一级的容量，不能相加");
-        ToolTipService.SetToolTip(parent,"返回上一级目录，并恢复之前选中的目录");ToolTipService.SetToolTip(refresh,"更新当前统计；如需重新查找文件，请在主窗口刷新目录");
+        ToolTipService.SetToolTip(parent,"返回上一级目录，并恢复之前选中的目录");ToolTipService.SetToolTip(refresh,physicalCapacity?"重新统计当前文件夹及其子目录":"更新当前统计；如需重新查找文件，请在主窗口刷新目录");
         ToolTipService.SetToolTip(browseButton,"查看选中目录的文件；未选中时查看当前目录。保持主窗口原有扫描根和其他筛选。");
         SetCommandContent(parent,"\uE74A","上一级");SetCommandContent(refresh,"\uE72C","刷新统计");SetCommandContent(browseButton,"\uE8B7","在主窗口浏览");
         var toolbar=new Grid{ColumnSpacing=16,RowSpacing=12};for(int i=0;i<3;i++){toolbar.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});toolbar.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});}
@@ -135,8 +144,8 @@ public sealed partial class CapacityWindow : Window
         }
         pageScroll.SizeChanged+=(_,_)=>ArrangePage();
         Grid.SetRow(state,4);root.Children.Add(state);Content=pageScroll;
-        scope.SelectionChanged+=(_,_)=>{SaveSelection();directory="";selectedPaths.Clear();dataVersion++;QueueRender();};
-        allocation.Click+=(_,_)=>{SaveSelection();QueueRender();};descendants.Click+=(_,_)=>{SaveSelection();QueueRender();};refresh.Click+=(_,_)=>{SaveSelection();dataVersion++;QueueRender();};
+        scope.SelectionChanged+=(_,_)=>{SaveSelection();directory="";selectedPaths.Clear();report=null;dataVersion++;if(physicalCapacity){if(scope.SelectedIndex==0)RestartPhysicalScan();else physicalStop?.Cancel();}QueueRender();};
+        allocation.Click+=(_,_)=>{SaveSelection();QueueRender();};descendants.Click+=(_,_)=>{SaveSelection();QueueRender();};refresh.Click+=(_,_)=>{SaveSelection();if(physicalCapacity&&scope.SelectedIndex==0)RestartPhysicalScan();else dataVersion++;QueueRender();};
         parent.Click+=(_,_)=>Navigate(Path.GetDirectoryName(directory)??"");
         ranking.DoubleTapped+=(_,_)=>{if(ranking.SelectedItem is CapacityDisplayRow row&&!row.Value.IsDirectFiles)Navigate(row.Value.RelativePath);};
         async Task Browse()
@@ -149,7 +158,7 @@ public sealed partial class CapacityWindow : Window
         }
         browseButton.Click+=(_,_)=>{if(browseWork.IsCompleted)browseWork=Browse();};
         liveTimer=DispatcherQueue.CreateTimer();liveTimer.Interval=TimeSpan.FromSeconds(5);liveTimer.Tick+=(_,_)=>{if(liveUpdate.IsCompleted)liveUpdate=CheckForUpdates();};
-        Closed+=(_,_)=>_=ShutdownAsync();QueueRender();liveTimer.Start();
+        Closed+=(_,_)=>_=ShutdownAsync();if(physicalCapacity)RestartPhysicalScan();QueueRender();if(!physicalCapacity)liveTimer.Start();
     }
     private static void AddMetric(Grid grid,int column,string label,TextBlock value,TextBlock detail)
     {
@@ -164,10 +173,42 @@ public sealed partial class CapacityWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button,label);
     }
     private void SaveSelection(){if(ranking.SelectedItem is CapacityDisplayRow row)selectedPaths[directory]=row.Value.RelativePath;}
-    private void Navigate(string path){SaveSelection();directory=path;descendants.IsChecked=false;preferScan?.Invoke(path);QueueRender();}
+    private void Navigate(string path){SaveSelection();directory=path;descendants.IsChecked=false;if(!physicalCapacity)preferScan?.Invoke(path);QueueRender();}
+    private void RestartPhysicalScan()
+    {
+        physicalStop?.Cancel();var previous=physicalWork;
+        var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);physicalStop=stop;
+        long current=++physicalGeneration;
+        physicalFailure=null;
+        report=new CapacityReport(physicalRoot,"scanning",Capacity.BuildDirectories([]));dataVersion++;
+        physicalWork=RunPhysicalScan(previous,stop,current);
+    }
+    private async Task RunPhysicalScan(Task previous,CancellationTokenSource stop,long current)
+    {
+        try
+        {
+            try{await previous;}catch(OperationCanceledException){}catch(Exception){}
+            stop.Token.ThrowIfCancellationRequested();
+            var progress=new Progress<CapacityReport>(next=>
+            {
+                if(closed||stop.IsCancellationRequested||current!=physicalGeneration||scope.SelectedIndex!=0)return;
+                report=next;dataVersion++;QueueRender(preserve:true);
+            });
+            var final=await PhysicalCapacityScanner.Scan(physicalRoot,capacityExclusions,progress,stop.Token,scanWorkerExecutable);
+            if(!closed&&!stop.IsCancellationRequested&&current==physicalGeneration&&scope.SelectedIndex==0)
+            {report=final;dataVersion++;QueueRender(preserve:true);}
+        }
+        catch(OperationCanceledException) when(stop.IsCancellationRequested){}
+        catch(Exception error)
+        {
+            if(!closed&&current==physicalGeneration&&scope.SelectedIndex==0)
+            {physicalFailure=UserMessages.Error(error);report=report is {} previousReport?previousReport with{State="failed"}:new CapacityReport(physicalRoot,"failed",Capacity.BuildDirectories([]));dataVersion++;QueueRender(preserve:true);}
+        }
+        finally{if(ReferenceEquals(physicalStop,stop))physicalStop=null;stop.Dispose();}
+    }
     private async Task CheckForUpdates()
     {
-        if(closed||scope.SelectedIndex!=0||!work.IsCompleted||report is null)return;
+        if(physicalCapacity||closed||scope.SelectedIndex!=0||!work.IsCompleted||report is null)return;
         try
         {
             var stamp=await new CapacityService(catalog).ChangeStamp(rootId,lifetime.Token);
@@ -194,7 +235,7 @@ public sealed partial class CapacityWindow : Window
             if(report is null||loadedVersion!=dataVersion)
             {
                 var service=new CapacityService(catalog);
-                var next=scope.SelectedIndex==1&&snapshot is not null?await service.Result(snapshot,token):await service.EntireRoot(rootId,token,currentObservationsOnly);
+                var next=scope.SelectedIndex==1&&snapshot is not null?await service.Result(snapshot,token):physicalCapacity?report??new CapacityReport(physicalRoot,"scanning",Capacity.BuildDirectories([])):await service.EntireRoot(rootId,token,currentObservationsOnly);
                 if(closed||current!=generation)return;report=next;loadedVersion=dataVersion;lastAggregate=DateTimeOffset.UtcNow;
             }
             var captured=report;string path=directory;bool useAllocated=allocation.IsChecked==true,all=descendants.IsChecked==true;
@@ -213,7 +254,8 @@ public sealed partial class CapacityWindow : Window
                 ranking.ItemsSource=null;shares.ItemsSource=null;state.Text="该目录已不在当前统计范围。请返回上层查看。";return;
             }
             hasDisplayedPage=true;browseButton.IsEnabled=browseWork.IsCompleted;
-            logical.Text=FileRow.FormatBytes(page.total?.SubtreeLogical??0);allocated.Text=FileRow.FormatBytes(page.total?.SubtreeAllocatedKnown??0);files.Text=(page.total?.SubtreeFiles??0).ToString("N0");
+            string lowerBound=captured.IsComplete?"":"≥ ";
+            logical.Text=lowerBound+FileRow.FormatBytes(page.total?.SubtreeLogical??0);allocated.Text=lowerBound+FileRow.FormatBytes(page.total?.SubtreeAllocatedKnown??0);files.Text=lowerBound+(page.total?.SubtreeFiles??0).ToString("N0");
             if(!captured.IsComplete&&page.total!.SubtreeFiles==0)logical.Text=allocated.Text=files.Text="未统计完整";
             ToolTipService.SetToolTip(logical,$"{page.total?.SubtreeLogical??0:N0} 字节");ToolTipService.SetToolTip(allocated,$"{page.total?.SubtreeAllocatedKnown??0:N0} 字节");
             unknown.Text=$"{page.total?.AllocationUnknown??0:N0} 项占用空间未知";
@@ -222,8 +264,8 @@ public sealed partial class CapacityWindow : Window
             shares.ItemsSource=page.bars;chartCaption.Text=all?"统计说明":"本层容量分布";
             chartNote.Text=all?"父子目录容量有重叠，不能相加；切回本层排名可查看占比。":useAllocated?"占比基于已知占用空间。前20项单列，其余合并；完整排名在左侧。":"本层各子文件夹与当前文件夹中的文件分别统计。前20项单列，其余合并；完整排名在左侧。";
             if(!captured.IsComplete)chartNote.Text="统计尚未完成，暂不计算占比。已统计的容量保留；没有统计到文件不表示目录为空。";
-            string status=captured.State switch{"ready"=>"扫描完成","snapshot"=>"打开窗口时的筛选结果","scanning"=>"扫描中，统计不完整","cancelled"=>"扫描已取消，统计不完整","failed"=>"扫描失败，统计不完整","offline" or "offlineSnapshot"=>"文件夹暂时无法访问，显示上次统计","notStarted"=>"尚未完成扫描",_=>"部分统计"};
-            state.Text=$"{status} · 更新于 {captured.CalculatedAt:HH:mm:ss}"+(captured.Pending>0?$" · {captured.Pending:N0} 个文件的信息尚未读全":"")+(captured.Unresolvable>0?$" · {captured.Unresolvable:N0} 个文件的信息无法读取":"");
+            string status=captured.State switch{"ready"=>"统计完成","snapshot"=>"打开窗口时的筛选结果","scanning"=>"正在统计，当前数字不完整","cancelled"=>"扫描已取消，统计不完整","failed"=>"统计中断，当前数字不完整","offline" or "offlineSnapshot"=>"文件夹暂时无法访问，显示上次统计","notStarted"=>"尚未完成扫描",_=>"部分统计，部分文件夹无法读取"};
+            state.Text=$"{status} · 更新于 {captured.CalculatedAt:HH:mm:ss}"+(captured.Pending>0?$" · 待统计 {captured.Pending:N0} 个文件夹":"")+(captured.Unresolvable>0?$" · {captured.Unresolvable:N0} 个文件夹未能完整统计":"")+(captured.State=="failed"&&physicalFailure is {} reason?" · "+reason:"");
         }
         catch(OperationCanceledException) when(token.IsCancellationRequested){}
         catch(Exception error){if(!closed&&current==generation)state.Text="统计未完成："+UserMessages.Error(error);}
@@ -232,7 +274,7 @@ public sealed partial class CapacityWindow : Window
     public Task ShutdownAsync()=>shutdown??=ShutdownCore();
     private async Task ShutdownCore()
     {
-        closed=true;liveTimer.Stop();generation++;lifetime.Cancel();operation.Cancel();await Task.WhenAll(work,browseWork,liveUpdate);
+        closed=true;liveTimer.Stop();generation++;physicalStop?.Cancel();lifetime.Cancel();operation.Cancel();await Task.WhenAll(work,browseWork,liveUpdate,physicalWork);
         try{if(snapshot is not null)await catalog.ReleaseSnapshot(snapshot.Id);}
         finally{operation.Dispose();lifetime.Dispose();}
     }

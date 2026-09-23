@@ -106,4 +106,100 @@ public sealed partial class MainWindow
         }
         finally{verifyShellRefreshBeforeDirectory=null;verifyShellRefreshBudget=null;}
     }
+
+    private async Task VerifyStoppedShellLateLookup(string source,Dictionary<string,object> report)
+    {
+        string first=Path.Combine(source,"A"),second=Path.Combine(source,"B"),late=Path.Combine(first,"late"),child=Path.Combine(second,"child");
+        Directory.CreateDirectory(child);
+        await StopFixtureScan(first);
+        Directory.CreateDirectory(late);
+        var lookupReturned=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOld=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var newConsumerEntered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseNew=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        verifyShellRefreshAfterLookup=async(path,exists)=>
+        {
+            if(path!=late||exists)return;
+            lookupReturned.TrySetResult();await releaseOld.Task;
+        };
+        try
+        {
+            var completed=await ExecuteShellFixture(new ShellFileRequest(Path.Combine(first,"image-00.png"),ShellFileAction.Copy,late));
+            // The destination can disappear after Shell completion, before its
+            // parent has been reconciled. This exercises a real false lookup.
+            Directory.Move(late,late+"-retired");
+            CompleteShellOperation(completed,CaptureShellRefreshOwner());
+            Task old=shellRefreshTask!;await lookupReturned.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            await StopFixtureScan(second);
+            string sourceFile=Path.Combine(first,"image-01.png"),incoming=Path.Combine(child,"image-01.png");
+            verifyShellRefreshBeforeDirectory=async(path,_)=>
+            {
+                if(path!=second)return;
+                newConsumerEntered.TrySetResult();await releaseNew.Task;
+            };
+            CompleteShellOperation(await ExecuteShellFixture(new ShellFileRequest(sourceFile,ShellFileAction.Copy,child)),CaptureShellRefreshOwner());
+            Task current=shellRefreshTask!;await newConsumerEntered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            releaseOld.TrySetResult();await old.WaitAsync(TimeSpan.FromSeconds(10));
+            releaseNew.TrySetResult();await current.WaitAsync(TimeSpan.FromSeconds(15));
+            if(!File.Exists(incoming)||await FixtureEntryState("image-01.png")!="present"||pendingShellDirectoryOrder.Count!=0||pendingShellDirectoryVersions.Count!=0)
+                throw new InvalidOperationException("A retired lookup damaged the new view's pending directory queue.");
+            report["retiredLookupCannotDequeueNewView"]=true;report["status"]="PASS";
+        }
+        finally{releaseOld.TrySetResult();releaseNew.TrySetResult();verifyShellRefreshAfterLookup=null;verifyShellRefreshBeforeDirectory=null;}
+    }
+
+    private async Task VerifyStoppedShellFailureOverlap(string source,Dictionary<string,object> report,bool ordinaryFailure=false)
+    {
+        string first=Path.Combine(source,"A"),second=Path.Combine(source,"B"),x=Path.Combine(first,"X"),y=Path.Combine(first,"Y");
+        Directory.CreateDirectory(x);Directory.CreateDirectory(y);
+        string left=Path.Combine(second,"left.png"),right=Path.Combine(second,"right.png");
+        File.Copy(Path.Combine(first,"image-00.png"),left);File.Copy(Path.Combine(first,"image-00.png"),right);
+        await StopFixtureScan(first);
+        var failurePublishing=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePublish=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        verifyShellRefreshBudget=ordinaryFailure?null:TimeSpan.FromMilliseconds(600);
+        verifyShellRefreshBeforeDirectory=async(path,token)=>
+        {if(path==x){if(ordinaryFailure)throw new IOException("Fixture directory failure.");await Task.Delay(Timeout.Infinite,token);}};
+        verifyShellRefreshBeforeFailurePublish=async()=>{failurePublishing.TrySetResult();await releasePublish.Task;};
+        try
+        {
+            var owner=CaptureShellRefreshOwner();
+            CompleteShellOperation(await ExecuteShellFixture(new ShellFileRequest(left,ShellFileAction.Copy,x)),owner);
+            Task firstRefresh=shellRefreshTask!;await failurePublishing.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            verifyShellRefreshBeforeDirectory=null;verifyShellRefreshBudget=null;
+            CompleteShellOperation(await ExecuteShellFixture(new ShellFileRequest(right,ShellFileAction.Copy,y)),owner);
+            Task secondRefresh=shellRefreshTask!;
+            releasePublish.TrySetResult();await Task.WhenAll(firstRefresh,secondRefresh).WaitAsync(TimeSpan.FromSeconds(20));
+            if(await FixtureEntryState("right.png")!="present"||pendingShellDirectoryOrder.Count!=0)
+                throw new InvalidOperationException("An operation completed during error publication had no follow-up directory consumer.");
+            report[ordinaryFailure?"exceptionPublicationResumesNewDemand":"timeoutPublicationResumesNewDemand"]=true;report["status"]="PASS";
+        }
+        finally{releasePublish.TrySetResult();verifyShellRefreshBeforeDirectory=null;verifyShellRefreshBeforeFailurePublish=null;verifyShellRefreshBudget=null;}
+    }
+
+    private async Task VerifyStoppedShellOutcomeWarning(string source,Dictionary<string,object> report)
+    {
+        string first=Path.Combine(source,"A"),second=Path.Combine(source,"B");
+        var request=new ShellFileRequest(Path.Combine(first,"image-00.png"),ShellFileAction.Copy,second);
+        foreach(var (outcome,aborted,expected) in new[]{
+            (ShellItemOutcome.Completed,true,"操作已取消"),
+            (ShellItemOutcome.SourceRetained,false,"原文件仍在"),
+            (ShellItemOutcome.Indeterminate,false,"无法确认部分文件")})
+        {
+            await StopFixtureScan(first);
+            verifyShellRefreshBudget=TimeSpan.FromMilliseconds(400);
+            verifyShellRefreshBeforeDirectory=async(path,token)=>
+            {if(path==first)await Task.Delay(Timeout.Infinite,token);};
+            try
+            {
+                CompleteShellOperation(new ShellBatchResult([new ShellFileResult(request,outcome,0,null)],aborted,0),CaptureShellRefreshOwner());
+                await shellRefreshTask!.WaitAsync(TimeSpan.FromSeconds(10));
+                if(!Status.Text.Contains(expected,StringComparison.Ordinal)||!Status.Text.Contains("目录核对未完成",StringComparison.Ordinal)||
+                    Status.Text.StartsWith("文件操作已完成",StringComparison.Ordinal))
+                    throw new InvalidOperationException("核对超时覆盖了取消或不确定的文件操作结果。");
+            }
+            finally{verifyShellRefreshBeforeDirectory=null;verifyShellRefreshBudget=null;}
+        }
+        report["operationOutcomePreservedOnVerificationTimeout"]=true;report["status"]="PASS";
+    }
 }

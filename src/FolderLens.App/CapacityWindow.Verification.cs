@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using FolderLens.Infrastructure;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -8,6 +9,20 @@ namespace FolderLens.App;
 
 public sealed partial class CapacityWindow
 {
+    internal async Task VerifyPhysicalCapacity(Dictionary<string,object> result)
+    {
+        await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));await work.WaitAsync(TimeSpan.FromSeconds(10));
+        if(report is not {IsComplete:true}||files.Text!="13"||!state.Text.Contains("统计完成"))
+            throw new InvalidOperationException("独立容量统计未包含浏览索引之外的新文件。");
+        scope.SelectedIndex=1;await work.WaitAsync(TimeSpan.FromSeconds(10));
+        if(files.Text!="12"||!state.Text.Contains("筛选结果"))
+            throw new InvalidOperationException("切换固定结果后仍显示物理容量。");
+        scope.SelectedIndex=0;await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));await work.WaitAsync(TimeSpan.FromSeconds(10));
+        if(report is not {IsComplete:true}||files.Text!="13")
+            throw new InvalidOperationException("返回整个文件夹后没有重新统计当前目录。");
+        result["physicalOutsideCatalog"]=true;result["scopeSwitchRetiresOldWork"]=true;result["status"]="PASS";
+    }
+
     internal async Task VerifyPresentation(string output,Dictionary<string,object> result)
     {
         await work;
@@ -72,6 +87,22 @@ public sealed partial class CapacityWindow
 
 public sealed partial class MainWindow
 {
+    private async Task VerifyPhysicalCapacityUi(string source,Dictionary<string,object> report)
+    {
+        await StopFixtureScan(source);
+        var snapshot=resultHandle!;if(!await catalog!.RetainSnapshot(snapshot.Id))throw new InvalidOperationException("无法保留容量快照。");
+        string added=Path.Combine(source,"capacity-only","unindexed.txt");Directory.CreateDirectory(Path.GetDirectoryName(added)!);await File.WriteAllBytesAsync(added,new byte[7]);
+        CapacityWindow? window=null;
+        try
+        {
+            window=new CapacityWindow(catalog,rootId,source,snapshot,lifetime.Token,(_,_)=>Task.CompletedTask,
+                physicalCapacity:true,scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));
+            window.AppWindow.Move(new Windows.Graphics.PointInt32(-16000,-16000));window.AppWindow.Show(false);
+            await window.VerifyPhysicalCapacity(report);
+        }
+        finally{if(window is not null){window.Close();await window.ShutdownAsync();}else await catalog.ReleaseSnapshot(snapshot.Id);}
+    }
+
     private async Task VerifyCapacityUi(string source,Dictionary<string,object> report)
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;

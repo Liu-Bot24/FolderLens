@@ -30,6 +30,10 @@ public sealed partial class MainWindow
     private long shellDirectoryDemandVersion;
     private TimeSpan? verifyShellRefreshBudget;
     private Func<string,CancellationToken,Task>? verifyShellRefreshBeforeDirectory;
+    private Func<string,bool,Task>? verifyShellRefreshAfterLookup;
+    private Func<Task>? verifyShellRefreshBeforeFailurePublish;
+    private string lastShellOperationMessage="";
+    private string? shellVerificationWarning;
     private sealed record ShellRefreshOwner(long RootVersion,long ViewRevision,string RootId,string? Collection,CancellationToken Token);
     private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,shellViewStop.Token);
     private void RetireShellRefreshView()
@@ -276,7 +280,13 @@ public sealed partial class MainWindow
         shellRefreshTask=RefreshAfterShellOperation(owner,result);
     }
     private Task CompleteOutgoingDrag(ShellRefreshOwner owner,IReadOnlyList<string> sourcePaths)
-        =>RefreshAfterShellOperation(owner,null,sourcePaths);
+    {
+        if(closing||owner.Token.IsCancellationRequested||owner.RootVersion!=rootChangeVersion||owner.ViewRevision!=viewRestoreRevision||owner.RootId!=rootId||owner.Collection!=activeCollectionId)
+            return Task.CompletedTask;
+        // A drag-completed event does not prove that Explorer moved the source.
+        lastShellOperationMessage="拖动已结束。";shellVerificationWarning=null;Status.Text=lastShellOperationMessage;
+        return RefreshAfterShellOperation(owner,null,sourcePaths);
+    }
     private Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null,ShellBatchResult? result=null,IReadOnlyList<string>? outgoingSources=null)
     {
         if(closing||catalog is null)return Task.CompletedTask;
@@ -314,8 +324,10 @@ public sealed partial class MainWindow
     }
     private void CompletePendingShellDirectory(string path,long version)
     {
-        if(pendingShellDirectoryOrder.Dequeue()!=path)throw new InvalidOperationException("目录核对队列顺序已变化。");
-        if(pendingShellDirectoryVersions[path]==version)pendingShellDirectoryVersions.Remove(path);
+        if(pendingShellDirectoryOrder.Count==0||pendingShellDirectoryOrder.Peek()!=path||!pendingShellDirectoryVersions.TryGetValue(path,out long current))
+            throw new InvalidOperationException("目录核对队列顺序已变化。");
+        pendingShellDirectoryOrder.Dequeue();
+        if(current==version)pendingShellDirectoryVersions.Remove(path);
         else pendingShellDirectoryOrder.Enqueue(path);
     }
     private async Task RunStoppedShellRefresh(ShellRefreshOwner owner)
@@ -328,6 +340,7 @@ public sealed partial class MainWindow
             &&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision&&owner.RootId==rootId&&activeCollectionId is null;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(verifyShellRefreshBudget??TimeSpan.FromSeconds(30));
+        long attemptDemand=shellDirectoryDemandVersion;bool retryNewDemand=false;
         try
         {
             if(scanTask is {} retiring)try{await retiring.WaitAsync(deadline.Token);}catch(OperationCanceledException) when(!deadline.IsCancellationRequested){}
@@ -342,6 +355,8 @@ public sealed partial class MainWindow
                     string? relative=DirectoryBrowseScope.Relative(currentRoot,path);
                     if(relative is null){CompletePendingShellDirectory(path,version);continue;}
                     bool exists=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT 1 FROM Directories WHERE root_id=$root AND canonical_key=$path";cmd.Parameters.AddWithValue("$root",owner.RootId);cmd.Parameters.AddWithValue("$path",relative);return cmd.ExecuteScalar() is not null;},deadline.Token);
+                    if(verifyShellRefreshAfterLookup is {} afterLookup)await afterLookup(path,exists);
+                    deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
                     if(!exists){CompletePendingShellDirectory(path,version);continue;}
                     if(verifyShellRefreshBeforeDirectory is {} beforeDirectory)await beforeDirectory(path,deadline.Token);
                     var scanResult=await new DirectoryIndexer(catalog,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Scan(owner.RootId,currentRoot,currentEpoch,true,exclusions,null,deadline.Token,scopeRelative:relative,descendants:false,preserveRootState:true);
@@ -350,29 +365,46 @@ public sealed partial class MainWindow
                     CompletePendingShellDirectory(path,version);
                 }
                 await RefreshQuery(preserveViewport:true,scanPreview:true);
-                if(!Current()||pendingShellDirectoryOrder.Count==0)return;
+                if(!Current()||pendingShellDirectoryOrder.Count==0)
+                {
+                    if(Current()&&pendingShellDirectoryOrder.Count==0&&shellVerificationWarning is {} warning&&Status.Text==lastShellOperationMessage+" "+warning)
+                    {shellVerificationWarning=null;Status.Text=lastShellOperationMessage;}
+                    return;
+                }
             }
         }
         catch(OperationCanceledException) when(deadline.IsCancellationRequested&&!token.IsCancellationRequested)
         {
+            if(verifyShellRefreshBeforeFailurePublish is {} beforeFailurePublish)await beforeFailurePublish();
             if(Current())
             {
                 try{await RefreshQuery(preserveViewport:true,scanPreview:true);}
                 catch(Exception error){if(Current())RecordWebView("Shell refresh publish failed "+error.GetType().Name);}
-                if(Current())Status.Text="文件操作已完成，但目录核对未完成；请按 F5 刷新。";
+                if(Current()){shellVerificationWarning="目录核对未完成；请按 F5 刷新。";Status.Text=lastShellOperationMessage+" "+shellVerificationWarning;}
             }
+            retryNewDemand=shellDirectoryDemandVersion>attemptDemand;
         }
         catch(OperationCanceledException){}
         catch(Exception error)
         {
+            if(verifyShellRefreshBeforeFailurePublish is {} beforeFailurePublish)await beforeFailurePublish();
             if(Current())
             {
                 try{await RefreshQuery(preserveViewport:true,scanPreview:true);}
                 catch(Exception publishError){if(Current())RecordWebView("Shell refresh publish failed "+publishError.GetType().Name);}
-                if(Current())ShowError(error);
+                if(Current())
+                {
+                    ShowError(error);
+                    if(Current()){shellVerificationWarning="目录核对未完成："+UserMessages.Error(error);Status.Text=lastShellOperationMessage+" "+shellVerificationWarning;}
+                }
             }
+            retryNewDemand=shellDirectoryDemandVersion>attemptDemand;
         }
         finally{if(ReferenceEquals(shellRefreshStop,refreshCancellation))shellRefreshStop=null;}
+        // An operation completed while this attempt was publishing its failure.
+        // Give only that fresh demand a new deadline; never spin on an old failure.
+        if(retryNewDemand&&Current()&&pendingShellDirectoryOrder.Count>0)
+            await RunStoppedShellRefresh(owner);
     }
     private async Task RefreshActiveShellOperation(ShellRefreshOwner owner)
     {
@@ -409,6 +441,7 @@ public sealed partial class MainWindow
     {
         RecordWebView($"Shell operation items={result.Items.Count} completed={result.Items.Count(i=>i.Outcome==ShellItemOutcome.Completed)} aborted={result.Aborted} hr={result.HResult:X8}");
         if(closing)return;
-        Status.Text=result.Items.Any(i=>i.Outcome==ShellItemOutcome.SourceRetained)?"目标已生成，但原文件仍在，移动未完成。":result.Items.Any(i=>i.Outcome==ShellItemOutcome.Indeterminate)?"无法确认部分文件的操作结果，请检查源位置和目标位置。":result.Aborted?"操作已取消；已完成的文件操作已保留。":result.Items.Any(i=>i.Outcome!=ShellItemOutcome.Completed)||result.HResult<0?"部分文件未完成操作，请检查系统提示及目标文件夹。":$"已完成 {result.Items.Count:N0} 项文件操作。";
+        lastShellOperationMessage=result.Items.Any(i=>i.Outcome==ShellItemOutcome.SourceRetained)?"目标已生成，但原文件仍在，移动未完成。":result.Items.Any(i=>i.Outcome==ShellItemOutcome.Indeterminate)?"无法确认部分文件的操作结果，请检查源位置和目标位置。":result.Aborted?"操作已取消；已完成的文件操作已保留。":result.Items.Any(i=>i.Outcome!=ShellItemOutcome.Completed)||result.HResult<0?"部分文件未完成操作，请检查系统提示及目标文件夹。":$"已完成 {result.Items.Count:N0} 项文件操作。";
+        shellVerificationWarning=null;Status.Text=lastShellOperationMessage;
     }
 }

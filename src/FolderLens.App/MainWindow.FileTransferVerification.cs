@@ -15,14 +15,8 @@ public sealed partial class MainWindow
         {
             DetailsMode.IsChecked=details;ToggleView(DetailsMode,new());
             var view=ActiveBrowser;view.DeselectRange(new ItemIndexRange(0,(uint)view.Items.Count));view.SelectRange(new ItemIndexRange(0,2));
-            foreach(string stage in new[]{"page","item"})
-            {
-                verifyTransferBarrier=at=>{if(at==stage)view.DeselectRange(new ItemIndexRange(0,1));return Task.CompletedTask;};
-                try{await TransferStorageItems();throw new InvalidOperationException("准备过程中改变选择仍输出了过时的数据包。");}
-                catch(OperationCanceledException){}
-                finally{verifyTransferBarrier=null;view.SelectRange(new ItemIndexRange(0,2));}
-            }
-            var files=await TransferStorageItems();if(files.Length!=2||!view.CanDragItems||view.CanReorderItems)throw new InvalidOperationException("两种列表的多选文件传输未接通。");
+            var files=await TransferStorageItems();
+            if(files.Length!=2||!view.CanDragItems||view.CanReorderItems)throw new InvalidOperationException("两种列表的多选文件传输未接通。");
             var data=new DataPackage{RequestedOperation=DataPackageOperation.Copy};data.SetStorageItems(files);
             if((await data.GetView().GetStorageItemsAsync()).Count!=2)throw new InvalidOperationException("系统文件数据包没有保留多选。");
             var delayed=new DataPackage{RequestedOperation=DataPackageOperation.Copy|DataPackageOperation.Move};
@@ -36,7 +30,17 @@ public sealed partial class MainWindow
             var copied=new List<IStorageItem>();foreach(var path in Directory.GetFiles(target))copied.Add(await StorageFile.GetFileFromPathAsync(path));cut.SetStorageItems(copied);
             await ReceiveFiles(cut.GetView(),moved,null);
             if(Directory.GetFiles(target).Length!=0||Directory.GetFiles(moved).Length!=2)throw new InvalidOperationException("剪切粘贴未完成。");
+            if(shellRefreshTask is {} refresh)await refresh.WaitAsync(TimeSpan.FromSeconds(20));
             report[details?"detailsMultiSelectionCopyCutPaste":"thumbnailMultiSelectionCopyCutPaste"]=true;
+            foreach(string stage in new[]{"page","item"})
+            {
+                bool reached=false;
+                verifyTransferBarrier=at=>{if(at==stage){reached=true;view.DeselectRange(new ItemIndexRange(0,1));}return Task.CompletedTask;};
+                try{await TransferStorageItems();throw new InvalidOperationException("准备过程中改变选择仍输出了过时的数据包。");}
+                catch(OperationCanceledException) when(reached){}
+                finally{verifyTransferBarrier=null;}
+                view.DeselectRange(new ItemIndexRange(0,(uint)view.Items.Count));view.SelectRange(new ItemIndexRange(0,2));
+            }
         }
         report["windowsExplorerPhysicalDrag"]="NOT_RUN";
         report["clipboardOwnershipAndExplorerPaste"]="NOT_RUN";

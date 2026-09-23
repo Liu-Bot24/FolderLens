@@ -48,5 +48,9 @@ public sealed class AuditRegressionTests
         Assert.NotEmpty(first.Items);
         var state=await catalog.Read(c=>{using var q=c.CreateCommand();q.CommandText="SELECT scan_state FROM Roots WHERE root_id='r'";return (string)q.ExecuteScalar()!;});
         Assert.Equal("partial",state);
+        // Capacity has its own metadata traversal. A deliberately exhausted
+        // browse catalog cannot turn this folder's exact file count into a partial result.
+        var capacity=await PhysicalCapacityScanner.Scan(source,[],null,CancellationToken.None);
+        Assert.True(capacity.IsComplete);Assert.Equal(1200,capacity.Rows.Single(row=>row.RelativePath=="").SubtreeFiles);
     }
 }

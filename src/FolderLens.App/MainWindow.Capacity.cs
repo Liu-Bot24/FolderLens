@@ -23,8 +23,8 @@ public sealed partial class MainWindow
         {
             if(handle is not null){retained=await store.RetainSnapshot(handle.Id,lifetime.Token);if(!retained)handle=null;}
             if(closing)return;
-            PreferScanDirectory(capturedRoot,"");
-            var window=new CapacityWindow(store,capturedRoot,capturedPath,handle,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),path=>PreferScanDirectory(capturedRoot,path),currentObservationsOnly:true);capacityWindow=window;retained=false;
+            var window=new CapacityWindow(store,capturedRoot,capturedPath,handle,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),
+                currentObservationsOnly:true,physicalCapacity:true,exclusions:ScanExclusions(),scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));capacityWindow=window;retained=false;
             window.Closed+=async(_,_)=>
             {
                 try{await window.ShutdownAsync();}catch(Exception error){ShowError(error);}

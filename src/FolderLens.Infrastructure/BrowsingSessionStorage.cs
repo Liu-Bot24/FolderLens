@@ -29,7 +29,9 @@ public sealed class BrowsingSessionStorage : IAsyncDisposable
         try
         {
             await session.Catalog.Initialize(cancellation).ConfigureAwait(false);
-            await session.Catalog.Write(c=>{CompactBrowsingCatalog.Configure(c);return true;},cancellation).ConfigureAwait(false);
+            // The active browse root must not stop at a fixed catalog size.
+            // Admission still guards the host drive's free space.
+            await session.Catalog.Write(c=>{CompactBrowsingCatalog.Configure(c,maximumBytes:null);return true;},cancellation).ConfigureAwait(false);
             await session.Catalog.ImportLegacyPlaylists(Path.Combine(dataDirectory,"catalog","catalog.sqlite"),cancellation).ConfigureAwait(false);
             return session;
         }
