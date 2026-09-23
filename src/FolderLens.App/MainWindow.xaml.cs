@@ -247,6 +247,9 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){return;}
         catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
         long requested=++rootChangeVersion;
+        // The capacity window belongs to the previous browse root. Closing it
+        // cancels its independent traversal before the new root starts scanning.
+        if(capacityWindow is {IsClosing:false} oldCapacity)oldCapacity.Close();
         RetireShellRefreshView();
         // Each producer owns its cancellation source. Signal them all before
         // waiting for any decoder or previous navigation to finish retiring.

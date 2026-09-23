@@ -99,8 +99,14 @@ public sealed partial class MainWindow
                 physicalCapacity:true,scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));
             window.AppWindow.Move(new Windows.Graphics.PointInt32(-16000,-16000));window.AppWindow.Show(false);
             await window.VerifyPhysicalCapacity(report);
+            capacityWindow=window;
+            await OpenRoot(Path.Combine(source,"A"));
+            await window.ShutdownAsync();
+            if(!window.IsClosing||root!=Path.Combine(source,"A"))
+                throw new InvalidOperationException("切换主文件夹后旧目录容量统计未退休。");
+            report["navigationRetiresCapacityWindow"]=true;
         }
-        finally{if(window is not null){window.Close();await window.ShutdownAsync();}else await catalog.ReleaseSnapshot(snapshot.Id);}
+        finally{if(ReferenceEquals(capacityWindow,window))capacityWindow=null;if(window is not null){if(!window.IsClosing)window.Close();await window.ShutdownAsync();}else await catalog.ReleaseSnapshot(snapshot.Id);}
     }
 
     private async Task VerifyCapacityUi(string source,Dictionary<string,object> report)
