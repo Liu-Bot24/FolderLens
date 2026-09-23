@@ -14,17 +14,15 @@ public sealed partial class MainWindow
         if(capacityWindow is not null){if(capacityWindow.IsClosing)Status.Text="正在关闭目录容量窗口，请稍后重试。";else capacityWindow.Activate();return;}
         openingCapacity=true;capacityOpening=OpenCapacityWindow();
     }
-    private async Task OpenCapacityWindow()
+    private Task OpenCapacityWindow()
     {
         long requestedForeground=WindowFocus.Foreground;
         var store=catalog!;string capturedRoot=rootId,capturedPath=root;
-        ResultHandle? handle=resultHandle is {IsPendingView:false}?resultHandle:null;bool retained=false;
         try
         {
-            if(handle is not null){retained=await store.RetainSnapshot(handle.Id,lifetime.Token);if(!retained)handle=null;}
-            if(closing)return;
-            var window=new CapacityWindow(store,capturedRoot,capturedPath,handle,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),
-                currentObservationsOnly:true,physicalCapacity:true,exclusions:ScanExclusions(),scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));capacityWindow=window;retained=false;
+            if(closing)return Task.CompletedTask;
+            var window=new CapacityWindow(store,capturedRoot,capturedPath,lifetime.Token,(path,direct)=>BrowseCapacityDirectory(capturedRoot,path,direct),
+                currentObservationsOnly:true,physicalCapacity:true,exclusions:ScanExclusions(),scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));capacityWindow=window;
             window.Closed+=async(_,_)=>
             {
                 try{await window.ShutdownAsync();}catch(Exception error){ShowError(error);}
@@ -32,9 +30,9 @@ public sealed partial class MainWindow
             };
             WindowFocus.Show(window,requestedForeground);
         }
-        catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
         catch(Exception error){ShowError(error);}
-        finally{openingCapacity=false;if(retained&&handle is not null)try{await store.ReleaseSnapshot(handle.Id);}catch(Exception error){ShowError(error);}}
+        finally{openingCapacity=false;}
+        return Task.CompletedTask;
     }
     private async Task CloseCapacityWindow()
     {

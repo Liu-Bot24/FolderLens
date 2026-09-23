@@ -10,7 +10,19 @@ public sealed class CapacityTests
         var rows=Capacity.Build([new("root",10,10),new(@"A\a",20,20),new(@"A\AA\a",30,30),new(@"B\b",40,40)]);
         Assert.Equal(100,rows.Single(r=>r.RelativePath=="").SubtreeLogical);Assert.Equal(50,rows.Single(r=>r.RelativePath=="A").SubtreeLogical);
         var level=Capacity.CurrentLevel(rows,"",false);Assert.Equal(100,level.Sum(r=>r.KnownBytes));Assert.Equal(1,level.Sum(r=>r.Fraction));
-        var ranking=Capacity.CurrentLevel(rows,"",false,true);Assert.Equal(120,ranking.Sum(r=>r.KnownBytes));Assert.Equal(3,ranking.Count);
+        var first=Capacity.RankAtDepth(rows,"",1);
+        Assert.Equal(["A","B"],first.Select(r=>r.RelativePath).OrderBy(path=>path));
+        Assert.Equal(90,first.Sum(r=>r.KnownBytes));
+        var second=Capacity.RankAtDepth(rows,"",2);
+        Assert.Equal([@"A\AA","B"],second.Select(r=>r.RelativePath).OrderBy(path=>path));
+        Assert.Equal(70,second.Sum(r=>r.KnownBytes));
+        Assert.Equal(second,Capacity.RankAtDepth(rows,"",3));
+        Assert.Single(Capacity.RankAtDepth(rows,"A",2),r=>r.RelativePath==@"A\AA");
+        var shares=Capacity.SharesAtDepth(rows,"",2);
+        Assert.Equal(100,shares.Sum(row=>row.KnownBytes));
+        Assert.Equal(30,shares.Single(row=>row.IsDirectFiles).KnownBytes);
+        Assert.Equal(1,shares.Sum(row=>row.Fraction)!.Value,10);
+        Assert.DoesNotContain(second,row=>row.RelativePath=="A");
     }
     [Fact] public void UnknownAllocationAndEmptyFoldersStayExplicit()
     {

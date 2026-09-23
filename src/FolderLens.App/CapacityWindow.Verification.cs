@@ -12,19 +12,30 @@ public sealed partial class CapacityWindow
     internal async Task VerifyPhysicalCapacity(Dictionary<string,object> result)
     {
         await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));await work.WaitAsync(TimeSpan.FromSeconds(10));
-        if(report is not {IsComplete:true}||files.Text!="13"||!state.Text.Contains("统计完成"))
+        if(report is not {IsComplete:true}||files.Text!="14"||!state.Text.Contains("统计完成"))
             throw new InvalidOperationException("独立容量统计未包含浏览索引之外的新文件。");
-        scope.SelectedIndex=1;await work.WaitAsync(TimeSpan.FromSeconds(10));
-        if(files.Text!="12"||!state.Text.Contains("筛选结果"))
-            throw new InvalidOperationException("切换固定结果后仍显示物理容量。");
-        scope.SelectedIndex=0;await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));await work.WaitAsync(TimeSpan.FromSeconds(10));
-        if(report is not {IsComplete:true}||files.Text!="13")
-            throw new InvalidOperationException("返回整个文件夹后没有重新统计当前目录。");
-        result["physicalOutsideCatalog"]=true;result["scopeSwitchRetiresOldWork"]=true;result["status"]="PASS";
+        long scan=physicalGeneration;
+        depthChoice.SelectedIndex=1;await work.WaitAsync(TimeSpan.FromSeconds(10));
+        var ranked=((IEnumerable<CapacityDisplayRow>)ranking.ItemsSource).Select(row=>row.Value.RelativePath).ToArray();
+        if(physicalGeneration!=scan||ranked.Length!=3||!ranked.Contains(@"A\inner")||ranked.Contains("A")||!ranked.Contains("B")||!ranked.Contains("capacity-only"))
+            throw new InvalidOperationException("二级排名同时列出父子目录，或浅分支没有保留末级目录。");
+        var distribution=((IEnumerable<CapacityDisplayRow>)shares.ItemsSource).Select(row=>row.Value).ToArray();
+        if(distribution.Sum(row=>row.KnownBytes)!=report.Rows.Single(row=>row.RelativePath=="").SubtreeLogical||
+            distribution.Single(row=>row.IsDirectFiles).Files!=12)
+            throw new InvalidOperationException("二级容量分布重复统计父子目录，或遗漏上层直属文件。");
+        depthChoice.SelectedIndex=2;await work.WaitAsync(TimeSpan.FromSeconds(10));
+        if(physicalGeneration!=scan||!((IEnumerable<CapacityDisplayRow>)ranking.ItemsSource).Any(row=>row.Value.RelativePath==@"A\inner"))
+            throw new InvalidOperationException("超过实际深度后未显示最深目录，或切换层级触发重复扫描。");
+        await File.WriteAllBytesAsync(Path.Combine(physicalRoot,"capacity-only","new.txt"),[3]);
+        RestartPhysicalScan();QueueRender();await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));await work.WaitAsync(TimeSpan.FromSeconds(10));
+        if(report is not {IsComplete:true}||files.Text!="15")
+            throw new InvalidOperationException("刷新目录容量后未读取新文件。");
+        result["physicalOutsideCatalog"]=true;result["levelSwitchWithoutRescan"]=true;result["refreshReadsChanges"]=true;result["status"]="PASS";
     }
 
     internal async Task VerifyPresentation(string output,Dictionary<string,object> result)
     {
+        if(physicalCapacity)await physicalWork.WaitAsync(TimeSpan.FromSeconds(20));
         await work;
         var page=(Microsoft.UI.Xaml.Controls.ScrollViewer)Content;
         var root=(Microsoft.UI.Xaml.Controls.Grid)page.Content;
@@ -73,15 +84,10 @@ public sealed partial class CapacityWindow
         if(directory!="A"||!parent.IsEnabled||files.Text!="12")throw new InvalidOperationException("看板下钻结果错误。");
         Navigate("");await work;
         if((ranking.SelectedItem as CapacityDisplayRow)?.Value.RelativePath!="A")throw new InvalidOperationException("返回上层没有恢复目录选择。");
-        await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE Roots SET scan_state='cancelled' WHERE root_id=$root; UPDATE SchemaInfo SET catalog_revision=catalog_revision+1";cmd.Parameters.AddWithValue("$root",rootId);return cmd.ExecuteNonQuery();});
-        await CheckForUpdates();await work;
-        if(!state.Text.Contains("扫描已取消"))throw new InvalidOperationException("取消的扫描没有明确显示终止状态。");
-        var unfinished=((IEnumerable<CapacityDisplayRow>)ranking.ItemsSource).Single(row=>row.Value.RelativePath=="B");
-        if(unfinished.Size=="0 B"||unfinished.Percent=="0.0%")throw new InvalidOperationException("不完整统计把未统计目录显示为确定的零容量。");
-        result["cancelledStateAutoUpdated"]=true;result["unfinishedZeroNotPresentedAsEmpty"]=true;
-        scope.SelectedIndex=1;await work;
-        if(files.Text!="12"||!state.Text.Contains("筛选结果"))throw new InvalidOperationException("固定筛选结果统计没有显示。");
-        result["fileCount"]=12;result["themeChangeRetainedRows"]=true;result["drillReturnAndSnapshotScope"]=true;result["status"]="PASS";
+        depthChoice.SelectedIndex=2;await work;
+        if(files.Text!="12"||!((IEnumerable<CapacityDisplayRow>)ranking.ItemsSource).Any(row=>row.Value.RelativePath=="A"))
+            throw new InvalidOperationException("超出实际层数后没有保留最深文件夹。");
+        result["fileCount"]=12;result["themeChangeRetainedRows"]=true;result["drillReturnAndDepthFallback"]=true;result["status"]="PASS";
     }
 }
 
@@ -90,12 +96,12 @@ public sealed partial class MainWindow
     private async Task VerifyPhysicalCapacityUi(string source,Dictionary<string,object> report)
     {
         await StopFixtureScan(source);
-        var snapshot=resultHandle!;if(!await catalog!.RetainSnapshot(snapshot.Id))throw new InvalidOperationException("无法保留容量快照。");
         string added=Path.Combine(source,"capacity-only","unindexed.txt");Directory.CreateDirectory(Path.GetDirectoryName(added)!);await File.WriteAllBytesAsync(added,new byte[7]);
+        string deeper=Path.Combine(source,"A","inner");Directory.CreateDirectory(deeper);await File.WriteAllBytesAsync(Path.Combine(deeper,"unindexed.txt"),new byte[5]);
         CapacityWindow? window=null;
         try
         {
-            window=new CapacityWindow(catalog,rootId,source,snapshot,lifetime.Token,(_,_)=>Task.CompletedTask,
+            window=new CapacityWindow(catalog!,rootId,source,lifetime.Token,(_,_)=>Task.CompletedTask,
                 physicalCapacity:true,scanWorkerExecutable:ScanWorkerClient.FindExecutable(ScanWorkerDirectory));
             window.AppWindow.Move(new Windows.Graphics.PointInt32(-16000,-16000));window.AppWindow.Show(false);
             await window.VerifyPhysicalCapacity(report);
@@ -106,20 +112,19 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("切换主文件夹后旧目录容量统计未退休。");
             report["navigationRetiresCapacityWindow"]=true;
         }
-        finally{if(ReferenceEquals(capacityWindow,window))capacityWindow=null;if(window is not null){if(!window.IsClosing)window.Close();await window.ShutdownAsync();}else await catalog.ReleaseSnapshot(snapshot.Id);}
+        finally{if(ReferenceEquals(capacityWindow,window))capacityWindow=null;if(window is not null){if(!window.IsClosing)window.Close();await window.ShutdownAsync();}}
     }
 
     private async Task VerifyCapacityUi(string source,Dictionary<string,object> report)
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;
-        var snapshot=resultHandle!;if(!await catalog!.RetainSnapshot(snapshot.Id))throw new InvalidOperationException("无法保留容量快照。");
         CapacityWindow? window=null;
         try
         {
-            window=new CapacityWindow(catalog,rootId,root,snapshot,lifetime.Token,(_,_)=>Task.CompletedTask);
+            window=new CapacityWindow(catalog!,rootId,root,lifetime.Token,(_,_)=>Task.CompletedTask,physicalCapacity:true);
             window.AppWindow.Move(new Windows.Graphics.PointInt32(-16000,-16000));window.AppWindow.Show(false);
             await window.VerifyPresentation(dataDirectory,report);
         }
-        finally{if(window is not null){window.Close();await window.ShutdownAsync();}else await catalog.ReleaseSnapshot(snapshot.Id);}
+        finally{if(window is not null){window.Close();await window.ShutdownAsync();}}
     }
 }

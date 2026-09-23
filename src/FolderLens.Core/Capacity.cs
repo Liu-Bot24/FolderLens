@@ -65,13 +65,53 @@ public static class Capacity
         double? fraction=rest.All(r=>r.Fraction is null)?null:rest.Sum(r=>r.Fraction??0);
         visible.Add(new("",$"其他（{rest.Length:N0} 项）",files,bytes,unknown,fraction,true));return visible;
     }
-    public static IReadOnlyList<CapacityViewRow> CurrentLevel(IReadOnlyList<CapacityRow> rows,string directory,bool allocated,bool allDescendants=false)
+    public static IReadOnlyList<CapacityViewRow> RankAtDepth(IReadOnlyList<CapacityRow> rows,string directory,int depth)
+    {
+        if(depth<1)throw new ArgumentOutOfRangeException(nameof(depth));
+        var parent=rows.FirstOrDefault(r=>r.RelativePath==directory);if(parent is null)return [];
+        string prefix=directory.Length==0?"":directory+Path.DirectorySeparatorChar;
+        var descendants=rows.Where(r=>r.RelativePath!=directory&&
+            (directory.Length==0||PathRules.IsWithinRelative(r.RelativePath,directory)))
+            .Select(r=>(Row:r,Label:r.RelativePath[prefix.Length..]))
+            .ToArray();
+        var branches=descendants.Select(r=>Path.GetDirectoryName(r.Row.RelativePath)??"").ToHashSet(StringComparer.Ordinal);
+        long total=parent.SubtreeLogical;
+        return descendants.Where(item=>
+        {
+            int level=1+item.Label.Count(ch=>ch is '\\' or '/');
+            return level==depth||level<depth&&!branches.Contains(item.Row.RelativePath);
+        }).Select(item=>new CapacityViewRow(item.Row.RelativePath,item.Label,item.Row.SubtreeFiles,
+            item.Row.SubtreeLogical,0,total==0?null:(double)item.Row.SubtreeLogical/total,false))
+            .OrderByDescending(row=>row.KnownBytes).ThenBy(row=>row.RelativePath,StringComparer.Ordinal).ToArray();
+    }
+    public static IReadOnlyList<CapacityViewRow> SharesAtDepth(IReadOnlyList<CapacityRow> rows,string directory,int depth,int maximum=20)
+    {
+        if(maximum is <1 or >20)throw new ArgumentOutOfRangeException(nameof(maximum));
+        var parent=rows.FirstOrDefault(r=>r.RelativePath==directory);if(parent is null)return [];
+        var ranked=RankAtDepth(rows,directory,depth);
+        var visible=ranked.Take(maximum).ToList();
+        long included=0,files=0;
+        checked{foreach(var row in ranked){included+=row.KnownBytes;files+=row.Files;}}
+        if(ranked.Count>maximum)
+        {
+            var rest=ranked.Skip(maximum).ToArray();
+            long bytes=0,remainingFiles=0;checked{foreach(var row in rest){bytes+=row.KnownBytes;remainingFiles+=row.Files;}}
+            visible.Add(new("",$"其他子文件夹（{rest.Length:N0} 项）",remainingFiles,bytes,0,
+                parent.SubtreeLogical==0?null:(double)bytes/parent.SubtreeLogical,true));
+        }
+        long direct=checked(parent.SubtreeLogical-included),directFiles=checked(parent.SubtreeFiles-files);
+        if(direct>0||directFiles>0)
+            visible.Add(new(directory,"未列入排名的直属文件",directFiles,direct,0,
+                parent.SubtreeLogical==0?null:(double)direct/parent.SubtreeLogical,true));
+        return visible;
+    }
+    public static IReadOnlyList<CapacityViewRow> CurrentLevel(IReadOnlyList<CapacityRow> rows,string directory,bool allocated)
     {
         var parent=rows.FirstOrDefault(r=>r.RelativePath==directory);if(parent is null)return [];
         long total=allocated?parent.SubtreeAllocatedKnown:parent.SubtreeLogical;
-        var result=rows.Where(r=>r.RelativePath!=directory && (allDescendants?directory.Length==0||PathRules.IsWithinRelative(r.RelativePath,directory):(Path.GetDirectoryName(r.RelativePath)??"")==directory))
-            .Select(r=>new CapacityViewRow(r.RelativePath,allDescendants?r.RelativePath:Path.GetFileName(r.RelativePath),r.SubtreeFiles,allocated?r.SubtreeAllocatedKnown:r.SubtreeLogical,allocated?r.AllocationUnknown:0,total==0?null:(double)(allocated?r.SubtreeAllocatedKnown:r.SubtreeLogical)/total,false)).ToList();
-        if(!allDescendants)result.Add(new(directory,"本目录直接文件",parent.DirectFiles,allocated?parent.DirectAllocatedKnown:parent.DirectLogical,allocated?Math.Max(0,parent.AllocationUnknown-rows.Where(r=>(Path.GetDirectoryName(r.RelativePath)??"")==directory&&r.RelativePath!=directory).Sum(r=>r.AllocationUnknown)):0,total==0?null:(double)(allocated?parent.DirectAllocatedKnown:parent.DirectLogical)/total,true));
+        var result=rows.Where(r=>r.RelativePath!=directory && (Path.GetDirectoryName(r.RelativePath)??"")==directory)
+            .Select(r=>new CapacityViewRow(r.RelativePath,Path.GetFileName(r.RelativePath),r.SubtreeFiles,allocated?r.SubtreeAllocatedKnown:r.SubtreeLogical,allocated?r.AllocationUnknown:0,total==0?null:(double)(allocated?r.SubtreeAllocatedKnown:r.SubtreeLogical)/total,false)).ToList();
+        result.Add(new(directory,"本目录直接文件",parent.DirectFiles,allocated?parent.DirectAllocatedKnown:parent.DirectLogical,allocated?Math.Max(0,parent.AllocationUnknown-rows.Where(r=>(Path.GetDirectoryName(r.RelativePath)??"")==directory&&r.RelativePath!=directory).Sum(r=>r.AllocationUnknown)):0,total==0?null:(double)(allocated?parent.DirectAllocatedKnown:parent.DirectLogical)/total,true));
         return result.OrderByDescending(r=>r.KnownBytes).ThenBy(r=>r.RelativePath,StringComparer.Ordinal).ToArray();
     }
 }
