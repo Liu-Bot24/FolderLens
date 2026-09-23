@@ -63,16 +63,50 @@ public sealed partial class MainWindow
     {
         using var work=browserWork.Enter();if(work is null||catalog is not {} store)return;
         var view=ActiveBrowser;var source=view.ItemsSource;var ranges=SelectedOrdinals(view).ToArray();var handle=resultHandle;
-        long version=rootChangeVersion;var listed=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
-        bool Current()=>!closing&&version==rootChangeVersion&&ReferenceEquals(handle,resultHandle)&&ReferenceEquals(source,view.ItemsSource)&&listed.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)));
+        long version=rootChangeVersion,viewVersion=viewRestoreRevision;string? collection=activeCollectionId;
+        var listed=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
+        bool Current()=>!closing&&version==rootChangeVersion&&viewVersion==viewRestoreRevision&&collection==activeCollectionId
+            &&ReferenceEquals(view,ActiveBrowser)&&ReferenceEquals(source,view.ItemsSource)
+            &&listed.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)));
         long count=ranges.Sum(r=>r.Count);var budget=new FileTransferBudget(count);
+        var capturedItems=new List<SnapshotItem>((int)count);
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);deadline.CancelAfter(TimeSpan.FromSeconds(30));var token=deadline.Token;
         void Check(){token.ThrowIfCancellationRequested();if(!Current())throw new OperationCanceledException();}
+        static bool SameTransferSource(SnapshotItem a,SnapshotItem b)=>a.Ordinal==b.Ordinal&&a.EntryId==b.EntryId&&a.Version==b.Version
+            &&a.RelativePath==b.RelativePath&&a.DirectoryId==b.DirectoryId&&a.SourceRootId==b.SourceRootId
+            &&a.SourceRootPath==b.SourceRootPath&&a.SourceRootEpoch==b.SourceRootEpoch&&a.PathRevision==b.PathRevision
+            &&a.DirectoryLocationId==b.DirectoryLocationId&&a.BindingRevision==b.BindingRevision&&a.PhysicalIdentity==b.PhysicalIdentity;
+        async Task VerifyPublishedSelection()
+        {
+            while(!ReferenceEquals(handle,resultHandle))
+            {
+                Check();
+                if(!ranges.SequenceEqual(SelectedOrdinals(view))||resultHandle is not {} published
+                    ||ranges.Any(range=>range.Start+range.Count>published.Count))
+                    throw new OperationCanceledException();
+                if(!await store.RetainSnapshot(published.Id,token))throw new OperationCanceledException();
+                try
+                {
+                    int index=0;
+                    foreach(var range in ranges)for(long offset=range.Start;offset<range.Start+range.Count;)
+                    {
+                        Check();var page=await store.ReadPage(published.Id,offset,(int)Math.Min(256,range.Start+range.Count-offset),token);
+                        if(page.Count==0)throw new OperationCanceledException();
+                        foreach(var item in page)
+                            if(index>=capturedItems.Count||!SameTransferSource(capturedItems[index++],item))throw new OperationCanceledException();
+                        offset+=page.Count;
+                    }
+                    if(index!=capturedItems.Count)throw new OperationCanceledException();
+                }
+                finally{await store.ReleaseSnapshot(published.Id);}
+                Check();if(ReferenceEquals(published,resultHandle))return;
+            }
+        }
         bool retained=false;long processed=0;
         async Task Accept(SnapshotItem item)
         {
             Check();var target=await store.ResolveFileOperation(item,token);Check();budget.Add(target.Path);
-            await receive(target,token);if(verifyTransferBarrier is not null)await verifyTransferBarrier("item");Check();processed++;
+            await receive(target,token);capturedItems.Add(item);if(verifyTransferBarrier is not null)await verifyTransferBarrier("item");Check();processed++;
         }
         try
         {
@@ -91,7 +125,7 @@ public sealed partial class MainWindow
             }
             else foreach(var range in ranges)for(long i=range.Start;i<range.Start+range.Count;i++)
             {Check();if(view.Items[(int)i] is FileRow {Item:{} item})await Accept(item);else throw new IOException("文件仍在加载，请稍后重试。");}
-            Check();
+            Check();await VerifyPublishedSelection();Check();
         }
         catch(OperationCanceledException) when(deadline.IsCancellationRequested&&!lifetime.IsCancellationRequested)
         {throw new TimeoutException("准备文件操作超时，请减少选择后重试。");}

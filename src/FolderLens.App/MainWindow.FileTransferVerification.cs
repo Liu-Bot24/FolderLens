@@ -1,3 +1,4 @@
+using FolderLens.Core;
 using FolderLens.Infrastructure;
 using Microsoft.UI.Xaml.Data;
 using Windows.ApplicationModel.DataTransfer;
@@ -42,6 +43,54 @@ public sealed partial class MainWindow
                 view.DeselectRange(new ItemIndexRange(0,(uint)view.Items.Count));view.SelectRange(new ItemIndexRange(0,2));
             }
         }
+        var stableView=ActiveBrowser;
+        stableView.DeselectRange(new ItemIndexRange(0,(uint)stableView.Items.Count));stableView.SelectRange(new ItemIndexRange(0,1));
+        var selectedBefore=stableView.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
+        var originalHandle=resultHandle;var originalSource=stableView.ItemsSource;
+        bool refreshed=false;
+        string? stablePath=null;
+        verifyTransferBarrier=async stage=>
+        {
+            if(stage!="page"||refreshed)return;
+            refreshed=true;
+            await RefreshQuery(preserveViewport:true,scanPreview:true);
+            report["publicationProbe"]=new{handleChanged=!ReferenceEquals(originalHandle,resultHandle),sourceChanged=!ReferenceEquals(originalSource,stableView.ItemsSource),selectionSame=selectedBefore.SequenceEqual(stableView.SelectedRanges.Select(r=>(r.FirstIndex,r.Length))),selected=stableView.SelectedRanges.Select(r=>new{r.FirstIndex,r.Length}).ToArray()};
+        };
+        try
+        {
+            var stable=await TransferStorageItems();
+            if(!refreshed||ReferenceEquals(originalHandle,resultHandle)||!selectedBefore.SequenceEqual(stableView.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)))||stable.Length!=1)
+                throw new InvalidOperationException("无法验证选中文件不变时的自动快照发布。");
+            stablePath=stable[0].Path;
+            report["unchangedSelectionSurvivesPublication"]=true;
+        }
+        finally{verifyTransferBarrier=null;}
+        bool changedFile=false,selectionStayed=false;
+        var beforeChangeHandle=resultHandle;long beforeRootVersion=rootChangeVersion,beforeViewVersion=viewRestoreRevision;
+        var beforeChange=(await catalog!.ReadPage(resultHandle!.Id,0,1))[0];
+        verifyTransferBarrier=async stage=>
+        {
+            if(stage!="item"||changedFile)return;
+            changedFile=true;
+            await File.AppendAllTextAsync(stablePath!,"changed");
+            string relativeDirectory=DirectoryBrowseScope.Relative(root,Path.GetDirectoryName(stablePath!)!)??throw new InvalidOperationException("测试文件超出当前根目录。");
+            var changeScan=await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token,scopeRelative:relativeDirectory,descendants:false,preserveRootState:true);
+            await RefreshQuery(preserveViewport:true,scanPreview:true);
+            var afterChange=(await catalog.ReadPage(resultHandle!.Id,0,1))[0];
+            report["changedFileProbe"]=new{stablePath,relativeDirectory,scan=changeScan.State,beforeChange.Version,beforeChange.Bytes,afterVersion=afterChange.Version,afterBytes=afterChange.Bytes,handleChanged=!ReferenceEquals(originalHandle,resultHandle)};
+            selectionStayed=selectedBefore.SequenceEqual(stableView.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)));
+            if(changeScan.State!="ready"||afterChange.Version==beforeChange.Version||ReferenceEquals(beforeChangeHandle,resultHandle)
+                ||!ReferenceEquals(originalSource,stableView.ItemsSource)||rootChangeVersion!=beforeRootVersion
+                ||viewRestoreRevision!=beforeViewVersion||!selectionStayed)
+                throw new InvalidOperationException("源文件变化反例没有保持同一视图、选区并更新快照版本。");
+        };
+        try
+        {
+            try{await TransferStorageItems();throw new InvalidOperationException("源文件变化后仍交付过时的数据包。");}
+            catch(OperationCanceledException) when(changedFile&&selectionStayed){}
+            report["changedSourceRejectedAfterPublication"]=true;
+        }
+        finally{verifyTransferBarrier=null;}
         report["windowsExplorerPhysicalDrag"]="NOT_RUN";
         report["clipboardOwnershipAndExplorerPaste"]="NOT_RUN";
         report["status"]="PASS";
