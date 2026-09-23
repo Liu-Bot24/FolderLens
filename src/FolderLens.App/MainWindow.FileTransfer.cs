@@ -23,9 +23,21 @@ public sealed partial class MainWindow
     private CancellationTokenSource? shellRefreshStop;
     private CancellationTokenSource shellViewStop=new();
     private Task? shellRefreshTask;
+    private Task? stoppedShellRefreshTask;
+    private ShellRefreshOwner? stoppedShellOwner;
+    private readonly Queue<string> pendingShellDirectoryOrder=new();
+    private readonly Dictionary<string,long> pendingShellDirectoryVersions=new(StringComparer.Ordinal);
+    private long shellDirectoryDemandVersion;
+    private TimeSpan? verifyShellRefreshBudget;
+    private Func<string,CancellationToken,Task>? verifyShellRefreshBeforeDirectory;
     private sealed record ShellRefreshOwner(long RootVersion,long ViewRevision,string RootId,string? Collection,CancellationToken Token);
     private ShellRefreshOwner CaptureShellRefreshOwner()=>new(rootChangeVersion,viewRestoreRevision,rootId,activeCollectionId,shellViewStop.Token);
-    private void RetireShellRefreshView(){shellViewStop.Cancel();shellViewStop.Dispose();shellViewStop=new();}
+    private void RetireShellRefreshView()
+    {
+        shellViewStop.Cancel();shellViewStop.Dispose();shellViewStop=new();
+        pendingShellDirectoryOrder.Clear();pendingShellDirectoryVersions.Clear();
+        stoppedShellOwner=null;stoppedShellRefreshTask=null;
+    }
     private Func<bool> CaptureIncomingView()
     {
         var owner=CaptureShellRefreshOwner();var view=ActiveBrowser;long selectedVersion=selection;
@@ -110,13 +122,14 @@ public sealed partial class MainWindow
         foreach(var view in new ListViewBase[]{FilesGrid,FilesList})
         {
             ShellRefreshOwner? dragOwner=null;
+            Task<IStorageItem[]>? dragFiles=null;
             view.CanDragItems=true;view.CanReorderItems=false;
             view.DragStarting+=(_,args)=>args.AllowedOperations=DataPackageOperation.Copy|DataPackageOperation.Move;
             view.DragItemsStarting+=(_,args)=>
             {
                 if(closing||fileOperationBusy){args.Cancel=true;return;}
                 dragOwner=CaptureShellRefreshOwner();
-                EndMarquee(false);var files=TransferStorageItems();
+                EndMarquee(false);var files=dragFiles=TransferStorageItems();
                 args.Data.RequestedOperation=DataPackageOperation.Copy|DataPackageOperation.Move;
                 // ListView/GridView expose DragItemsStarting without an event deferral.
                 // Standard delayed rendering lets Windows request the captured selection asynchronously.
@@ -128,7 +141,13 @@ public sealed partial class MainWindow
                 });
                 _=files.ContinueWith(t=>{var error=t.Exception;DispatcherQueue.TryEnqueue(()=>{if(!closing)ShowError(error!);});},TaskContinuationOptions.OnlyOnFaulted);
             };
-            view.DragItemsCompleted+=async(_,_)=>{var owner=dragOwner;dragOwner=null;if(owner is not null)await RefreshAfterShellOperation(owner);};
+            view.DragItemsCompleted+=async(_,_)=>
+            {
+                var owner=dragOwner;var files=dragFiles;dragOwner=null;dragFiles=null;
+                if(owner is null||files is null||owner.Token.IsCancellationRequested)return;
+                try{await CompleteOutgoingDrag(owner,(await files).Select(item=>item.Path).ToArray());}
+                catch(OperationCanceledException){}catch(Exception error){if(!closing)ShowError(error);}
+            };
         }
         foreach(var binding in new[]{(VirtualKey.C,false),(VirtualKey.X,true)})
         {
@@ -256,11 +275,109 @@ public sealed partial class MainWindow
         fileOperationBusy=false;UpdateCommandAvailability();
         shellRefreshTask=RefreshAfterShellOperation(owner,result);
     }
-    private async Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null,ShellBatchResult? result=null)
+    private Task CompleteOutgoingDrag(ShellRefreshOwner owner,IReadOnlyList<string> sourcePaths)
+        =>RefreshAfterShellOperation(owner,null,sourcePaths);
+    private Task RefreshAfterShellOperation(ShellRefreshOwner? owner=null,ShellBatchResult? result=null,IReadOnlyList<string>? outgoingSources=null)
+    {
+        if(closing||catalog is null)return Task.CompletedTask;
+        owner??=CaptureShellRefreshOwner();
+        if(owner.Token.IsCancellationRequested||owner.RootVersion!=rootChangeVersion||owner.ViewRevision!=viewRestoreRevision||owner.RootId!=rootId||owner.Collection!=activeCollectionId)
+            return Task.CompletedTask;
+        if(owner.Collection is null&&scanStop.IsCancellationRequested)return QueueStoppedShellRefresh(owner,result,outgoingSources);
+        return RefreshActiveShellOperation(owner);
+    }
+    private void AddPendingShellDirectory(string path)
+    {
+        if(DirectoryBrowseScope.Relative(root,path) is null)return;
+        if(!pendingShellDirectoryVersions.ContainsKey(path))pendingShellDirectoryOrder.Enqueue(path);
+        pendingShellDirectoryVersions[path]=checked(++shellDirectoryDemandVersion);
+    }
+    private Task QueueStoppedShellRefresh(ShellRefreshOwner owner,ShellBatchResult? result,IReadOnlyList<string>? outgoingSources)
+    {
+        if(stoppedShellOwner!=owner)
+        {
+            pendingShellDirectoryOrder.Clear();pendingShellDirectoryVersions.Clear();
+            stoppedShellOwner=owner;stoppedShellRefreshTask=null;
+        }
+        AddPendingShellDirectory(BrowsedDirectory);
+        if(result is not null)foreach(var item in result.Items)
+        {
+            if(Path.GetDirectoryName(item.Request.Source) is {} sourceDirectory)AddPendingShellDirectory(sourceDirectory);
+            if(item.ActualDestination is {} actual&&Path.GetDirectoryName(actual) is {} actualDirectory)AddPendingShellDirectory(actualDirectory);
+            if(item.Request.Destination is {} destination)AddPendingShellDirectory(destination);
+        }
+        if(outgoingSources is not null)foreach(var source in outgoingSources)
+            if(Path.GetDirectoryName(source) is {} directory)AddPendingShellDirectory(directory);
+        if(stoppedShellRefreshTask is {IsCompleted:false})return stoppedShellRefreshTask;
+        stoppedShellRefreshTask=RunStoppedShellRefresh(owner);
+        return stoppedShellRefreshTask;
+    }
+    private void CompletePendingShellDirectory(string path,long version)
+    {
+        if(pendingShellDirectoryOrder.Dequeue()!=path)throw new InvalidOperationException("目录核对队列顺序已变化。");
+        if(pendingShellDirectoryVersions[path]==version)pendingShellDirectoryVersions.Remove(path);
+        else pendingShellDirectoryOrder.Enqueue(path);
+    }
+    private async Task RunStoppedShellRefresh(ShellRefreshOwner owner)
+    {
+        using var work=browserWork.Enter();if(work is null||catalog is null)return;
+        using var refreshCancellation=CancellationTokenSource.CreateLinkedTokenSource(owner.Token,lifetime.Token);
+        var previous=shellRefreshStop;shellRefreshStop=refreshCancellation;previous?.Cancel();
+        var token=refreshCancellation.Token;
+        bool Current()=>!closing&&!token.IsCancellationRequested&&stoppedShellOwner==owner
+            &&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision&&owner.RootId==rootId&&activeCollectionId is null;
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(verifyShellRefreshBudget??TimeSpan.FromSeconds(30));
+        try
+        {
+            if(scanTask is {} retiring)try{await retiring.WaitAsync(deadline.Token);}catch(OperationCanceledException) when(!deadline.IsCancellationRequested){}
+            deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
+            string currentRoot=root;long currentEpoch=epoch;var exclusions=ScanExclusions();
+            while(Current())
+            {
+                while(pendingShellDirectoryOrder.Count>0)
+                {
+                    deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
+                    string path=pendingShellDirectoryOrder.Peek();long version=pendingShellDirectoryVersions[path];
+                    string? relative=DirectoryBrowseScope.Relative(currentRoot,path);
+                    if(relative is null){CompletePendingShellDirectory(path,version);continue;}
+                    bool exists=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT 1 FROM Directories WHERE root_id=$root AND canonical_key=$path";cmd.Parameters.AddWithValue("$root",owner.RootId);cmd.Parameters.AddWithValue("$path",relative);return cmd.ExecuteScalar() is not null;},deadline.Token);
+                    if(!exists){CompletePendingShellDirectory(path,version);continue;}
+                    if(verifyShellRefreshBeforeDirectory is {} beforeDirectory)await beforeDirectory(path,deadline.Token);
+                    var scanResult=await new DirectoryIndexer(catalog,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Scan(owner.RootId,currentRoot,currentEpoch,true,exclusions,null,deadline.Token,scopeRelative:relative,descendants:false,preserveRootState:true);
+                    deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
+                    if(scanResult.State!="ready")throw new IOException("文件操作已结束，但目录核对未完成，请刷新重试。");
+                    CompletePendingShellDirectory(path,version);
+                }
+                await RefreshQuery(preserveViewport:true,scanPreview:true);
+                if(!Current()||pendingShellDirectoryOrder.Count==0)return;
+            }
+        }
+        catch(OperationCanceledException) when(deadline.IsCancellationRequested&&!token.IsCancellationRequested)
+        {
+            if(Current())
+            {
+                try{await RefreshQuery(preserveViewport:true,scanPreview:true);}
+                catch(Exception error){if(Current())RecordWebView("Shell refresh publish failed "+error.GetType().Name);}
+                if(Current())Status.Text="文件操作已完成，但目录核对未完成；请按 F5 刷新。";
+            }
+        }
+        catch(OperationCanceledException){}
+        catch(Exception error)
+        {
+            if(Current())
+            {
+                try{await RefreshQuery(preserveViewport:true,scanPreview:true);}
+                catch(Exception publishError){if(Current())RecordWebView("Shell refresh publish failed "+publishError.GetType().Name);}
+                if(Current())ShowError(error);
+            }
+        }
+        finally{if(ReferenceEquals(shellRefreshStop,refreshCancellation))shellRefreshStop=null;}
+    }
+    private async Task RefreshActiveShellOperation(ShellRefreshOwner owner)
     {
         using var work=browserWork.Enter();if(work is null)return;
         if(closing||catalog is null)return;
-        owner??=CaptureShellRefreshOwner();
         bool OwnsView()=>!closing&&!owner.Token.IsCancellationRequested&&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision&&owner.RootId==rootId&&owner.Collection==activeCollectionId;
         if(!OwnsView())return;
         using var refreshCancellation=CancellationTokenSource.CreateLinkedTokenSource(owner.Token,lifetime.Token);
@@ -280,32 +397,6 @@ public sealed partial class MainWindow
                     await RefreshQuery(preserveViewport:true,scanPreview:true);
                     if(!Current())return;
                     nextPublication=System.Diagnostics.Stopwatch.GetTimestamp()+System.Diagnostics.Stopwatch.Frequency;
-                }
-                if(Current())await RefreshQuery(preserveViewport:true,scanPreview:true);
-            }
-            else if(scanStop.IsCancellationRequested)
-            {
-                // A stopped scan stays stopped. Only reconcile affected existing
-                // directory entries with a separate view-owned deadline.
-                using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(30));
-                if(scanTask is {} retiring)try{await retiring.WaitAsync(deadline.Token);}catch(OperationCanceledException) when(!deadline.IsCancellationRequested){}
-                deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
-                string currentRoot=root;long currentEpoch=epoch;var exclusions=ScanExclusions();
-                var paths=new HashSet<string>(StringComparer.Ordinal){BrowsedDirectory};
-                if(result is not null)foreach(var item in result.Items)
-                {
-                    if(Path.GetDirectoryName(item.Request.Source) is {} sourceDirectory)paths.Add(sourceDirectory);
-                    if(item.ActualDestination is {} actual&&Path.GetDirectoryName(actual) is {} actualDirectory)paths.Add(actualDirectory);
-                    if(item.Request.Destination is {} destination)paths.Add(destination);
-                }
-                foreach(string path in paths)
-                {
-                    string? relative=DirectoryBrowseScope.Relative(currentRoot,path);if(relative is null)continue;
-                    bool exists=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT 1 FROM Directories WHERE root_id=$root AND canonical_key=$path";cmd.Parameters.AddWithValue("$root",owner.RootId);cmd.Parameters.AddWithValue("$path",relative);return cmd.ExecuteScalar() is not null;},deadline.Token);
-                    if(!exists)continue;
-                    var scanResult=await new DirectoryIndexer(catalog,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Scan(owner.RootId,currentRoot,currentEpoch,true,exclusions,null,deadline.Token,scopeRelative:relative,descendants:false,preserveRootState:true);
-                    deadline.Token.ThrowIfCancellationRequested();if(!Current())return;
-                    if(scanResult.State!="ready")throw new IOException("文件操作已结束，但目录核对未完成，请刷新重试。");
                 }
                 if(Current())await RefreshQuery(preserveViewport:true,scanPreview:true);
             }
