@@ -286,6 +286,57 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128
+    },
+    "assetFormat": {
+      "enum": [
+        "png",
+        "jpeg"
+      ]
+    },
+    "pixels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "stride",
+        "byteLength",
+        "pixelFormat",
+        "colorSpace",
+        "alphaMode"
+      ],
+      "description": "Binary bytes immediately follow this response JSON on the same authenticated pipe. No Base64, file token, or mapping lease. stride=width*4 and byteLength=stride*height are checked before allocation.",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "stride": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 65536
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 268435456
+        },
+        "pixelFormat": {
+          "const": "RGBA8"
+        },
+        "colorSpace": {
+          "const": "sRGB"
+        },
+        "alphaMode": {
+          "const": "premultiplied"
+        }
+      }
     }
   },
   "allOf": [
@@ -413,6 +464,45 @@
         "not": {
           "required": [
             "fileRef"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "pixels"
+        ]
+      },
+      "then": {
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "type": {
+            "const": "response"
+          },
+          "status": {
+            "const": "ok"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "assetToken"
+              ]
+            },
+            {
+              "required": [
+                "assetFormat"
+              ]
+            },
+            {
+              "required": [
+                "surface"
+              ]
+            }
           ]
         }
       }

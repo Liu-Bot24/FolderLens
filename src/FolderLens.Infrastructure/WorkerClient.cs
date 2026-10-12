@@ -9,7 +9,15 @@ using Microsoft.Win32.SafeHandles;
 
 namespace FolderLens.Infrastructure;
 
-public sealed record ImageReply(WorkerEnvelope Message,string? AssetPath);
+public sealed record ImageReply(WorkerEnvelope Message,string? AssetPath)
+{
+    internal byte[]? PixelBytes {get;set;}
+    public byte[] TakePixels()
+    {
+        var bytes=PixelBytes??throw new InvalidDataException("No pixel payload available.");
+        PixelBytes=null;return bytes;
+    }
+}
 
 /// <summary>One persistent foreground worker, one active request. Cancelling invalidates and terminates that instance.</summary>
 public sealed class WorkerClient : IAsyncDisposable
@@ -19,11 +27,35 @@ public sealed class WorkerClient : IAsyncDisposable
     private readonly WorkerResources resources;
     public WorkerClient(string executable,string tempRoot,WorkerPriority priority=WorkerPriority.Foreground):this(executable,tempRoot,priority,WorkerResources.Shared){}
     internal WorkerClient(string executable,string tempRoot,WorkerPriority priority,WorkerResources resources)
-    {this.executable=executable;this.tempRoot=tempRoot;this.priority=priority;this.resources=resources;resources.MemoryPressure+=OnMemoryPressure;}
+    {
+        this.executable=executable;this.tempRoot=tempRoot;this.priority=priority;this.resources=resources;
+        idleTimer=new(_=>OnIdleTimeout(),null,Timeout.InfiniteTimeSpan,Timeout.InfiniteTimeSpan);
+        resources.MemoryPressure+=OnMemoryPressure;
+    }
     private readonly SemaphoreSlim gate=new(1,1);
     private readonly SemaphoreSlim requestGate=new(1,1);
     private readonly CancellationTokenSource lifetime=new();
     private Task idleReclaimTask=Task.CompletedTask;
+    private readonly Timer idleTimer;
+    private long lastIdleActivity;
+    private void ArmIdleReclaim()
+    {
+        // Foreground sessions carry animation/text state. Only reconstructible
+        // background decoders expire, after their last output has been consumed.
+        if(priority!=WorkerPriority.Foreground&&Volatile.Read(ref disposing)==0&&process is not null&&producedAssets.Count==0)
+        {
+            lastIdleActivity=Stopwatch.GetTimestamp();
+            idleTimer.Change(TimeSpan.FromSeconds(30),Timeout.InfiniteTimeSpan);
+        }
+    }
+    private void OnIdleTimeout()
+    {
+        if(Volatile.Read(ref disposing)!=0||!gate.Wait(0))return;
+        if(process is null||producedAssets.Count!=0){gate.Release();return;}
+        var remaining=TimeSpan.FromSeconds(30)-Stopwatch.GetElapsedTime(lastIdleActivity);
+        if(remaining>TimeSpan.Zero){gate.Release();return;} // A newer arm already owns the next deadline.
+        idleReclaimTask=ReclaimIdle();
+    }
     private int disposing;
     private readonly object disposalSync=new();
     private Task? disposalTask;
@@ -55,7 +87,6 @@ public sealed class WorkerClient : IAsyncDisposable
     private WorkerTemporaryFiles.Session? temporarySession;
     public WorkerTemporaryCleanup? LastTemporaryCleanup {get;private set;}
 
-    private readonly HashSet<string> requestedOutputs=new(StringComparer.OrdinalIgnoreCase);
     public async Task<string> GetProviderIdentity(CancellationToken cancellation)
     {
         await identityGate.WaitAsync(cancellation).ConfigureAwait(false);
@@ -82,6 +113,8 @@ public sealed class WorkerClient : IAsyncDisposable
     }
     public async Task ReleaseAsset(ImageReply reply)
     {
+        reply.PixelBytes=null;
+        if(reply.AssetPath is null)return;
         await gate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -90,12 +123,20 @@ public sealed class WorkerClient : IAsyncDisposable
             if(registered.Path!=reply.AssetPath||registered.Instance!=reply.Message.WorkerInstanceId)throw new InvalidDataException("不匹配的工作进程资产释放请求。");
             await Task.Run(()=>{if(File.Exists(registered.Path))ThumbnailCache.DeleteOwned(registered.Path);}).ConfigureAwait(false);
             producedAssets.Remove(token);
-            requestedOutputs.Remove(registered.Path);
+            ArmIdleReclaim();
         }
         finally{gate.Release();}
     }
     private bool currentAllowCloud;
     public Task<ImageReply> Request(string path,string operation,RequestContext context,ImageParameters parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)=>RequestCore(path,operation,context,parameters,cancellation,sourceStamp,false,allowCloud:allowCloud);
+    public Task<ImageReply> RequestPixels(string path,string operation,RequestContext context,ImageParameters parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp=null,bool allowCloud=false)
+    {
+        // A very large full-size camera preview can exceed the binary frame cap.
+        // Preserve the existing encoded path instead of rejecting a formerly viewable image.
+        bool pixels=operation=="fullTile"||parameters.TargetWidth is >0 and <=16384&&parameters.TargetHeight is >0 and <=16384
+            &&(long)parameters.TargetWidth*parameters.TargetHeight*4<=PixelPayload.MaximumBytes;
+        return Request(path,operation,context,parameters with{PixelOutput=pixels},cancellation,sourceStamp,allowCloud);
+    }
     public async Task<RuntimeCapabilities> GetRuntimeCapabilities(CancellationToken cancellation)
     {
         var reply=await RequestCore(null,"capabilities",new("runtime",1,1,1,1,1),new ImageParameters(),cancellation,null,false,true);
@@ -119,7 +160,8 @@ public sealed class WorkerClient : IAsyncDisposable
         {
             lease=await resources.Acquire(priority,cancellation).ConfigureAwait(false);
             await gate.WaitAsync(cancellation).ConfigureAwait(false);ownsGate=true;
-            await idleReclaimTask.ConfigureAwait(false);
+            idleTimer.Change(Timeout.InfiniteTimeSpan,Timeout.InfiniteTimeSpan);
+            var reclaim=idleReclaimTask;idleReclaimTask=Task.CompletedTask;await reclaim.ConfigureAwait(false);
             deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lease.PressureCancellation);
             double seconds=operation=="textExcerpt"?5:operation=="markdownRender"?3:operation=="capabilities"||dataOnly?30:priority!=WorkerPriority.Foreground?10:60;
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));var token=deadline.Token;
@@ -143,8 +185,8 @@ public sealed class WorkerClient : IAsyncDisposable
                 try{await File.WriteAllTextAsync(currentInputFile,JsonSerializer.Serialize(approved,WorkerProtocol.Json),token).ConfigureAwait(false);}catch{currentPath=null;throw;}
             }
             string requestId=Guid.NewGuid().ToString("N");
-            if(!dataOnly&&!fileless&&operation is not("probe" or "animationClose"))requestedOutputs.Add(Path.Combine(taskDirectory!,requestId+(operation=="markdownRender"?".html":".png")));
-            var request=new WorkerEnvelope{WorkerInstanceId=instance!,RequestId=requestId,Context=context,Operation=operation,FileRef=fileless?null:new(context.RootId+":"+Path.GetFileName(path),currentInput!),DeadlineUtc=DateTimeOffset.UtcNow.AddSeconds(seconds),ResourceBudget=new(memoryLimit,1L<<30,lease.CpuThreads),Parameters=JsonSerializer.SerializeToElement(parameters,WorkerProtocol.Json)};
+            long outputLimit=parameters is ImageParameters{PixelOutput:true}?PixelPayload.MaximumBytes:128L<<20;
+            var request=new WorkerEnvelope{WorkerInstanceId=instance!,RequestId=requestId,Context=context,Operation=operation,FileRef=fileless?null:new(context.RootId+":"+Path.GetFileName(path),currentInput!),DeadlineUtc=DateTimeOffset.UtcNow.AddSeconds(seconds),ResourceBudget=new(memoryLimit,1L<<30,lease.CpuThreads,MaxOutputBytes:outputLimit),Parameters=JsonSerializer.SerializeToElement(parameters,WorkerProtocol.Json)};
             await WorkerProtocol.Write(pipe!,request,token).ConfigureAwait(false);
             var response=await WorkerProtocol.Read(pipe!,token).ConfigureAwait(false);token.ThrowIfCancellationRequested();
             if(response.Type!="response"||response.WorkerInstanceId!=instance||response.RequestId!=requestId||response.Context!=context)throw new InvalidDataException("Stale or mismatched worker response.");
@@ -159,29 +201,45 @@ public sealed class WorkerClient : IAsyncDisposable
                 failure.Data["WorkerDiagnostic"]=new{operation,requestId,worker=instance,diagnostic=response.Metadata};
                 throw failure;
             }
-            if((dataOnly||fileless)&&response.AssetToken is not null)throw new InvalidDataException("数据响应不得包含文件资产。");
+            if((dataOnly||fileless)&&(response.AssetToken is not null||response.Pixels is not null))throw new InvalidDataException("数据响应不得包含图像资产。");
+            byte[]? pixels=null;
+            if(response.Pixels is {} layout)
+            {
+                if(parameters is not ImageParameters{PixelOutput:true}||response.AssetToken is not null||response.AssetFormat is not null)
+                    throw new InvalidDataException("Unexpected pixel response.");
+                layout.Validate(request.ResourceBudget!.MaxOutputBytes);
+                var imageParameters=(ImageParameters)parameters;
+                int maximumWidth=operation=="fullTile"?imageParameters.TileSize:imageParameters.TargetWidth;
+                int maximumHeight=operation=="fullTile"?imageParameters.TileSize:imageParameters.TargetHeight;
+                if(layout.Width>maximumWidth||layout.Height>maximumHeight)throw new InvalidDataException("Pixel response exceeds requested dimensions.");
+                pixels=GC.AllocateUninitializedArray<byte>(layout.ByteLength);
+                await pipe!.ReadExactlyAsync(pixels,token).ConfigureAwait(false);
+            }
+            else if(parameters is ImageParameters{PixelOutput:true})throw new InvalidDataException("Missing requested pixel response.");
             string? asset=null;
             if(response.AssetToken is {} assetToken)
             {
                 if(!WorkerProtocol.SafeToken(assetToken)||assetToken!=requestId)throw new InvalidDataException("Invalid asset token.");
-                asset=Path.Combine(taskDirectory!,assetToken+(operation=="markdownRender"?".html":".png"));using(var verified=ThumbnailCache.OpenOwnedRead(asset)){}producedAssets.Add(assetToken,(asset,instance!));
+                if(response.AssetFormat is not(null or "png" or "jpeg")||response.AssetFormat=="jpeg"&&parameters is not ImageParameters{CompactThumbnail:true})throw new InvalidDataException("Unexpected asset format.");
+                asset=Path.Combine(taskDirectory!,assetToken+(operation=="markdownRender"?".html":response.AssetFormat=="jpeg"?".jpg":".png"));using(var verified=ThumbnailCache.OpenOwnedRead(asset)){}producedAssets.Add(assetToken,(asset,instance!));
             }
-            token.ThrowIfCancellationRequested();return new(response,asset);
+            token.ThrowIfCancellationRequested();return new(response,asset){PixelBytes=pixels};
         }
         catch(OperationCanceledException)
         {
-            if(!ownsGate){await gate.WaitAsync().ConfigureAwait(false);ownsGate=true;}
-            await Stop().ConfigureAwait(false);
+            // Cancellation while waiting for admission has not touched this
+            // worker. Keep its warm decoder and previously handed-out assets.
+            if(ownsGate)await Stop().ConfigureAwait(false);
             if(cancellation.IsCancellationRequested)throw;
             if(diskFailure!=0)throw new WorkerResourceLimitException("工作进程临时磁盘预算已触发，任务已停止。");
             if(lease?.PressureCancellation.IsCancellationRequested==true)throw new WorkerResourceLimitException("内存保护已暂停后台媒体任务。");
             throw new TimeoutException("媒体工作进程任务超时。");
         }
-        catch{if(!ownsGate){await gate.WaitAsync().ConfigureAwait(false);ownsGate=true;}await Stop().ConfigureAwait(false);throw;}
+        catch{if(ownsGate)await Stop().ConfigureAwait(false);throw;}
         finally
         {
             if(diskGuard is not null)await diskGuard.DisposeAsync().ConfigureAwait(false);
-            deadline?.Dispose();lease?.Dispose();if(ownsGate)gate.Release();requestGate.Release();
+            deadline?.Dispose();lease?.Dispose();if(ownsGate){ArmIdleReclaim();gate.Release();}requestGate.Release();
         }
     }
     private async Task Start(CancellationToken cancellation,int threads,long memoryLimit)
@@ -216,7 +274,7 @@ public sealed class WorkerClient : IAsyncDisposable
         }
         var retired=temporarySession;temporarySession=null;
         if(retired is not null)LastTemporaryCleanup=await Task.Run(()=>WorkerTemporaryFiles.ReleaseExited(retired)).ConfigureAwait(false);
-        producedAssets.Clear();requestedOutputs.Clear();currentPath=null;currentInput=null;currentInputFile=null;taskDirectory=null;
+        producedAssets.Clear();currentPath=null;currentInput=null;currentInputFile=null;taskDirectory=null;
     }
     public ValueTask DisposeAsync()
     {lock(disposalSync)return new(disposalTask??=DisposeCore());}
@@ -226,7 +284,7 @@ public sealed class WorkerClient : IAsyncDisposable
         resources.MemoryPressure-=OnMemoryPressure;lifetime.Cancel();
         await requestGate.WaitAsync().ConfigureAwait(false);
         await gate.WaitAsync().ConfigureAwait(false);
-        try{try{await idleReclaimTask.ConfigureAwait(false);}finally{await Stop().ConfigureAwait(false);}}
+        try{await idleTimer.DisposeAsync().ConfigureAwait(false);try{await idleReclaimTask.ConfigureAwait(false);}finally{await Stop().ConfigureAwait(false);}}
         finally{gate.Release();requestGate.Release();}
     }
 }

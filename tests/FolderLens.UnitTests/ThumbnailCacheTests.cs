@@ -6,6 +6,13 @@ namespace FolderLens.UnitTests;
 
 public sealed class ThumbnailCacheTests
 {
+    [Theory][InlineData(100,128)][InlineData(144,192)][InlineData(192,192)][InlineData(193,256)][InlineData(288,384)][InlineData(577,768)]
+    public void ThumbnailTierCoversPhysicalPixelsWithoutUnnecessaryDoubling(double pixels,int expected)
+    {
+        Assert.Equal(expected,ThumbnailCache.SelectEdge(pixels));
+        new ThumbnailCacheKey("tier",1,1,1,expected,"v1").Hash();
+        Assert.Throws<ArgumentException>(()=>new ThumbnailCacheKey("tier",1,1,1,160,"v1").Hash());
+    }
     [Fact]
     public async Task SevenDayExpiryUsesLastAccessAndCountBudgetEvictsOldest()
     {

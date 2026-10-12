@@ -33,7 +33,7 @@ App 依赖 Core/Contracts，Windows 接入由 Infrastructure 提供；Core 不�
 
 一个 AppSession 拥有活动 RootSession、BrowserQuerySession、SelectionState、PreviewSession。文件集合不是 ObservableCollection<完整文件>；只存在有界页缓存和结果会话句柄。
 
-所有权链：AppSession 只扫描当前选择的文件夹及其子目录。切换文件夹时取消并等待旧范围扫描退出，再启动新范围；进入子目录也按此边界处理，不复用仍在扫描的父目录范围。进度只统计当前根的新一轮扫描。显式停止取消当前根扫描，退出时取消并等待全部任务。BrowserQuerySession 释放时取消查询、列表预取和当前页面元数据请求；PreviewSession 释放时取消图片/文本/音频；SurfaceLease 释放 CPU/GPU/共享内存资源；worker 退出立即使其所有 lease 失效。资源不能靠最终 GC 才释放。见 ADR `2026-09-16-selected-directory-scanning.md`；该决策替代旧 ADR 中跨导航继续整根扫描的行为。
+所有权链：AppSession 只扫描当前选择的文件夹及其子目录。切换文件夹时取消并等待旧范围扫描退出，再启动新范围；进入子目录也按此边界处理，不复用仍在扫描的父目录范围。进度只统计当前根的新一轮扫描。显式停止取消当前根扫描，退出时取消并等待全部任务。BrowserQuerySession 释放时取消查询、列表预取和当前页面元数据请求；PreviewSession 释放时取消图片/文本/音频。位图由当前显示或历史缓存单独持有并显式 Dispose；已完整接收的管道像素属于宿主，上传后清除字节引用，worker 退出不使它失效。仍由 worker 持有的文件资产随实例退役失效。见 ADR `2026-09-16-selected-directory-scanning.md`；该决策替代旧 ADR 中跨导航继续整根扫描的行为。
 
 ### 版本标识
 
@@ -53,7 +53,7 @@ UI 应用结果时逐项核验适用标识，而不是只比较文件路径。�
 ## 3. 进程模型
 
 App：UI、状态协调、后台数据库调度、Windows 音频播放、只读文本页布局。
-Media Worker：每实例同一时刻一个重任务；一个前台、最多两个后台，延迟启动，不在空闲时全部常驻加载原生 DLL。重解码一进程一任务方便真正取消。
+Media Worker：每实例同一时刻一个重任务；前台一个，后台按 CPU/内存预算允许 2–8 个，延迟启动。后台请求及资产释放完毕后空闲 30 秒回收；前台保留当前解码/动画状态。重解码一进程一任务方便真正取消。
 Content Worker：FFprobe/FFmpeg 子进程监督、Markdown 转换；最多一个视频封面任务；文本/目录网络阻塞操作使用独立可终止工作任务，不占用 UI。
 
 Win2D 在 App 中负责 GPU 资源和渲染；原始不可信媒体尽量在 worker 中解码。Worker 崩溃可隔离故障，但普通同用户进程并非强安全沙箱，不能对外宣传“完全沙箱化”。
@@ -85,7 +85,7 @@ IExternalPlayer.OpenAsync(ExternalOpenRequest, CancellationToken) -> OpenResult
 
 请求包含 requestId、operation、fileRef、selection/query 代次、deadlineUtc、resourceBudget、任务参数。响应包含同一上下文、status、errorCode、质量级别、实际尺寸/色彩/帧信息、surfaceDescriptor 或受控缓存产物。contracts/worker-message.schema.json 描述公共信封。
 
-像素不通过 JSON/base64 传送。小缩略图可以写应用缓存并返回受控 assetToken；大图/tiles 使用共享内存句柄或有名映射，含宽高、stride、pixelFormat、byteLength、colorSpace、alphaMode、leaseId。分配前 checked 计算 stride×height，验证容量和预算；父进程校验后 ACK，再释放或续租。worker 不能任意决定要让父进程打开的外部路径。
+像素不通过 JSON/base64 传送。显示用 `pixels` 描述位于 JSON 响应，后面紧接同一 Named Pipe 的原始 RGBA8 帧；尺寸、stride、长度、alpha 与色彩在分配前验证，最多 256 MiB。宿主完整读取后拥有字节，上传 Win2D 后释放，无共享内存租约。缩略图及超大目标框的兼容路径返回受控 assetToken，JPEG 缩略图附 assetFormat。worker 不能任意决定宿主打开的外部路径。协议细节及缓存所有权见 ADR `2026-10-12-direct-pixels-and-fit-history.md`；该决策替代未实现的共享映射传输规划。
 
 优先 worker 接收只读打开的文件句柄；无法使用句柄的库必须使用父进程批准的规范绝对路径，并在读取前后核验 fileVersion。不可传带解释语法的文件名给 ImageMagick，优先 Stream API。缓存/临时文件写在父进程分配的本地任务目录内。
 

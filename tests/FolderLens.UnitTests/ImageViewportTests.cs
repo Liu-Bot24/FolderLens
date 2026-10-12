@@ -16,4 +16,11 @@ public sealed class ImageViewportTests
         Assert.Equal(16,ImageViewport.VisibleTiles(4096,4096,1024,1024,.25,0,0,0).Count);
         Assert.Throws<ArgumentOutOfRangeException>(()=>ImageViewport.VisibleTiles(4096,4096,1024,1024,0,0,0,0));
     }
+    [Fact]public void TileBudgetCountsClippedPixelsInsteadOfAssumingEveryTileIsFull()
+    {
+        Assert.Equal(1025L*1025*4,new TileRange(0,0,1,1).PixelBytes(1025,1025));
+        Assert.Equal(4,new TileRange(1,1,1,1).PixelBytes(1025,1025));
+        Assert.Equal(0,new TileRange(1,1,0,0).PixelBytes(1025,1025));
+        Assert.Throws<ArgumentOutOfRangeException>(()=>new TileRange(-1,0,0,0).PixelBytes(1024,1024));
+    }
 }

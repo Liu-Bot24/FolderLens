@@ -87,7 +87,7 @@ public sealed partial class MainWindow
     {
         if(thumbnailCache is null||row.Item is null||row.ModifiedUtcTicks is not {} modified)return false;
         string representation=FileKinds.Raw.Contains(Path.GetExtension(row.RelativePath))?"rawEmbedded":"thumbnail";
-        foreach(int edge in new[]{1024,512,256})
+        foreach(int edge in ThumbnailCache.Edges.Reverse())
         {
             using var lease=await thumbnailCache.TryGet(new(row.Item.EntryId,row.Item.Version,modified,row.Item.Bytes,edge,providerIdentity,representation,SourceSignature:row.SourceSignature),token);if(lease is null)continue;
             using var source=lease.OpenRead();using var random=source.AsRandomAccessStream();var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,random);if(current!=selection){bitmap.Dispose();return false;}

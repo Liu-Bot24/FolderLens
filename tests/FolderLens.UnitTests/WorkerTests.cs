@@ -32,6 +32,29 @@ public sealed class WorkerTests
         var next=await worker.Request(jpeg,"fit",context with{SelectionGeneration=3},new(128,128),CancellationToken.None);
         Assert.NotEqual(first.Message.WorkerInstanceId,next.Message.WorkerInstanceId);Assert.Equal(3,next.Message.Context!.SelectionGeneration);Assert.True(File.Exists(next.AssetPath));
     }
+    [Fact] public async Task BinaryFitLeavesThePipeAlignedForProbeAndEncodedThumbnail()
+    {
+        string root=ProjectRoot(),source=Path.Combine(root,"artifacts","m0","formats","synthetic.jpeg");
+        string directory=Path.Combine(Path.GetTempPath(),"FolderLens-pixel-pipe",Guid.NewGuid().ToString("N"));
+        await using var worker=new WorkerClient(WorkerExecutable(root),directory);
+        var context=new RequestContext("fixture",1,1,1,1,1);
+        var fit=await worker.RequestPixels(source,"fit",context,new(256,256),CancellationToken.None);
+        Assert.Null(fit.AssetPath);Assert.Null(fit.Message.AssetToken);Assert.NotNull(fit.Message.Pixels);
+        byte[] bytes=fit.TakePixels();Assert.Equal(fit.Message.Pixels.ByteLength,bytes.Length);
+        Assert.All(bytes.Where((_,index)=>index%4==3),alpha=>Assert.Equal((byte)255,alpha));
+        Assert.Throws<InvalidDataException>(()=>fit.TakePixels());await worker.ReleaseAsset(fit);
+        var probe=await worker.Request(source,"probe",context,new(ReadDetails:false),CancellationToken.None);
+        Assert.Equal(fit.Message.WorkerInstanceId,probe.Message.WorkerInstanceId);Assert.Null(probe.Message.Pixels);
+        Assert.Empty(Directory.EnumerateFiles(directory,"*.png",SearchOption.AllDirectories));
+        var thumbnail=await worker.Request(source,"thumbnail",context,new(256,256,CompactThumbnail:true),CancellationToken.None);
+        Assert.Equal("jpeg",thumbnail.Message.AssetFormat);
+        byte[] jpeg=await File.ReadAllBytesAsync(thumbnail.AssetPath!);Assert.Equal(0xff,jpeg[0]);Assert.Equal(0xd8,jpeg[1]);
+        await using var cache=new ThumbnailCache(Path.Combine(directory,"cache"),new(){MinimumFreeBytes=0});await cache.Initialize();
+        var key=new ThumbnailCacheKey("fixture",1,1,1,256,"pixel-pipe-v1");
+        using(var lease=await cache.Store(key,thumbnail.AssetPath!))Assert.EndsWith(".thumb",lease.Path);
+        using(var hit=await cache.TryGet(key)){Assert.NotNull(hit);using var stream=hit.OpenRead();Assert.Equal(jpeg.Length,stream.Length);}
+        await worker.ReleaseAsset(thumbnail);
+    }
     [Theory][InlineData("gif")][InlineData("webp")][InlineData("apng")]
     public async Task ActualAnimationFramesChangeAndStayInOneFile(string extension)
     {

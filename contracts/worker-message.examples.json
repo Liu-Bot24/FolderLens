@@ -88,5 +88,44 @@
     "type": "releaseLease",
     "messageId": "m5",
     "leaseId": "lease-1"
+  },
+  {
+    "protocolMajor": 1,
+    "protocolMinor": 0,
+    "type": "response",
+    "messageId": "pixel-example",
+    "workerInstanceId": "worker-example-1",
+    "requestId": "0123456789abcdef0123456789abcdef",
+    "context": {
+      "rootId": "root-1",
+      "rootEpoch": 1,
+      "queryGeneration": 1,
+      "selectionGeneration": 1,
+      "fileVersion": 1,
+      "pathRevision": 1
+    },
+    "status": "ok",
+    "quality": "fit",
+    "pixels": {
+      "width": 2,
+      "height": 1,
+      "stride": 8,
+      "byteLength": 8,
+      "pixelFormat": "RGBA8",
+      "colorSpace": "sRGB",
+      "alphaMode": "premultiplied"
+    },
+    "metadata": {
+      "isFinal": true,
+      "sequence": 0,
+      "width": 2,
+      "height": 1,
+      "targetWidth": 256,
+      "targetHeight": 256,
+      "format": "png",
+      "isRaw": false,
+      "isAnimated": false,
+      "pages": 1
+    }
   }
 ]

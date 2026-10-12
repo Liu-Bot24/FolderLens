@@ -2,6 +2,14 @@
 
 这是worker-message.schema.json公共信封的补充。宿主和worker共享同一Contracts程序集生成的严格DTO；拒绝未知字段/operation、范围溢出、不适用的参数组合。表内参数为合同，C#命名可遵循项目惯例但JSON名字固定。
 
+## 当前显示传输（2026-10-12）
+
+`ImageParameters.pixelOutput` 默认 false；fit/fullTile/rawEmbedded/rawDevelop/page/animationOpen/animationFrame 可设置 true。成功响应的 `pixels` 指明紧密 RGBA8、sRGB、premultiplied；JSON 帧后直接发送 byteLength 字节，单帧最多 256 MiB，stride 必须等于 width×4。宿主还检查输出未超过请求目标框（fullTile 使用 tileSize）。pixels 与 assetToken/assetFormat/surface 互斥；失败不携带像素。中途断流必须关闭实例，不能继续解析下一个 JSON。它是复制传输，不适用下面的共享映射 ACK/release 租约。
+
+`compactThumbnail` 默认 false，仅 thumbnail/rawEmbedded 可用，且不能与 pixelOutput 同用。照片与无 alpha RAW 预览可返回 `assetFormat=jpeg`（token.jpg），其余返回 png（token.png）。未提供 assetFormat 的既有图片资产仍按 PNG 处理。持久缓存 `.thumb` 根据头部读取 PNG/JPEG，旧 `.png` 缓存可继续读取。
+
+这些新增字段要求 `folderlens-0.1.5-pixel-pipe` 同版本握手。接口默认仍保留编码输出；App 显示入口用 `RequestPixels`，目标框超出二进制预算时采用原有编码路径。
+
 ## 专用请求/响应
 
 | operation | parameters必需字段与限制 | ok响应载荷 |

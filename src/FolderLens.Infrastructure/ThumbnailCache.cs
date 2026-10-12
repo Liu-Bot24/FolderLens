@@ -12,7 +12,7 @@ public sealed record ThumbnailCacheKey(string EntryId,long FileVersion,long Modi
 {
     public string Hash()
     {
-        if(string.IsNullOrWhiteSpace(EntryId)||EntryId.Length>512||FileVersion<1||ModifiedUtcTicks<0||LogicalBytes<0||Edge is not(256 or 512 or 1024)||string.IsNullOrWhiteSpace(ProviderVersion)||ProviderVersion.Length>512||Representation is not("thumbnail" or "rawEmbedded" or "videoCover" or "audioCover")||OrientationPolicy.Length>128||ColorPolicy.Length>128)throw new ArgumentException("缩略图缓存键无效。");
+        if(string.IsNullOrWhiteSpace(EntryId)||EntryId.Length>512||FileVersion<1||ModifiedUtcTicks<0||LogicalBytes<0||!ThumbnailCache.Edges.Contains(Edge)||string.IsNullOrWhiteSpace(ProviderVersion)||ProviderVersion.Length>512||Representation is not("thumbnail" or "rawEmbedded" or "videoCover" or "audioCover")||OrientationPolicy.Length>128||ColorPolicy.Length>128)throw new ArgumentException("缩略图缓存键无效。");
         using var bytes=new MemoryStream();using(var writer=new BinaryWriter(bytes,Encoding.UTF8,true)){writer.Write(1);writer.Write(EntryId);writer.Write(FileVersion);writer.Write(ModifiedUtcTicks);writer.Write(LogicalBytes);writer.Write(Edge);writer.Write(ProviderVersion);writer.Write(Representation);writer.Write(OrientationPolicy);writer.Write(ColorPolicy);}
         using(var signature=new BinaryWriter(bytes,Encoding.UTF8,true))signature.Write(SourceSignature);
         return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0,checked((int)bytes.Length))));
@@ -32,7 +32,7 @@ public sealed record ThumbnailCacheStatistics(long DiskEntries,long PayloadBytes
 public sealed record ThumbnailCacheCleanup(long RemovedEntries,long RemovedBytes,int ActiveLeases);
 public sealed record ThumbnailCacheWrite(ThumbnailCacheLease? Lease,string? Warning);
 
-/// <summary>The lease protects an encoded PNG from LRU cleanup. Dispose after XAML
+/// <summary>The lease protects an encoded thumbnail from LRU cleanup. Dispose after XAML
 /// has loaded it; the memory cache below accounts encoded bytes, not UI/GPU bitmaps.</summary>
 public sealed class ThumbnailCacheLease : IDisposable
 {
@@ -49,7 +49,7 @@ public sealed class ThumbnailCacheLease : IDisposable
     public void Dispose(){var action=Interlocked.Exchange(ref release,null);if(action is null)return;pin.Dispose();action();}
 }
 
-/// <summary>Flat, application-owned persistent PNG cache with a SQLite LRU index.
+/// <summary>Flat, application-owned persistent image cache with a SQLite LRU index.
 /// All filesystem/index work runs on its bounded database executor, never the UI.</summary>
 public sealed class ThumbnailCache : IAsyncDisposable
 {
@@ -75,7 +75,8 @@ public sealed class ThumbnailCache : IAsyncDisposable
         if(this.directory.StartsWith("\\",StringComparison.Ordinal)||this.directory==Path.GetPathRoot(this.directory)?.TrimEnd('\\')||this.options.MemoryBytes<0||this.options.MemoryEntries<1||this.options.DiskBytes<1<<20||this.options.MaxEntryBytes<24||this.options.MaxEntryBytes>64L<<20||this.options.MaxAge<=TimeSpan.Zero||this.options.MinimumFreeBytes<0)throw new ArgumentException("缩略图缓存位置或预算无效。");
         WorkerResources.Shared.MemoryPressure+=OnMemoryPressure;
     }
-    public static int SelectEdge(double physicalPixels)=>physicalPixels>512?1024:physicalPixels>256?512:256;
+    public static IReadOnlyList<int> Edges {get;}=Array.AsReadOnly(new[]{128,192,256,384,512,768,1024});
+    public static int SelectEdge(double physicalPixels)=>Edges.FirstOrDefault(edge=>edge>=physicalPixels,1024);
     public async Task Initialize(CancellationToken cancellation=default)
     {
         await initialization.WaitAsync(cancellation).ConfigureAwait(false);
@@ -152,7 +153,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
             if(name.Length==102&&name[65]=='.'&&name.AsSpan(1,64).ToString().All(Uri.IsHexDigit)&&Guid.TryParseExact(name.Substring(66,32),"N",out _))DeleteOwned(file);
         }
         using var query=c.CreateCommand();query.CommandText="SELECT 1 FROM ThumbnailItems WHERE cache_key=$key";var key=query.Parameters.Add("$key",SqliteType.Text);
-        foreach(string file in Directory.EnumerateFiles(directory,"*.png",SearchOption.TopDirectoryOnly))
+        foreach(string file in Directory.EnumerateFiles(directory,"*",SearchOption.TopDirectoryOnly).Where(p=>Path.GetExtension(p) is ".png" or ".thumb"))
         {
             cancellation.ThrowIfCancellationRequested();string hash=Path.GetFileNameWithoutExtension(file);if(hash.Length!=64||!hash.All(Uri.IsHexDigit))continue;
             key.Value=hash;if(query.ExecuteScalar() is null)DeleteOwned(file);
@@ -162,7 +163,8 @@ public sealed class ThumbnailCache : IAsyncDisposable
     private string AssetPath(string hash)
     {
         if(hash.Length!=64||!hash.All(Uri.IsHexDigit))throw new InvalidDataException("缓存索引包含无效键。");
-        return Path.Combine(directory,hash+".png");
+        string current=Path.Combine(directory,hash+".thumb"),legacy=Path.Combine(directory,hash+".png");
+        return !File.Exists(current)&&File.Exists(legacy)?legacy:current;
     }
     public Task<ThumbnailCacheLease?> TryGet(ThumbnailCacheKey key,CancellationToken cancellation=default)
     {
@@ -178,7 +180,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
         string path=AssetPath(hash);SafeFileHandle? pin=null;
         try
         {
-            pin=PinFile(path,0x80000000);using(var input=OpenOwnedRead(path)){if(input.Length!=size||size>options.MaxEntryBytes)throw new InvalidDataException("缓存长度已变化或超预算。");ValidatePng(input,edge);}
+            pin=PinFile(path,0x80000000);using(var input=OpenOwnedRead(path)){if(input.Length!=size||size>options.MaxEntryBytes)throw new InvalidDataException("缓存长度已变化或超预算。");ValidateImage(input,edge);}
         }
         catch(Exception ex) when(ex is IOException or InvalidDataException or Win32Exception or UnauthorizedAccessException)
         {
@@ -203,7 +205,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
         string hash=key.Hash();return Db().Execute(c=>
         {
             using var source=new FileStream(encodedPngPath,FileMode.Open,FileAccess.Read,FileShare.Read,64*1024,FileOptions.SequentialScan);
-            ValidatePng(source,key.Edge);if(source.Length>options.MaxEntryBytes)throw new IOException("缩略图超过单项缓存预算。");source.Position=0;
+            ValidateImage(source,key.Edge);if(source.Length>options.MaxEntryBytes)throw new IOException("缩略图超过单项缓存预算。");source.Position=0;
             var existing=Get(c,hash,key.Edge);if(existing is not null)return existing;
             if(IsLeased(hash))throw new IOException("失效缩略图仍在释放，暂不写入缓存。");
             long size=source.Length;EnsureRoom(c,size,cancellation);
@@ -286,7 +288,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
             if(lease is null)return null;
             try{return await decode(lease);}
             catch(COMException error) when(error.HResult is unchecked((int)0x88982F07) or unchecked((int)0x88982F60) or unchecked((int)0x88982F61) or unchecked((int)0x88982F62))
-            { /* WIC rejected encoded PNG content; release the pin before invalidating. */ }
+            { /* WIC rejected encoded image content; release the pin before invalidating. */ }
         }
         await Invalidate(key,cancellation);return null;
     }
@@ -334,11 +336,41 @@ public sealed class ThumbnailCache : IAsyncDisposable
         string wal=Path.Combine(directory,"index.sqlite-wal");if(!File.Exists(wal)||new FileInfo(wal).Length<Math.Min(4L<<20,options.DiskBytes/16))return;
         using var cmd=c.CreateCommand();cmd.CommandText="PRAGMA wal_checkpoint(TRUNCATE)";cmd.ExecuteNonQuery();
     }
-    private static void ValidatePng(Stream stream,int edge)
+    private static void ValidateImage(Stream stream,int edge)
     {
-        Span<byte> header=stackalloc byte[24];try{stream.ReadExactly(header);}catch(EndOfStreamException error){throw new InvalidDataException("缓存输入缺少完整的 PNG 文件头。",error);}
+        Span<byte> header=stackalloc byte[24];try{stream.ReadExactly(header);}catch(EndOfStreamException error){throw new InvalidDataException("缓存输入缺少完整的图像文件头。",error);}
+        if(header[0]==0xff&&header[1]==0xd8){stream.Position=2;ValidateJpegDimensions(stream,edge);return;}
         if(!header[..8].SequenceEqual(new byte[]{137,80,78,71,13,10,26,10})||!header.Slice(12,4).SequenceEqual("IHDR"u8))throw new InvalidDataException("缓存输入不是 PNG 缩略图。");
         uint width=BinaryPrimitives.ReadUInt32BigEndian(header.Slice(16,4)),height=BinaryPrimitives.ReadUInt32BigEndian(header.Slice(20,4));if(width<1||height<1||width>edge||height>edge)throw new InvalidDataException("缓存输入超过缩略图像素等级。");
+    }
+    private static void ValidateJpegDimensions(Stream stream,int edge)
+    {
+        // Only read bounded marker metadata; actual JPEG decoding remains in WIC.
+        // Generated thumbnails are 8-bit baseline JPEG; allow progressive caches too.
+        Span<byte> length=stackalloc byte[2];Span<byte> frame=stackalloc byte[6];
+        try
+        {
+            for(int markers=0;markers<256&&stream.Position<128*1024;markers++)
+            {
+                if(stream.ReadByte()!=0xff)break;
+                int marker=stream.ReadByte();
+                while(marker==0xff&&stream.Position<128*1024)marker=stream.ReadByte();
+                if(marker<0||marker is 0 or 0xd8 or 0xd9 or 0xda||marker is >=0xd0 and <=0xd7)break;
+                if(marker==1)continue;
+                stream.ReadExactly(length);int size=BinaryPrimitives.ReadUInt16BigEndian(length);
+                if(size<2||stream.Position+size-2>stream.Length)break;
+                if(marker is 0xc0 or 0xc2)
+                {
+                    if(size<8)break;stream.ReadExactly(frame);
+                    int height=BinaryPrimitives.ReadUInt16BigEndian(frame[1..]),width=BinaryPrimitives.ReadUInt16BigEndian(frame[3..]),channels=frame[5];
+                    if(frame[0]!=8||channels is not(1 or 3)||size!=8+3*channels||width<1||height<1||width>edge||height>edge)break;
+                    return;
+                }
+                stream.Position+=size-2;
+            }
+        }
+        catch(EndOfStreamException error){throw new InvalidDataException("缓存 JPEG 文件头不完整。",error);}
+        throw new InvalidDataException("缓存 JPEG 尺寸无效或超过缩略图像素等级。");
     }
     internal static SafeFileHandle PinDirectory(string path)=>Pin(path,0x80,true);
     internal static SafeFileHandle PinOwnedFile(string path,uint access,uint creation=3,uint share=3)=>Pin(path,access,false,creation,share);

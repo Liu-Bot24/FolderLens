@@ -27,7 +27,10 @@ public sealed partial class MainWindow
     private long preparedPrefetchBytes;
     private readonly SemaphoreSlim preparedPrefetchGate=new(1,1);
     private long preparingPrefetchBytes;
-    private const long PreparedPrefetchLimit=64L*1024*1024;
+    private static long PreparedPrefetchLimit=>Math.Clamp(WorkerResources.Shared.Snapshot.SoftLimitBytes/16,64L<<20,384L<<20);
+    private const long PrefetchPayloadLimit=128L*1024*1024;
+    private const int FitHistoryEntries=14;
+    private PrefetchedImage? displayedFit;
     private readonly LinkedList<PrefetchedDetail> prefetchedDetails=[];
     private long prefetchedDetailBytes;
     private int prefetchPressurePending;
@@ -44,10 +47,11 @@ public sealed partial class MainWindow
             finally{Volatile.Write(ref prefetchPressurePending,0);}
         }))Volatile.Write(ref prefetchPressurePending,0);
     }
-    private sealed record PrefetchedDetail(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int X,int Y,byte[] Png);
+    private sealed record PrefetchedDetail(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int X,int Y,byte[] Payload,PixelPayload? Pixels=null);
     private readonly SourceFileProbe prefetchSourceProbe=new();
-    private sealed record PrefetchedImage(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int TargetWidth,int TargetHeight,byte[] Png,WorkerEnvelope Message)
+    private sealed record PrefetchedImage(string Root,long Epoch,string Path,long Version,SourceFileStamp Stamp,int TargetWidth,int TargetHeight,byte[] Payload,WorkerEnvelope Message)
     {
+        public byte[] Payload {get;set;}=Payload; // Encoded fallback or tightly packed pixels, as Message.Pixels declares.
         public CanvasBitmap? Bitmap;
         public long DeviceRevision;
         public long BitmapBytes;
@@ -58,12 +62,52 @@ public sealed partial class MainWindow
     }
     private void RemovePrefetchedImage(PrefetchedImage image)
     {
-        if(!prefetched.Remove(image))return;prefetchBytes-=image.Png.Length;ReleasePreparedImage(image);
+        if(!prefetched.Remove(image))return;prefetchBytes-=image.Payload.Length;image.Payload=[];ReleasePreparedImage(image);
     }
     private void ClearPrefetchedImages()
     {
-        foreach(var image in prefetched)ReleasePreparedImage(image);
+        foreach(var image in prefetched){image.Payload=[];ReleasePreparedImage(image);}
         prefetched.Clear();prefetchBytes=0;
+        ClearThumbnailBitmaps();
+    }
+    private void TrimFitHistory()
+    {
+        while(prefetched.Last is {} last&&(prefetched.Count>FitHistoryEntries||preparedPrefetchBytes+preparingPrefetchBytes>PreparedPrefetchLimit||prefetchBytes>PrefetchPayloadLimit))
+            RemovePrefetchedImage(last.Value);
+    }
+    private void RetainDisplayedFit()
+    {
+        var cached=displayedFit;displayedFit=null;
+        if(verifyColdSwitch||verifyEncodedPrefetch||cached is null||fitBitmap is null||previewLoading||previewReadySelection!=selection||offlinePreview
+            ||cached.DeviceRevision!=imageResourceRevision||WorkerResources.Shared.Snapshot.UnderPressure)return;
+        long cost=checked((long)fitBitmap.SizeInPixels.Width*fitBitmap.SizeInPixels.Height*4);
+        if(cost>PreparedPrefetchLimit)return;
+        foreach(var old in prefetched.Where(item=>item.Root==cached.Root&&item.Path==cached.Path).ToArray())RemovePrefetchedImage(old);
+        cached.Bitmap=fitBitmap;fitBitmap=null;cached.BitmapBytes=cost;
+        prefetched.AddFirst(cached);preparedPrefetchBytes+=cost;TrimFitHistory();
+    }
+    private void TrackDisplayedFit(WorkerEnvelope message)
+    {
+        displayedFit=null;
+        if(selected?.Item is null||Stamp(selected) is not {} stamp||message.Metadata is not {} metadata
+            ||message.Context is not {} context||context.RootId!=rootId||context.RootEpoch!=epoch||context.FileVersion!=selected.Item.Version
+            ||metadata.GetProperty("isAnimated").GetBoolean()||metadata.GetProperty("pages").GetInt32()>1&&!metadata.GetProperty("isRaw").GetBoolean())return;
+        displayedFit=new(rootId,epoch,SourcePath(selected),selected.Item.Version,stamp,
+            metadata.GetProperty("targetWidth").GetInt32(),metadata.GetProperty("targetHeight").GetInt32(),[],message){DeviceRevision=imageResourceRevision};
+    }
+    private static bool FitsTarget(PrefetchedImage image,int width,int height)
+    {
+        if(image.Message.Pixels is not {} pixels)return image.TargetWidth>=width&&image.TargetHeight>=height;
+        var metadata=image.Message.Metadata!.Value;
+        int sourceWidth=metadata.GetProperty("width").GetInt32(),sourceHeight=metadata.GetProperty("height").GetInt32();
+        double scale=Math.Min(1,Math.Min((double)width/sourceWidth,(double)height/sourceHeight));
+        return pixels.Width+1>=sourceWidth*scale&&pixels.Height+1>=sourceHeight*scale;
+    }
+    private async Task<CanvasBitmap> LoadPrefetchedBitmap(PrefetchedImage image)
+    {
+        if(image.Message.Pixels is {} pixels)return CreatePixelBitmap(pixels,image.Payload);
+        using var bytes=new MemoryStream(image.Payload,false);using var random=bytes.AsRandomAccessStream();
+        return await CanvasBitmap.LoadAsync(ImageCanvas,random);
     }
     private async Task PreparePrefetchedImage(PrefetchedImage image,CancellationToken token)
     {
@@ -73,20 +117,22 @@ public sealed partial class MainWindow
         token.ThrowIfCancellationRequested();
         if(closing||!prefetched.Contains(image))return;
         if(verifyEncodedPrefetch||image.Bitmap is not null||WorkerResources.Shared.Snapshot.UnderPressure)return;
-        long reserve=checked((long)image.TargetWidth*image.TargetHeight*4);
+        long reserve=image.Message.Pixels?.ByteLength??checked((long)image.TargetWidth*image.TargetHeight*4);
         if(reserve>PreparedPrefetchLimit)return;
-        foreach(var old in prefetched.Reverse())
-        {if(preparedPrefetchBytes+reserve<=PreparedPrefetchLimit)break;if(!ReferenceEquals(old,image))ReleasePreparedImage(old);}
+        foreach(var old in prefetched.Reverse().ToArray())
+        {if(preparedPrefetchBytes+reserve<=PreparedPrefetchLimit)break;if(!ReferenceEquals(old,image))RemovePrefetchedImage(old);}
         if(preparedPrefetchBytes+reserve>PreparedPrefetchLimit)return;
         preparingPrefetchBytes=reserve;
         long deviceRevision=imageResourceRevision;
-        using var bytes=new MemoryStream(image.Png,false);using var random=bytes.AsRandomAccessStream();
-        var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,random);
+        var bitmap=await LoadPrefetchedBitmap(image);
         if(token.IsCancellationRequested||closing||deviceRevision!=imageResourceRevision||!prefetched.Contains(image)||WorkerResources.Shared.Snapshot.UnderPressure)
         {bitmap.Dispose();return;}
         long cost=checked((long)bitmap.SizeInPixels.Width*bitmap.SizeInPixels.Height*4);
         if(preparedPrefetchBytes+cost>PreparedPrefetchLimit){bitmap.Dispose();return;}
         image.Bitmap=bitmap;image.BitmapBytes=cost;image.DeviceRevision=deviceRevision;preparedPrefetchBytes+=cost;
+        // The GPU copy now owns the drawable pixels. Retaining another raw/PNG
+        // copy for every history entry only wastes memory and GC bandwidth.
+        prefetchBytes-=image.Payload.Length;image.Payload=[];
         }
         finally{preparingPrefetchBytes=0;preparedPrefetchGate.Release();}
     }
@@ -98,7 +144,7 @@ public sealed partial class MainWindow
             try{await pending.Completed.Task.WaitAsync(TimeSpan.FromMilliseconds(200),token);}
             catch(TimeoutException){token.ThrowIfCancellationRequested();if(ReferenceEquals(pendingImagePrefetch,pending))prefetchStop.Cancel();}
         }
-        var cached=prefetched.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&item.TargetWidth>=width&&item.TargetHeight>=height);
+        var cached=prefetched.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&FitsTarget(item,width,height));
         if(cached is null)
         {
             if(verifyPreviewStage is not null&&ReferenceEquals(row,selected))
@@ -109,14 +155,22 @@ public sealed partial class MainWindow
             return null;
         }
         var stat=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
+        token.ThrowIfCancellationRequested();
+        if(!prefetched.Contains(cached)||cached.Root!=rootId||cached.Epoch!=epoch||cached.Version!=row.Item?.Version||cached.Path!=SourcePath(row))return null;
         bool current=stat==cached.Stamp;
         if(!current){RemovePrefetchedImage(cached);return null;}
+        if(cached.Bitmap is not null&&cached.DeviceRevision!=imageResourceRevision){RemovePrefetchedImage(cached);return null;}
+        if(cached.Bitmap is null&&cached.Payload.Length==0){RemovePrefetchedImage(cached);return null;}
         if(prefetched.Remove(cached))prefetched.AddFirst(cached);
         if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView($"Prefetch hit ordinal={row.Ordinal}");
         return cached;
     }
-    private async Task PresentPrefetched(PrefetchedImage cached,long current,CancellationToken token)
+    private async Task<bool> PresentPrefetched(PrefetchedImage cached,long current,CancellationToken token)
     {
+        // Source observation and presentation have an await boundary. A pressure
+        // event can retire the entry between them; treat that as a cache miss.
+        if(!prefetched.Contains(cached)||cached.Bitmap is null&&cached.Payload.Length==0)return false;
+        if(cached.Bitmap is not null&&cached.DeviceRevision!=imageResourceRevision){RemovePrefetchedImage(cached);return false;}
         CanvasBitmap bitmap;
         if(cached.Bitmap is {} prepared&&cached.DeviceRevision==imageResourceRevision)
         {
@@ -127,10 +181,13 @@ public sealed partial class MainWindow
         else
         {
             ReleasePreparedImage(cached);
-            using var bytes=new MemoryStream(cached.Png,false);using var random=bytes.AsRandomAccessStream();bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,random);
+            bitmap=await LoadPrefetchedBitmap(cached);
         }
-        if(current!=selection||token.IsCancellationRequested){bitmap.Dispose();return;}
+        RemovePrefetchedImage(cached);cached.Payload=[];
+        if(current!=selection||token.IsCancellationRequested){bitmap.Dispose();return false;}
         fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=cached.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=cached.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=cached.Message.Quality=="rawEmbedded";ApplyViewerSizing();
+        displayedFit=cached;cached.DeviceRevision=imageResourceRevision;
+        return true;
     }
     private void SchedulePrefetch(long current)
     {
@@ -169,19 +226,23 @@ public sealed partial class MainWindow
                     // Selection validates again: this warm-up does not authorize stale pixels.
                     var sourceStat=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
                     if(sourceStat!=expectedStamp)continue;
-                    bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));reply=await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",new(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1),new(width,height),token,expectedStamp,approvedCloud.Contains(CloudKey(row)));
+                    bool raw=FileKinds.Raw.Contains(Path.GetExtension(path));
+                    var context=new RequestContext(sourceRootId,sourceEpoch,sourceGeneration,current,row.Item!.Version,1);
+                    reply=verifyEncodedPrefetch
+                        ?await prefetchWorker.Request(path,raw?"rawEmbedded":"fit",context,new(width,height),token,expectedStamp,approvedCloud.Contains(CloudKey(row)))
+                        :await prefetchWorker.RequestPixels(path,raw?"rawEmbedded":"fit",context,new(width,height),token,expectedStamp,approvedCloud.Contains(CloudKey(row)));
                     pending.PixelsDecoded=true;
                     if(verifyPrefetchBarrier is not null)await verifyPrefetchBarrier(row,token);
                     if(reply.Message.Metadata!.Value.GetProperty("isAnimated").GetBoolean())continue;
-                    long encodedLength=new FileInfo(reply.AssetPath!).Length;if(encodedLength>32L*1024*1024)continue;
+                    long encodedLength=reply.Message.Pixels?.ByteLength??new FileInfo(reply.AssetPath!).Length;if(encodedLength>PrefetchPayloadLimit)continue;
                     var metadata=reply.Message.Metadata!.Value;
                     if(metadata.GetProperty("pages").GetInt32()>1&&!metadata.GetProperty("isAnimated").GetBoolean()&&!metadata.GetProperty("isRaw").GetBoolean())continue;
-                    byte[] png=await File.ReadAllBytesAsync(reply.AssetPath!,token);
+                    byte[] png=reply.Message.Pixels is not null?reply.TakePixels():await File.ReadAllBytesAsync(reply.AssetPath!,token);
                     if((current!=selection&&!ReferenceEquals(row,selected))||sourceRootId!=rootId||sourceEpoch!=epoch||sourceGeneration!=generation||!RowStillCurrent()||token.IsCancellationRequested)return;
                     var cached=new PrefetchedImage(sourceRootId,sourceEpoch,path,row.Item.Version,expectedStamp,width,height,png,reply.Message);
                     prefetched.AddFirst(cached);prefetchBytes+=png.Length;
                     if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))RecordWebView($"Prefetch ready ordinal={row.Ordinal} resolvedMissingProperties={missingProperties}");
-                    while(prefetched.Count>2||prefetchBytes>32L*1024*1024)RemovePrefetchedImage(prefetched.Last!.Value);
+                    TrimFitHistory();
                     await PreparePrefetchedImage(cached,token);
 
                 }
@@ -209,12 +270,11 @@ public sealed partial class MainWindow
             ImageReply? reply=null;
             try
             {
-                reply=await prefetchWorker!.Request(path,"fullTile",new(id,activeEpoch,generation,current,row.Item!.Version,1),new(1024,1024,TileX:x,TileY:y),token,stamp,approvedCloud.Contains(CloudKey(row)));
-                if(new FileInfo(reply.AssetPath!).Length>8L*1024*1024)continue;
-                byte[] bytes=await File.ReadAllBytesAsync(reply.AssetPath!,token);
+                reply=await prefetchWorker!.RequestPixels(path,"fullTile",new(id,activeEpoch,generation,current,row.Item!.Version,1),new(1024,1024,TileX:x,TileY:y),token,stamp,approvedCloud.Contains(CloudKey(row)));
+                byte[] bytes=reply.TakePixels();
                 if(current!=selection||rootId!=id||epoch!=activeEpoch||token.IsCancellationRequested)return;
-                prefetchedDetails.AddFirst(new PrefetchedDetail(id,activeEpoch,path,row.Item.Version,stamp,x,y,bytes));prefetchedDetailBytes+=bytes.Length;
-                while(prefetchedDetails.Count>12||prefetchedDetailBytes>32L*1024*1024){prefetchedDetailBytes-=prefetchedDetails.Last!.Value.Png.Length;prefetchedDetails.RemoveLast();}
+                prefetchedDetails.AddFirst(new PrefetchedDetail(id,activeEpoch,path,row.Item.Version,stamp,x,y,bytes,reply.Message.Pixels));prefetchedDetailBytes+=bytes.Length;
+                while(prefetchedDetails.Count>12||prefetchedDetailBytes>32L*1024*1024){prefetchedDetailBytes-=prefetchedDetails.Last!.Value.Payload.Length;prefetchedDetails.RemoveLast();}
             }
             finally{if(reply is not null)await prefetchWorker!.ReleaseAsset(reply);}
         }
@@ -224,9 +284,13 @@ public sealed partial class MainWindow
         if(Stamp(row) is not {} stamp)return null;string path=SourcePath(row);
         var cached=prefetchedDetails.FirstOrDefault(item=>item.Root==rootId&&item.Epoch==epoch&&item.Path==path&&item.Version==row.Item!.Version&&item.Stamp==stamp&&item.X==key.X&&item.Y==key.Y);
         if(cached is null)return null;token.ThrowIfCancellationRequested();
-        if(await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)))!=cached.Stamp)
-        {prefetchedDetails.Remove(cached);prefetchedDetailBytes-=cached.Png.Length;return null;}
-        using var stream=new MemoryStream(cached.Png,false);using var random=stream.AsRandomAccessStream();
+        var observed=await prefetchSourceProbe.Read(path,token,approvedCloud.Contains(CloudKey(row)));
+        token.ThrowIfCancellationRequested();
+        if(!prefetchedDetails.Contains(cached)||cached.Root!=rootId||cached.Epoch!=epoch||cached.Version!=row.Item?.Version||cached.Path!=SourcePath(row))return null;
+        if(observed!=cached.Stamp)
+        {if(prefetchedDetails.Remove(cached))prefetchedDetailBytes-=cached.Payload.Length;return null;}
+        if(cached.Pixels is {} pixels)return CreatePixelBitmap(pixels,cached.Payload);
+        using var stream=new MemoryStream(cached.Payload,false);using var random=stream.AsRandomAccessStream();
         return await CanvasBitmap.LoadAsync(ImageCanvas,random);
     }
 }

@@ -37,6 +37,7 @@ public sealed partial class MainWindow
         previewFailure=null;
         foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=fitBitmap is null?1:.4;
         if(loadingBadge is not null){loadingText!.Text="正在打开 "+selected?.Name;loadingText.MaxWidth=Math.Max(120,PreviewSurface.ActualWidth-48);loadingBadge.Visibility=Visibility.Visible;}
+        ImageCanvas.Invalidate();
     }
     private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=previewFailure is null?Visibility.Collapsed:Visibility.Visible;}
     private void ClearResultSelection()
@@ -61,6 +62,6 @@ public sealed partial class MainWindow
         if(actual.Width+1>=Math.Min(sourceWidth,sourceWidth*scale)&&actual.Height+1>=Math.Min(sourceHeight,sourceHeight*scale))return;
         int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*raster)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*raster));
         if(rotation%2!=0)(width,height)=(height,width);int heldRotation=rotation;
-        var reply=await previewWorker!.Request(SourcePath(row),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}
+        var reply=await previewWorker!.RequestPixels(SourcePath(row),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}
     }
 }

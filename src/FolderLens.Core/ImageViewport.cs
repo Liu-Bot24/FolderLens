@@ -3,6 +3,14 @@ namespace FolderLens.Core;
 public readonly record struct TileRange(int FirstX,int FirstY,int LastX,int LastY)
 {
     public long Count=>LastX<FirstX||LastY<FirstY?0:checked((long)(LastX-FirstX+1)*(LastY-FirstY+1));
+    public long PixelBytes(int width,int height,int tileSize=1024)
+    {
+        if(width<1||height<1||tileSize<1||FirstX<0||FirstY<0)throw new ArgumentOutOfRangeException(nameof(width));
+        if(Count==0)return 0;
+        long left=Math.Min(width,checked((long)FirstX*tileSize)),top=Math.Min(height,checked((long)FirstY*tileSize));
+        long right=Math.Min(width,checked(((long)LastX+1)*tileSize)),bottom=Math.Min(height,checked(((long)LastY+1)*tileSize));
+        return checked((right-left)*(bottom-top)*4);
+    }
 }
 
 public static class ImageViewport

@@ -396,7 +396,7 @@ public sealed partial class MainWindow
     private HashSet<(int X,int Y)> MagnifierTileKeys()
     {
         var range=ImageViewport.VisibleTiles(sourceWidth,sourceHeight,PreviewSurface.MagnifierWidth,PreviewSurface.MagnifierHeight,PressZoomScale,(sourceWidth/2-lensNativeCenter.X)*PressZoomScale,(sourceHeight/2-lensNativeCenter.Y)*PressZoomScale,rotation,padding:0);
-        if(range.Count>128)throw new InvalidDataException("当前区域过大，无法一次读取全部原图细节，请继续放大后查看。");
+        if(range.PixelBytes(checked((int)sourceWidth),checked((int)sourceHeight))>TileBitmapLimit)throw new InvalidDataException("当前区域过大，无法一次读取全部原图细节，请继续放大后查看。");
         var keys=new HashSet<(int,int)>();for(int y=range.FirstY;y<=range.LastY;y++)for(int x=range.FirstX;x<=range.LastX;x++)keys.Add((x,y));return keys;
     }
     private async Task LoadMagnifierPixels()
@@ -404,6 +404,11 @@ public sealed partial class MainWindow
         if(lensLoading||lensStop is null||selected?.Item is null)return;lensLoading=true;long revision=viewerGestureRevision,current=selection;var token=lensStop.Token;
         try
         {
+            if(AnimationButton.Visibility!=Visibility.Visible&&FitContainsOriginalPixels())
+            {
+                foreach(var old in lensTiles.Values)old.Dispose();lensTiles.Clear();lensPending=false;
+                PreviewSurface.InvalidateMagnifier();PreviewSurface.SetMagnifierQuality($"{viewerPressZoom.Percent:0.##}% · 原图细节");return;
+            }
             if(rawPreviewOnly)
             {
                 await EnsureEmbeddedRawResolution(selected,current,token,nativeSize:true);
@@ -422,7 +427,7 @@ public sealed partial class MainWindow
                     var bitmap=!animated&&imagePage==0?await ReadPrefetchedDetail(selected,key,token):null;
                     if(bitmap is null)
                     {
-                        var reply=await previewWorker!.Request(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?animationFrameIndex:0,TileX:key.X,TileY:key.Y,PageIndex:imagePage),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
+                        var reply=await previewWorker!.RequestPixels(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?animationFrameIndex:0,TileX:key.X,TileY:key.Y,PageIndex:imagePage),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
                         bitmap=await LoadRenderedBitmap(reply);
                     }
                     if(token.IsCancellationRequested||revision!=viewerGestureRevision||current!=selection){bitmap.Dispose();return;}

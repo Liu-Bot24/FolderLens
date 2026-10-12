@@ -149,14 +149,22 @@ internal sealed class StaticDecoder : IDisposable
         if(data.Slice(4,4).SequenceEqual("ftyp"u8)){using var stream=new MemoryStream(data.ToArray(),false);return BmffImageFormat.Read(stream);}
         throw new NotSupportedException("Unsupported image container.");
     }
-    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false,bool fastPreview=false)
+    public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false,bool fastPreview=false,ImageOutput? outputTarget=null)
     {
         if(targetWidth is <1 or >16384 || targetHeight is <1 or >16384 || tileX<0 || tileY<0)throw new ArgumentOutOfRangeException(nameof(targetWidth));
         CheckVersion();
         if(IsRaw && embedded)
         {
             var preview=RawDecoder.Decode(raw!,false);using var decoded=RawPreviewImage.Decode(preview.Data,preview.Info,rawFlip);using var oriented=decoded.Autorot();
-            WriteFit(oriented,destination,targetWidth,targetHeight);return(oriented.Width,oriented.Height,"rawEmbedded");
+            if(preview.Info.Type==1)
+            {
+                // Embedded camera JPEGs need the same shrink-on-load path as
+                // standalone JPEGs. The header image above supplies original dimensions.
+                using var small=VImage.ThumbnailBuffer(preview.Data,targetWidth,height:targetHeight,size:Enums.Size.Down,outputProfile:"srgb",failOn:Enums.FailOn.Error);
+                if(outputTarget is not null)outputTarget.Write(small);else small.WriteToFile(destination);
+            }
+            else WriteFit(oriented,destination,targetWidth,targetHeight,outputTarget:outputTarget);
+            CheckVersion();return(oriented.Width,oriented.Height,"rawEmbedded");
         }
         if(IsRaw && image is null)
         {
@@ -167,33 +175,37 @@ internal sealed class StaticDecoder : IDisposable
         if(full)
         {
             int x=checked(tileX*1024),y=checked(tileY*1024);if(x>=Width || y>=Height)throw new ArgumentOutOfRangeException(nameof(tileX));
-            using var tile=image!.Crop(x,y,Math.Min(1024,Width-x),Math.Min(1024,Height-y));using var output=tile.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
+            using var tile=image!.Crop(x,y,Math.Min(1024,Width-x),Math.Min(1024,Height-y));using var output=tile.Colourspace(Enums.Interpretation.Srgb);
+            if(outputTarget is not null)outputTarget.Write(output);else output.WriteToFile(destination);
         }
-        else if(thumbnail&&Format=="jpeg")
+        else if(Format=="jpeg")
         {
             // Load and resize together so libvips can use JPEG shrink-on-load.
             // Keep a separate stream: the full-resolution decoder may be used later.
             using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
             using var small=VImage.ThumbnailStream(input,targetWidth,height:targetHeight,size:Enums.Size.Down,outputProfile:"srgb",failOn:Enums.FailOn.Error);
-            using var output=small.Colourspace(Enums.Interpretation.Srgb);output.WriteToFile(destination);
+            using var output=small.Colourspace(Enums.Interpretation.Srgb);
+            if(outputTarget is not null)outputTarget.Write(output);
+            else if(fastPreview)output.Pngsave(destination,compression:1,filter:Enums.ForeignPngFilter.None);
+            else output.WriteToFile(destination);
         }
-        else WriteFit(image!,destination,targetWidth,targetHeight,fastPreview);
+        else WriteFit(image!,destination,targetWidth,targetHeight,fastPreview,outputTarget);
         CheckVersion();return(Width,Height,IsRaw?"rawDeveloped":full?"full":"fit");
     }
-    private static void WriteFit(VImage input,string destination,int width,int height,bool fastPreview=false)
+    private static void WriteFit(VImage input,string destination,int width,int height,bool fastPreview=false,ImageOutput? outputTarget=null)
     {
         double scale=Math.Min(1,Math.Min((double)width/input.Width,(double)height/input.Height));
         using var small=ResizeForDisplay(input,scale);using var output=small.Colourspace(Enums.Interpretation.Srgb);
-        if(fastPreview)output.Pngsave(destination,compression:1,filter:Enums.ForeignPngFilter.None);
+        if(outputTarget is not null)outputTarget.Write(output);
+        else if(fastPreview)output.Pngsave(destination,compression:1,filter:Enums.ForeignPngFilter.None);
         else output.WriteToFile(destination);
     }
     internal byte[] MeasureFitPixels(int width,int height)
     {
         if(image is null||IsRaw)throw new NotSupportedException("Static decoded image required.");
-        CheckVersion();double scale=Math.Min(1,Math.Min((double)width/image.Width,(double)height/image.Height));
-        using var small=ResizeForDisplay(image,scale);using var output=small.Colourspace(Enums.Interpretation.Srgb);
-        using var rgba=output.HasAlpha()?output.Copy():output.Bandjoin(255);
-        byte[] pixels=rgba.WriteToMemory<byte>();CheckVersion();return pixels;
+        var output=new ImageOutput("",true,false,PixelPayload.MaximumBytes);
+        Render("",width,height,outputTarget:output);
+        return output.Bytes??throw new InvalidDataException("Missing diagnostic pixel output.");
     }
     internal static VImage ResizeForDisplay(VImage input,double scale)
     {

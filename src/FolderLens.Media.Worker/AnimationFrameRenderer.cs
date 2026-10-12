@@ -15,7 +15,7 @@ internal static class AnimationFrameRenderer
         return File.Exists(adjacent)?adjacent:Path.Combine(AppContext.BaseDirectory,"ffmpeg.exe");
     }
 
-    public static async Task RenderTile(string path,string format,int width,int height,ImageParameters parameters,string destination,CancellationToken token)
+    public static async Task RenderTile(string path,string format,int width,int height,ImageParameters parameters,string destination,CancellationToken token,ImageOutput? output=null)
     {
         if(parameters.FrameIndex<0||parameters.PageIndex!=0||parameters.TileX<0||parameters.TileY<0)throw new ArgumentOutOfRangeException(nameof(parameters));
         int x=checked(parameters.TileX*1024),y=checked(parameters.TileY*1024);
@@ -32,17 +32,29 @@ internal static class AnimationFrameRenderer
             using var decoded=VImage.NewFromStream(frameStream,access:Enums.Access.Random,kwargs:new VOption{{"page",parameters.FrameIndex},{"n",1}});
             using var display=StaticDecoder.PrepareDisplay(decoded);
             if(display.Width!=width||display.Height!=height)throw new InvalidDataException("Animation canvas changed.");
-            using var tile=display.Crop(x,y,tileWidth,tileHeight);using var srgb=tile.Colourspace(Enums.Interpretation.Srgb);srgb.WriteToFile(destination);return;
+            using var tile=display.Crop(x,y,tileWidth,tileHeight);using var srgb=tile.Colourspace(Enums.Interpretation.Srgb);
+            if(output is not null)output.Write(srgb);else srgb.WriteToFile(destination);return;
         }
         if(parameters.FrameIndex>=ReadApngFrameCount(path))throw new ArgumentOutOfRangeException(nameof(parameters.FrameIndex));
-        var start=new ProcessStartInfo(FfmpegExecutable()){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,WorkingDirectory=AppContext.BaseDirectory};
-        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-threads",Math.Max(1,NetVips.NetVips.Concurrency-2).ToString(System.Globalization.CultureInfo.InvariantCulture),"-i",path,"-an","-vf",$"select=eq(n\\,{parameters.FrameIndex}),crop={tileWidth}:{tileHeight}:{x}:{y}","-frames:v","1","-threads","1","-filter_threads","1","-pix_fmt","rgba","-f","image2","-y",destination})start.ArgumentList.Add(argument);
+        var start=new ProcessStartInfo(FfmpegExecutable()){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,RedirectStandardOutput=output is not null,WorkingDirectory=AppContext.BaseDirectory};
+        foreach(string argument in new[]{"-nostdin","-v","error","-protocol_whitelist","file,pipe","-f","apng","-ignore_loop","1","-threads",Math.Max(1,NetVips.NetVips.Concurrency-2).ToString(System.Globalization.CultureInfo.InvariantCulture),"-i",path,"-an","-vf",$"select=eq(n\\,{parameters.FrameIndex}),crop={tileWidth}:{tileHeight}:{x}:{y}","-frames:v","1","-threads","1","-filter_threads","1","-pix_fmt","rgba","-f",output is null?"image2":"rawvideo","-y",output is null?destination:"pipe:1"})start.ArgumentList.Add(argument);
         using var process=Process.Start(start)??throw new IOException("APNG decoder unavailable.");
         var errors=Task.Run(async()=>{var result=new StringBuilder();char[] buffer=new char[2048];int count;while((count=await process.StandardError.ReadAsync(buffer))>0)if(result.Length<16384)result.Append(buffer,0,Math.Min(count,16384-result.Length));return result.ToString();});
         try
         {
+            byte[]? pixels=null;
+            if(output is not null)
+            {
+                pixels=new byte[checked(tileWidth*tileHeight*4)];
+                await process.StandardOutput.BaseStream.ReadExactlyAsync(pixels,token);
+            }
             await process.WaitForExitAsync(token);string detail=await errors;
-            if(process.ExitCode!=0||!File.Exists(destination)||new FileInfo(destination).Length==0)throw new InvalidDataException("APNG current frame decode failed: "+detail);
+            if(process.ExitCode!=0||output is null&&(!File.Exists(destination)||new FileInfo(destination).Length==0))throw new InvalidDataException("APNG current frame decode failed: "+detail);
+            if(output is not null)
+            {
+                using var frame=VImage.NewFromMemory(pixels!,tileWidth,tileHeight,4,Enums.BandFormat.Uchar);
+                using var srgb=frame.Copy(interpretation:Enums.Interpretation.Srgb);output.Write(srgb);
+            }
         }
         finally
         {

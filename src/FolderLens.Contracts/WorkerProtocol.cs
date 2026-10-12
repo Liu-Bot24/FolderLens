@@ -11,7 +11,22 @@ public sealed record InputReference(string EntryId,string InputToken);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ResourceBudget(long MemoryBytes=2L*1024*1024*1024,long TempBytes=1024L*1024*1024,long CpuThreads=4,long MaxPixels=300_000_000,long MaxOutputBytes=128L*1024*1024);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record ImageParameters(int TargetWidth=1920,int TargetHeight=1080,int FrameIndex=0,int TileX=0,int TileY=0,int TileSize=1024,int Level=0,int PageIndex=0,long CompletedLoops=0,bool ReadDetails=true);
+public sealed record ImageParameters(int TargetWidth=1920,int TargetHeight=1080,int FrameIndex=0,int TileX=0,int TileY=0,int TileSize=1024,int Level=0,int PageIndex=0,long CompletedLoops=0,bool ReadDetails=true,bool PixelOutput=false,bool CompactThumbnail=false);
+
+/// <summary>One tightly packed binary frame immediately following its JSON response.
+/// This is copied through the authenticated pipe, not a shared-memory lease.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record PixelPayload(int Width,int Height,int Stride,int ByteLength,string PixelFormat="RGBA8",string ColorSpace="sRGB",string AlphaMode="premultiplied")
+{
+    public const int MaximumBytes=256*1024*1024;
+    public void Validate(long maximumBytes=MaximumBytes)
+    {
+        if(Width is <1 or >16384||Height is <1 or >16384||Stride!=checked(Width*4)
+            ||ByteLength!=checked((long)Stride*Height)||ByteLength<1||ByteLength>Math.Min(maximumBytes,MaximumBytes)
+            ||PixelFormat!="RGBA8"||ColorSpace!="sRGB"||AlphaMode!="premultiplied")
+            throw new InvalidDataException("Invalid pixel payload.");
+    }
+}
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ApprovedInput(string Path,long? Length=null,long? LastWriteTicks=null,bool AllowCloud=false,string? SourceSignature=null)
 {
@@ -56,13 +71,15 @@ public sealed record WorkerEnvelope
     public string? ErrorCode {get;init;}
     public string? Quality {get;init;}
     public string? AssetToken {get;init;}
+    public string? AssetFormat {get;init;}
+    public PixelPayload? Pixels {get;init;}
     public JsonElement? Metadata {get;init;}
     public string? LeaseId {get;init;}
 }
 public static class WorkerProtocol
 {
     public const int MaxControlBytes=1024*1024;
-    public const string BuildId="folderlens-0.1.4-demand-metadata";
+    public const string BuildId="folderlens-0.1.5-pixel-pipe";
     public static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web){UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow,DefaultIgnoreCondition=JsonIgnoreCondition.WhenWritingNull,MaxDepth=32};
     public static async Task Write(Stream stream,WorkerEnvelope message,CancellationToken cancellation=default)
     {
