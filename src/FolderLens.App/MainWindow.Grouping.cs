@@ -21,11 +21,18 @@ public sealed partial class MainWindow
     }
     private void ToggleFolderGroup(object sender,RoutedEventArgs args)
     {
-        if(sender is FrameworkElement{DataContext:BrowserFileGroup group})ToggleFolderGroup(group);
+        if(sender is not FrameworkElement{DataContext:BrowserFileGroup group})return;
+        AcceptBrowserInteraction();
+        // A header click takes over even inside the wheel/touch settling window.
+        // RevealBrowserRow uses the other overload so navigation keeps ownership.
+        browserMovementPending=false;browserScrollPointer=null;browserMovementTimer?.Stop();
+        try{ToggleFolderGroup(group);}
+        finally{PublishPendingViewport();}
     }
     private void FolderGroupContext(object sender,Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs args)
     {
         if(sender is not FrameworkElement{DataContext:BrowserFileGroup group} element)return;
+        AcceptBrowserInteraction();
         string path=group.Info.RelativePath;long revision=rootChangeVersion;
         var menu=new MenuFlyout();var hide=new MenuFlyoutItem{Text="隐藏此文件夹及子文件夹",IsEnabled=path.Length>0};
         hide.Click+=async(_,_)=>
@@ -75,7 +82,11 @@ public sealed partial class MainWindow
                 }
                 visibleOffset+=visibleGroup.Info.Count;
             }
-            ActiveBrowser.UpdateLayout();FindScrollViewer(ActiveBrowser)?.ChangeView(null,offset,null,true);
+            ActiveBrowser.UpdateLayout();
+            // This explicit collapse has completed its projection/layout. Adopt
+            // the reachable position, not a stale offset to chase as data grows.
+            double reachable=Math.Min(offset,Math.Max(0,FindScrollViewer(ActiveBrowser)?.ScrollableHeight??0));
+            RestorePublicationViewport(ActiveBrowser,reachable);UpdateCurrentFolderHeader();
         }
         finally{syncingBrowserSelection=previous;if(ownsPublicationRows)ReleasePublicationRows();UpdateBrowserEmptyState();}
     }

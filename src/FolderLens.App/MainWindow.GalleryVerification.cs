@@ -31,7 +31,7 @@ public sealed partial class MainWindow
         verifyPublicationFailure=error=>publicationFailures.Add(new{ms=watch.Elapsed.TotalMilliseconds,phase,queryRequest,notification=error.Data["FolderLens.RangeNotification"],error=error.ToString()});
         verifyRowRecycling=(row,reason)=>{releases.Enqueue(new{ms=watch.Elapsed.TotalMilliseconds,phase,ordinal=row.Ordinal,queryRequest,queryBusy,updatingBrowser,reason});while(releases.Count>24)releases.Dequeue();};
         var observed=new Dictionary<FileRow,(object? Image,DependencyObject Container)>();
-        (FileRow Row,double Top)? stationaryAnchor=null;int stationaryMissing=0,stationaryMoved=0;
+        double? stationaryOffset=null;int stationaryMoved=0;
         int reservedSlots=Environment.GetCommandLineArgs().Contains("--verify-gallery-two-slots")?Math.Max(0,WorkerResources.Shared.ThumbnailConcurrency-2):0;
         for(int i=0;i<reservedSlots;i++)await thumbnailSlots.WaitAsync();
         long peakProcessTree=0;
@@ -55,21 +55,14 @@ public sealed partial class MainWindow
             if(firstImage<0&&viewport.Any(item=>item.Row.Thumbnail is not null))firstImage=watch.Elapsed.TotalMilliseconds;
             if(phase=="scanning")
             {
-                if(keepBrowserStart)
+                stationaryOffset??=CapturePublicationViewport(FilesGrid);
+                double actual=FindScrollViewer(FilesGrid)?.VerticalOffset??0;
+                double expected=Math.Min(stationaryOffset.Value,FindScrollViewer(FilesGrid)?.ScrollableHeight??0);
+                if(Math.Abs(actual-expected)>2)
                 {
-                    if((FindScrollViewer(FilesGrid)?.VerticalOffset??0)>1)stationaryMoved++;
+                    stationaryMoved++;
+                    if(anchorFaults.Count<8)anchorFaults.Add(new{ms=watch.Elapsed.TotalMilliseconds,expectedOffset=expected,actualOffset=actual,queryRequest,queryBusy,updatingBrowser});
                 }
-                else if(stationaryAnchor is {} anchor&&results?.Contains(anchor.Row)==true)
-                {
-                    var entry=viewport.FirstOrDefault(item=>ReferenceEquals(item.Row,anchor.Row));
-                    if(entry.Container is not FrameworkElement element)stationaryMissing++;
-                    else if(Math.Abs(element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y-anchor.Top)>2)
-                    {
-                        stationaryMoved++;
-                        if(anchorFaults.Count<8)anchorFaults.Add(new{ms=watch.Elapsed.TotalMilliseconds,expectedTop=anchor.Top,actualTop=element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y,ordinal=anchor.Row.Ordinal,queryRequest,queryBusy,updatingBrowser,viewWidth=FilesGrid.ActualWidth,viewHeight=FilesGrid.ActualHeight,offset=FindScrollViewer(FilesGrid)?.VerticalOffset});
-                    }
-                }
-                else stationaryAnchor=CapturePublicationViewport(FilesGrid);
             }
             var current=viewport.Select(item=>item.Row).ToHashSet();
             foreach(var old in observed.Keys.Where(row=>!current.Contains(row)).ToArray())observed.Remove(old);
@@ -129,8 +122,8 @@ public sealed partial class MainWindow
             // and no theme animation. Identity alone is not a visible-frame change.
             bool animatedRecycling=FilesGrid.ItemContainerTransitions is {Count:>0}||FilesList.ItemContainerTransitions is {Count:>0};
             report["fileListThemeAnimationsDisabled"]=!animatedRecycling;
-            report["status"]=cleared==0&&!animatedRecycling&&stationaryMissing==0&&stationaryMoved==0?"PASS":"FAIL";
-            if(cleared>0||animatedRecycling||stationaryMissing>0||stationaryMoved>0)throw new InvalidOperationException("后台更新导致视口跳位、消失、缩略图被清空或重复触发主题动画。");
+            report["status"]=cleared==0&&!animatedRecycling&&stationaryMoved==0?"PASS":"FAIL";
+            if(cleared>0||animatedRecycling||stationaryMoved>0)throw new InvalidOperationException("后台更新导致视口跳位、缩略图被清空或重复触发主题动画。");
         }
         finally
         {
@@ -145,8 +138,8 @@ public sealed partial class MainWindow
             report["publicationFailures"]=publicationFailures;report["faults"]=faults;report["itemsSourceRebindings"]=rebindings;
             report["firstRowsMs"]=firstRows;report["firstThumbnailOnRenderingMs"]=firstImage;report["screens"]=screens;
             report["frames"]=frames;report["continuousVisibleThumbnailClears"]=cleared;report["continuousVisibleContainerChanges"]=replaced;
-            report["stationaryAnchorMissingFrames"]=stationaryMissing;report["stationaryAnchorMovedFrames"]=stationaryMoved;
-            report["stationaryAnchorFaults"]=anchorFaults;
+            report["stationaryOffsetMovedFrames"]=stationaryMoved;
+            report["stationaryOffsetFaults"]=anchorFaults;
             report["hostPeakWorkingSetBytes"]=Process.GetCurrentProcess().PeakWorkingSet64;
             report["measurementScope"]="Read-only real source; fresh app catalog/cache; OS cache not cleared; offscreen WinUI Rendering observations, not physical display Present timing. No source paths or image content in this report.";
         }

@@ -5,27 +5,23 @@ public sealed partial class MainWindow
     private async Task VerifyPromotionViewport(string source,Dictionary<string,object> report)
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
-        ClearResultSelection();CancelThumbnails();AttachBrowserView(null);results?.Dispose();results=null;
-        if(resultHandle is not null)await catalog!.ReleaseSnapshot(resultHandle.Id);resultHandle=null;
-        (FileRow Row,double Top)? before=null;
+        await ResetFirstPageFixture();ResetBrowserStart();
+        double before=0;
         verifyFirstPageBarrier=async _=>
         {
-            Shell.UpdateLayout();FindScrollViewer(FilesGrid)?.ChangeView(null,0,null,true);await Task.Delay(50);
-            if(keepBrowserStart&&CapturePublicationViewport(FilesGrid) is not null)throw new InvalidOperationException("初次打开不应保留任意文件锚点。");
-            // This half checks preservation after actual browsing intent. The
-            // unopened/top-pinned state is covered separately by viewport-loading.
-            AcceptBrowserInteraction();
+            Shell.UpdateLayout();RestoreBrowserStart(FilesGrid);await Task.Delay(50);
             before=CapturePublicationViewport(FilesGrid);
-            if(before is null)throw new InvalidOperationException("No first-page viewport anchor.");
+            if(Math.Abs(before)>1)throw new InvalidOperationException("新目录首批没有保持数值偏移0。");
+            // Selection alone must not release the top position.
+            AcceptBrowserInteraction();
+            if(!keepBrowserStart)throw new InvalidOperationException("点击图片错误地放弃了顶部位置。");
         };
         try
         {
             await RefreshQuery(preserveViewport:true,scanPreview:true);await Task.Delay(100);
-            var element=before is {} saved?FilesGrid.ContainerFromItem(saved.Row) as Microsoft.UI.Xaml.FrameworkElement:null;
-            if(element is null)throw new InvalidOperationException("First-page anchor disappeared.");
-            double after=element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y;
-            report["beforeTop"]=before!.Value.Top;report["afterTop"]=after;
-            if(Math.Abs(after-before.Value.Top)>1)throw new InvalidOperationException("Promotion scrolled a stationary first-page anchor.");
+            double after=FindScrollViewer(FilesGrid)?.VerticalOffset??0;
+            report["beforeOffset"]=before;report["afterOffset"]=after;
+            if(Math.Abs(after-before)>1)throw new InvalidOperationException("首批升级改变了数值滚动偏移。");
             report["status"]="PASS";
         }
         finally{verifyFirstPageBarrier=null;}

@@ -185,6 +185,7 @@ public sealed partial class MainWindow
     }
     private void RestoreBrowserPosition()
     {
+        BeginBrowserMovement();
         var list=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;list.UpdateLayout();
         if(selected is not null){RevealBrowserRow(selected);list.SelectedItem=selected;}
         if(selected is not null&&selected.Ordinal==browserEntryOrdinal)FindScrollViewer(list)?.ChangeView(null,browserOffset,null,true);

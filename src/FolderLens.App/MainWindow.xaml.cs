@@ -456,7 +456,13 @@ public sealed partial class MainWindow : Window
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
-        bool PreviewInterrupted()=>scanPreview&&BrowserSequenceLocked;
+        bool PreviewInterrupted()
+        {
+            if(!scanPreview)return false;
+            if(BrowserSequenceLocked)return true;
+            if(!browserMovementPending)return false;
+            viewportPublicationPending=true;return true;
+        }
         if(PreviewInterrupted())return;
         var completion=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);queryCompletion=completion.Task;
         queryStop.Cancel();queryStop.Dispose();queryStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var queryToken=queryStop.Token;long gen=scanPreview?generation:++generation,request=++queryRequest;queryBusy=true;
@@ -470,8 +476,7 @@ public sealed partial class MainWindow : Window
             if(!IsCurrent()||closing)return;
             if(!scanPreview){metadataDemandStop.Cancel();metadataDemandStop.Dispose();metadataDemandStop=new();_=StartMetadataRefresh();}if(!scanPreview)PreferScanDirectory(rootId,filter.DirectoryScope);attempt=attempt with{FilterHash=QueryFilterHash(filter)};ShowActiveFilters(filter);if(!scanPreview)ResultSummary.Text="正在更新浏览结果…";string? previousPath=BrowserPath(selected);long restoreSelectionRequest=browserSelectionRequest;
             var activeList=DetailsMode.IsChecked==true?(ListViewBase)FilesList:FilesGrid;
-            int firstVisible=activeList.ItemsPanelRoot switch{ItemsWrapGrid panel=>panel.FirstVisibleIndex,ItemsStackPanel panel=>panel.FirstVisibleIndex,_=>-1};
-            string? viewportPath=preserveViewport&&firstVisible>=0&&firstVisible<activeList.Items.Count?BrowserPath(activeList.Items[firstVisible] as FileRow):null;
+
             if(resultHandle is null&&!FirstPageMatches(filter))
             {
                 var first=await catalog.ReadFirstPage(filter,queryToken,deferGrouping:filter.Grouping.Enabled);if(!IsCurrent()||closing||PreviewInterrupted())return;
@@ -489,7 +494,6 @@ public sealed partial class MainWindow : Window
             if(!IsCurrent()||closing||PreviewInterrupted())return;
             queryPhase="readSnapshot";IReadOnlyList<SnapshotGroup> groups=filter.Grouping.Enabled?await catalog.ReadGroups(handle.Id,queryToken):Array.Empty<SnapshotGroup>();
             if(!IsCurrent()||closing||PreviewInterrupted())return;
-            if(preserveViewport)viewportPath=VisibleBrowserPath()??viewportPath;
             var previousHandle=resultHandle;var previousResults=results;
             bool promoting=previousHandle is null&&FirstPageMatches(filter);
             bool incremental=scanPreview&&previousHandle is not null&&previousResults is not null&&((browserGroups is not null)==(groups.Count>0));
@@ -511,6 +515,9 @@ public sealed partial class MainWindow : Window
                 if(!IsCurrent()||closing)return;
                 previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             }
+            // All preparation branches can await database work. A wheel/drag
+            // arriving during first-page matching must postpone publication too.
+            if(!IsCurrent()||closing||PreviewInterrupted())return;
             // Restore the pre-drag selection while the old ordinals still refer
             // to the old files. Incremental publication may reuse ItemsSource.
             CancelMarquee();previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
@@ -518,7 +525,7 @@ public sealed partial class MainWindow : Window
             bool adopted=false;
             activeList=ActiveBrowser;
             long publicationInteraction=browserInteractionVersion;
-            var publicationAnchor=incremental||promoting?CapturePublicationViewport(activeList):null;
+            double publicationOffset=preserveViewport||scanPreview?CapturePublicationViewport(activeList):0;
             if(incremental||promoting)publicationRows=visible.ToHashSet();
             queryPhase="publish";updatingBrowser=true;
             long publicationStart=Stopwatch.GetTimestamp();
@@ -553,7 +560,7 @@ public sealed partial class MainWindow : Window
                     long notificationAllocated=publicationStages is null?0:GC.GetAllocatedBytesForCurrentThread();
                     int notificationGc0=publicationStages is null?0:GC.CollectionCount(0),notificationGc1=publicationStages is null?0:GC.CollectionCount(1),notificationGc2=publicationStages is null?0:GC.CollectionCount(2);
                     UpdateBrowserResults(nextResults,groups,stableChanges,publicationStages);
-                    RestorePublicationViewport(activeList,publicationAnchor);
+                    RestorePublicationViewport(activeList,publicationOffset);
                     Stage("notifications");
                     if(publicationStages is not null)
                     {
@@ -572,10 +579,10 @@ public sealed partial class MainWindow : Window
                     var changes=PromoteFirstPage(nextResults,matching);
                     CancelObsoleteThumbnails(nextResults);resultHandle=handle;results=nextResults;candidateLease=null;adopted=true;
                     if(groups.Count==0)UpdatePromotedFirstPage(nextResults,changes);else BindPromotedFirstPage(nextResults,groups);
-                    RestorePublicationViewport(activeList,publicationAnchor);
+                    RestorePublicationViewport(activeList,publicationOffset);
                     foreach(var item in visibleContainers.ToArray())if(nextResults.IndexOf(item.Value)>=0)_=LoadThumbnail(item.Key.View,item.Value);
                 }
-                else{ClearResultSelection();CancelThumbnails();resultHandle=handle;results=nextResults;candidateLease=null;adopted=true;BindBrowserResults(results,groups);RestoreBrowserStart(ActiveBrowser);}
+                else{ClearResultSelection();CancelThumbnails();resultHandle=handle;results=nextResults;candidateLease=null;adopted=true;BindBrowserResults(results,groups);RestorePublicationViewport(ActiveBrowser,publicationOffset);}
                 if(viewerStrip is not null)viewerStrip.ItemsSource=results;
                 verifyPublishFault?.Invoke();
                 lastAppliedFilter=filter;
@@ -617,10 +624,6 @@ public sealed partial class MainWindow : Window
                     else{ActiveBrowser.SelectedItem=null;ClearResultSelection();}
                 }
             }
-            // Promotion already restored the row's exact pixel offset above.
-            // A second leading-edge scroll would discard that offset.
-            else if(!keepBrowserStart&&!incremental&&!promoting&&!string.IsNullOrEmpty(viewportPath)&&await catalog.FindOrdinal(handle.Id,viewportPath,queryToken) is {} anchor&&IsCurrent()&&publicationInteraction==browserInteractionVersion)
-                activeList.ScrollIntoView(results[(int)anchor],ScrollIntoViewAlignment.Leading);
             if(IsCurrent()&&!closing){RestoreBrowserStart(ActiveBrowser);await TryRestoreBrowserView();QueueThumbnailViewport();}
         }
         catch(OperationCanceledException ex){await RecordQueryFailure(ex,queryPhase,attempt,candidateLease);}
@@ -1340,7 +1343,7 @@ public sealed partial class MainWindow : Window
         }
     }
     private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
-    private void Navigate(int delta){AcceptBrowserInteraction();int count=results?.Count??firstPageSequence.Length;if(count==0)return;int index=selected is null?(delta<0?count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,count-1);var row=results is not null?(FileRow)results[index]!:firstPageSequence[index];RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(row);}}
+    private void Navigate(int delta){AcceptBrowserInteraction(changesViewport:true);int count=results?.Count??firstPageSequence.Length;if(count==0)return;int index=selected is null?(delta<0?count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,count-1);var row=results is not null?(FileRow)results[index]!:firstPageSequence[index];RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(row);}}
     private void Previous(object sender,RoutedEventArgs e)=>Navigate(-1);private void Next(object sender,RoutedEventArgs e)=>Navigate(1);
     private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;try{writePreviewClipboard(SourcePath(selected));}catch(Exception error){ShowError(error);}}
     private async void Reveal(object sender,RoutedEventArgs e)

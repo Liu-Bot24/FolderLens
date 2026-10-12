@@ -15,7 +15,7 @@ public sealed partial class MainWindow
             if(resultHandle is not null||firstPageSequence.Length==0||browserGroups is not null)
                 throw new InvalidOperationException("分组完成前没有提供可用首批。");
             Shell.UpdateLayout();RestoreBrowserStart(FilesGrid);
-            if(!keepBrowserStart||CapturePublicationViewport(FilesGrid) is not null||(FindScrollViewer(FilesGrid)?.VerticalOffset??0)>1)
+            if(!keepBrowserStart||Math.Abs(CapturePublicationViewport(FilesGrid))>1||(FindScrollViewer(FilesGrid)?.VerticalOffset??0)>1)
                 throw new InvalidOperationException("未操作的新目录没有保持开头。");
             chosen=firstPageSequence.First(row=>row.Kind=="image");
             await SelectPreview(chosen);

@@ -25,7 +25,7 @@ public sealed partial class MainWindow
     private void InitializeMarquee()
     {
         marqueeBox=new Border{BorderThickness=new Thickness(1),BorderBrush=new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent)),Background=new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(45,0,120,215)),Visibility=Visibility.Collapsed};
-        marqueeOverlay=new Canvas{IsHitTestVisible=false};marqueeOverlay.Children.Add(marqueeBox);Grid.SetRow(marqueeOverlay,2);BrowserPane.Children.Add(marqueeOverlay);
+        marqueeOverlay=new Canvas{IsHitTestVisible=false};marqueeOverlay.Children.Add(marqueeBox);Grid.SetRow(marqueeOverlay,3);BrowserPane.Children.Add(marqueeOverlay);
         foreach(var view in new ListViewBase[]{FilesList,FilesGrid})
         {
             view.AddHandler(UIElement.PointerPressedEvent,new PointerEventHandler(MarqueePressed),true);

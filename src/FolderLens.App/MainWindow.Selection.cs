@@ -18,10 +18,13 @@ public sealed partial class MainWindow
     }
     private async Task<bool> SelectBrowserOrdinal(VirtualResults source,int index,CancellationToken cancellation)
     {
-        CancelIncomingPreparation();AcceptBrowserInteraction();
+        CancelIncomingPreparation();AcceptBrowserInteraction(changesViewport:true);
         long request=++browserSelectionRequest;
         var row=(FileRow)source[index]!;await EnsureCurrentRowLoaded(row,cancellation,foreground:true);
         if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||results?.Contains(row)!=true)return false;
+        // The page read can outlive the input debounce. Reclaim positioning at
+        // the actual navigation point, after its asynchronous boundary.
+        BeginBrowserMovement();
         var view=ActiveBrowser;
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
         try{RevealBrowserRow(row);view.SelectedItem=row;view.ScrollIntoView(row);}finally{syncingBrowserSelection=prior;}
@@ -84,7 +87,7 @@ public sealed partial class MainWindow
     }
     private void ToggleView(object sender,RoutedEventArgs args)
     {
-        if(controlsReady&&!suppressFilters)CancelIncomingPreparation();
+        if(controlsReady&&!suppressFilters){CancelIncomingPreparation();AcceptBrowserInteraction(changesViewport:true);}
         bool details=DetailsMode.IsChecked==true;
         UpdatePathPresentationControl();
         if(controlsReady&&!suppressFilters&&ReferenceEquals(sender,DetailsMode))categoryDetailViews[Tag(Category)]=details;

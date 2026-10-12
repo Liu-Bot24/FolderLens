@@ -26,15 +26,21 @@ public sealed partial class MainWindow
         {
             view.LayoutUpdated+=ThumbnailLayoutUpdated;
             view.AddHandler(UIElement.PointerPressedEvent,new PointerEventHandler(BrowserPointerIntent),true);
-            view.AddHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler(BrowserPointerIntent),true);
+            view.AddHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler(BrowserWheelIntent),true);
+            view.AddHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(BrowserPointerReleased),true);
+            view.AddHandler(UIElement.PointerCaptureLostEvent,new PointerEventHandler(BrowserPointerReleased),true);
             view.AddHandler(UIElement.KeyDownEvent,new KeyEventHandler(BrowserKeyIntent),true);
         }
         if(FindScrollViewer(view) is not {} scroll||thumbnailScrollers.GetValueOrDefault(view)==scroll)return;
         if(thumbnailScrollers.TryGetValue(view,out var previous))previous.ViewChanged-=ThumbnailViewChanged;
         thumbnailScrollers[view]=scroll;scroll.ViewChanged+=ThumbnailViewChanged;
     }
-    private void ThumbnailLayoutUpdated(object? sender,object args)=>QueueThumbnailViewport();
-    private void ThumbnailViewChanged(object? sender,ScrollViewerViewChangedEventArgs args)=>QueueThumbnailViewport();
+    private void ThumbnailLayoutUpdated(object? sender,object args){QueueBrowserOffset();QueueThumbnailViewport();}
+    private void ThumbnailViewChanged(object? sender,ScrollViewerViewChangedEventArgs args)
+    {
+        if(ReferenceEquals(sender,FindScrollViewer(ActiveBrowser))&&browserMovementPending)ContinueBrowserMovement();
+        QueueBrowserOffset();QueueThumbnailViewport();
+    }
     private bool HasThumbnailViewport(FileRow row)=>visibleContainers.Any(pair=>ReferenceEquals(pair.Value,row)&&IsThumbnailInViewport(pair.Key.View,row));
     private void QueueThumbnailViewport()
     {
@@ -44,6 +50,7 @@ public sealed partial class MainWindow
         {
             thumbnailDispatchQueued=false;
             if(closing||updatingBrowser)return;
+            UpdateCurrentFolderHeader();
             foreach(var view in thumbnailViews.ToArray())ObserveThumbnailViewport(view);
             foreach(var pair in thumbnailRequests.ToArray())
                 // Do not kill a decoder on every wheel tick. Retire queued work;
@@ -65,11 +72,13 @@ public sealed partial class MainWindow
         {
             view.LayoutUpdated-=ThumbnailLayoutUpdated;
             view.RemoveHandler(UIElement.PointerPressedEvent,new PointerEventHandler(BrowserPointerIntent));
-            view.RemoveHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler(BrowserPointerIntent));
+            view.RemoveHandler(UIElement.PointerWheelChangedEvent,new PointerEventHandler(BrowserWheelIntent));
+            view.RemoveHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(BrowserPointerReleased));
+            view.RemoveHandler(UIElement.PointerCaptureLostEvent,new PointerEventHandler(BrowserPointerReleased));
             view.RemoveHandler(UIElement.KeyDownEvent,new KeyEventHandler(BrowserKeyIntent));
         }
         foreach(var scroll in thumbnailScrollers.Values)scroll.ViewChanged-=ThumbnailViewChanged;
-        thumbnailViews.Clear();thumbnailScrollers.Clear();
+        thumbnailViews.Clear();thumbnailScrollers.Clear();realizedFolderHeaders.Clear();browserMovementTimer?.Stop();browserOffsetOwner=null;
     }
 
     private async Task EnsureCurrentRowLoaded(FileRow row,CancellationToken token,bool foreground=false)
