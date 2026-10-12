@@ -11,6 +11,7 @@ public readonly record struct SourceFileStamp(long Length,long ModifiedUtcTicks,
     public void Validate(){if(Length<0||ModifiedUtcTicks<0||ModifiedUtcTicks>DateTime.MaxValue.Ticks)throw new ArgumentException("源文件版本戳无效。");}
 }
 public sealed class WorkerResourceLimitException(string message):IOException(message);
+public sealed class WorkerTemporaryAccessException(string message,Exception? inner=null):IOException(message,inner);
 public sealed record WorkerResourceSnapshot(long ProcessTreeBytes,long AvailablePhysicalBytes,long SoftLimitBytes,long HardLimitBytes,int ActiveForeground,int ActiveBackground,int Pending,int CpuThreads,bool UnderPressure,bool MeasurementComplete);
 
 /// <summary>One application-wide admission queue. Worker jobs enforce the hard memory

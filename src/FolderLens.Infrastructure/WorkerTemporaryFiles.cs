@@ -18,6 +18,7 @@ internal static class WorkerTemporaryFiles
         private readonly List<SafeFileHandle> pins;
         private SafeFileHandle? activeLock;
         private Owner owner;
+        internal Action<string>? BeforeInspectEntry {get;set;}
         public string Path {get;}
         internal Session(string path,string instance,List<SafeFileHandle> pins)
         {
@@ -35,7 +36,11 @@ internal static class WorkerTemporaryFiles
         public void ReleaseInstancePin(){if(pins.Count>0){pins[^1].Dispose();pins.RemoveAt(pins.Count-1);}}
         public long CheckBudget(long limit)
         {
-            int visited=0,unsafeEntries=0;long bytes=Size(Path,ref visited,ref unsafeEntries,0);if(unsafeEntries>0)throw new IOException("工作进程临时目录包含不安全链接。");if(bytes>limit)throw new WorkerResourceLimitException("工作进程临时空间超过预算。");return bytes;
+            foreach(var pin in pins)ThumbnailCache.ValidateDirectoryPin(pin);
+            int visited=0,unsafeEntries=0;long bytes=Size(Path,ref visited,ref unsafeEntries,0,BeforeInspectEntry);
+            foreach(var pin in pins)ThumbnailCache.ValidateDirectoryPin(pin);
+            if(unsafeEntries>0)throw new WorkerTemporaryAccessException("工作进程临时目录包含不安全或不可访问的对象。");
+            if(bytes>limit)throw new WorkerResourceLimitException("工作进程临时空间超过预算。");return bytes;
         }
         public void Dispose(){activeLock?.Dispose();activeLock=null;foreach(var pin in pins)pin.Dispose();pins.Clear();}
     }
@@ -101,18 +106,30 @@ internal static class WorkerTemporaryFiles
         try{using var process=Process.GetProcessById(pid);return !process.HasExited&&process.StartTime.ToUniversalTime().Ticks==start;}
         catch(ArgumentException){return false;}catch(InvalidOperationException){return false;}catch(System.ComponentModel.Win32Exception){return true;}
     }
-    private static long Size(string directory,ref int visited,ref int unsafeEntries,int depth)
+    private static long Size(string directory,ref int visited,ref int unsafeEntries,int depth,Action<string>? beforeInspect=null)
     {
-        if(depth>12)throw new IOException("临时目录层级超过清理预算。");long bytes=0;using var pin=ThumbnailCache.PinDirectory(directory);
+        if(depth>12)throw new WorkerResourceLimitException("临时目录层级超过预算。");long bytes=0;using var pin=ThumbnailCache.PinDirectory(directory);
         foreach(string entry in Directory.EnumerateFileSystemEntries(directory))
         {
-            if(++visited>10000)throw new IOException("临时文件数量超过预算。");
+            if(++visited>10000)throw new WorkerResourceLimitException("临时文件数量超过预算。");
             if(System.IO.Path.GetFileName(entry)==Lock)continue;
-            try{if((File.GetAttributes(entry)&FileAttributes.Directory)!=0)bytes=checked(bytes+Size(entry,ref visited,ref unsafeEntries,depth+1));else bytes=checked(bytes+ThumbnailCache.OwnedFileLength(entry));}
+            beforeInspect?.Invoke(entry);
+            try{if((File.GetAttributes(entry)&FileAttributes.Directory)!=0)bytes=checked(bytes+Size(entry,ref visited,ref unsafeEntries,depth+1,beforeInspect));else bytes=checked(bytes+ThumbnailCache.OwnedFileLength(entry));}
+            catch(WorkerResourceLimitException){throw;}
+            catch(Exception ex) when(IsMissingEntry(ex))
+            {
+                // Only this enumerated child disappeared. The pinned parent
+                // and all recursive ancestors must still be valid directories.
+                ThumbnailCache.ValidateDirectoryPin(pin);
+            }
             catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException){unsafeEntries++;}
         }
+        ThumbnailCache.ValidateDirectoryPin(pin);
         return bytes;
     }
+    internal static bool IsMissingEntry(Exception error)=>error is FileNotFoundException or DirectoryNotFoundException
+        ||error is System.ComponentModel.Win32Exception{NativeErrorCode:2 or 3}
+        ||error is IOException&&error.HResult is unchecked((int)0x80070002) or unchecked((int)0x80070003);
     private static void DeleteContents(string directory,ref int visited,ref int unsafeEntries,int depth)
     {
         if(depth>12)throw new IOException("临时目录层级超过清理预算。");

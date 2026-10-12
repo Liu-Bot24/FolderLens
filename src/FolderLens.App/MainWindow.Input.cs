@@ -106,7 +106,8 @@ public sealed partial class MainWindow
     private bool CanRunViewerBinding(ViewerBinding binding,DependencyObject? source)
     {
         if(closing||ViewerPopupOwnsInput(source))return false;
-        if(binding.Action is ViewerAction.Help or ViewerAction.Find or ViewerAction.OpenFolder or ViewerAction.FocusPath or ViewerAction.Refresh or ViewerAction.BackFolder or ViewerAction.ForwardFolder or ViewerAction.ParentFolder)return true;
+        if(binding.Action==ViewerAction.ParentFolder)return CanNavigateParent;
+        if(binding.Action is ViewerAction.Help or ViewerAction.Find or ViewerAction.OpenFolder or ViewerAction.FocusPath or ViewerAction.Refresh or ViewerAction.BackFolder or ViewerAction.ForwardFolder)return true;
         if(binding.Action==ViewerAction.ToggleFullScreen)return selected is not null||results?.Count>0;
         if(binding.Action is ViewerAction.ReturnBrowser)return immersive||fullScreen;
         if(ViewerEditorOwnsInput(source))return false;
@@ -175,7 +176,7 @@ public sealed partial class MainWindow
                 case ViewerAction.FocusPath: await ReturnToBrowser();FocusIfForeground(RootPath,FocusState.Keyboard);RootPath.SelectAll();return;
                 case ViewerAction.BackFolder: await NavigateHistory(false);return;
                 case ViewerAction.ForwardFolder: await NavigateHistory(true);return;
-                case ViewerAction.ParentFolder: await ReturnToBrowser();ParentRoot(this,new());return;
+                case ViewerAction.ParentFolder: await NavigateParent();return;
                 case ViewerAction.Refresh: RefreshRoot(this,new());return;
                 case ViewerAction.Slideshow: ToggleSlideshow(this,new());return;
                 case ViewerAction.ToggleFullScreen: if(fullScreen)await LeaveFullScreen(toBrowser:false);else await EnterFullScreen();return;
@@ -245,7 +246,14 @@ public sealed partial class MainWindow
     private void RememberViewerScale()
     {viewerCustomPhysicalScale=EffectiveScale()*Shell.XamlRoot.RasterizationScale;if(viewerSizing==ViewerSizing.Locked){viewerLockedIntent=viewerScaleIntent;viewerLockedPhysicalScale=viewerCustomPhysicalScale;_=SaveViewerPreferences();}}
     private async Task RefreshViewerPixels()
-    {ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}if(zoom>0)await LoadVisibleTiles();else QualityLabel.Text=rawPreviewOnly?"当前显示相机预览":"清晰适应屏幕";}
+    {
+        ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();
+        if(offlinePreview){QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return;}
+        if(zoom>0){await LoadVisibleTiles();return;}
+        long current=selection,layout=previewLayoutRevision;int angle=rotation;var token=selectionStop.Token;
+        if(selected is {} row&&!animationRunning)await EnsureFitResolution(row,current,token);
+        if(current==selection&&layout==previewLayoutRevision&&rotation==angle&&zoom<=0&&!offlinePreview&&!token.IsCancellationRequested&&!closing)QualityLabel.Text=rawPreviewOnly?"当前显示相机预览":"清晰适应屏幕";
+    }
     private void ApplyViewerScaleIntent()
     {
         zoom=viewerScaleIntent switch{ViewerScaleIntent.Default or ViewerScaleIntent.Fit=>0,ViewerScaleIntent.Width=>ImageCanvas.ActualWidth/(rotation%2==0?sourceWidth:sourceHeight),ViewerScaleIntent.Height=>ImageCanvas.ActualHeight/(rotation%2==0?sourceHeight:sourceWidth),_=>viewerCustomPhysicalScale/Shell.XamlRoot.RasterizationScale};

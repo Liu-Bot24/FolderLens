@@ -107,9 +107,9 @@ public sealed partial class MainWindow
             });return Task.CompletedTask;
         },lifetime.Token);}catch(Exception ex){DispatcherQueue.TryEnqueue(()=>ShowError(ex));}
     }
-    private ExclusionSpec[] ScanExclusions()
+    private ExclusionSpec[] ScanExclusions(FilterSpec? submitted=null)
     {
-        var exclusions=(advanced?.Exclusions??[]).ToList();string relative=Path.GetRelativePath(root,dataDirectory);
+        var exclusions=(submitted?.Exclusions??advanced?.Exclusions??[]).ToList();string relative=Path.GetRelativePath(root,dataDirectory);
         if(relative!="."&&!Path.IsPathRooted(relative)&&!relative.Split('\\','/').Contains(".."))exclusions.Add(new(relative,"skipScan"));
         return exclusions.ToArray();
     }
@@ -156,6 +156,7 @@ public sealed partial class MainWindow
         CancelPendingSearch();
         // A delayed TextChanged must not replace an explicitly submitted sequence.
         if(Search.Text==submittedSearch)return;
+        CancelPendingFileOpen();
         long revision=searchRevision,navigation=directoryNavigationRequest;
         var timer=DispatcherQueue.CreateTimer();timer.Interval=searchTimer?.Interval??TimeSpan.FromMilliseconds(280);timer.IsRepeating=false;searchTimer=timer;
         async Task Tick()
@@ -218,9 +219,27 @@ public sealed partial class MainWindow
     {
         includedCollectionIds=[];excludedCollectionIds=[];UpdateCollectionFilterLabel();
         suppressFilters=true;advanced=null;Search.Text="";SetFormatChoices(new());RawMode.SelectedIndex=0;AnimationMode.SelectedIndex=0;ShowHidden.IsChecked=false;PendingView.IsChecked=false;
-        MinSize.Value=MaxSize.Value=MinWidth.Value=MinHeight.Value=double.NaN;suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
+        MinSize.Value=MaxSize.Value=double.NaN;MinWidth.Text=MinHeight.Text="";suppressFilters=false;FilterFlyout.Hide();await ApplyBrowserFilters();
     }
-    private async void ParentRoot(object sender,RoutedEventArgs e){if(activeCollectionId is not null){ManageCollections(sender,e);return;}var parent=Directory.GetParent(BrowsedDirectory);if(parent is not null){RootPath.Text=parent.FullName;await OpenRoot(parent.FullName);}}
+    private string? BrowserParentDirectory=>activeCollectionId is null&&browserRootReady&&rootId.Length>0&&root.Length>0
+        ?Directory.GetParent(BrowsedDirectory)?.FullName:null;
+    private bool CanNavigateParent=>controlsReady&&!closing&&!replacingRoot&&catalog is not null
+        &&(activeCollectionId is not null||BrowserParentDirectory is not null);
+    private async void ParentRoot(object sender,RoutedEventArgs e)
+    {
+        try{await NavigateParent();}
+        catch(OperationCanceledException){}catch(Exception error){ShowError(error);}
+    }
+    private async Task NavigateParent()
+    {
+        if(!CanNavigateParent)return;
+        long version=rootChangeVersion;string? collection=activeCollectionId,parent=BrowserParentDirectory;
+        await ReturnToBrowser();
+        if(!CanNavigateParent||version!=rootChangeVersion||collection!=activeCollectionId)return;
+        if(collection is not null){ManageCollections(this,new());return;}
+        if(parent is null||parent!=BrowserParentDirectory)return;
+        RootPath.Text=parent;await OpenRoot(parent);
+    }
     private void StartPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=true;PaneDivider.CapturePointer(e.Pointer);}
     private void ResizePane(object sender,PointerRoutedEventArgs e){if(resizingPane&&!immersive)PreviewColumn.Width=new GridLength(Math.Clamp(e.GetCurrentPoint(BodyGrid).Position.X,220,Math.Max(220,Math.Min(650,BodyGrid.ActualWidth*.5))));}
     private void EndPaneResize(object sender,PointerRoutedEventArgs e){resizingPane=false;PaneDivider.ReleasePointerCapture(e.Pointer);}
@@ -281,16 +300,6 @@ public sealed partial class MainWindow
     }
     private async Task NavigateFolder(FolderNode folder)
     {if(folder.PageOffset is not null||string.Equals(folder.Path,BrowsedDirectory,StringComparison.Ordinal))return;await OpenRoot(folder.Path);}
-    private async Task OpenPath(string path)
-    {
-        if(Directory.Exists(path)){RootPath.Text=path;await OpenRoot(path);return;}
-        string parent=Path.GetDirectoryName(Path.GetFullPath(path))!;suppressFilters=true;SelectTag(Category,"all");Search.Text="";advanced=null;suppressFilters=false;RootPath.Text=parent;await OpenRoot(parent);
-        if(closing||catalog is null||resultHandle is not {} handle||results is not {} source||!string.Equals(BrowsedDirectory,parent,StringComparison.OrdinalIgnoreCase))return;
-        long rootVersion=rootChangeVersion;var token=queryStop.Token;
-        long? ordinal=await catalog.FindOrdinal(handle.Id,Path.GetRelativePath(root,path),token);
-        if(closing||token.IsCancellationRequested||rootVersion!=rootChangeVersion||!ReferenceEquals(resultHandle,handle)||!ReferenceEquals(results,source))return;
-        if(ordinal is >=0&&ordinal<source.Count)await SelectBrowserOrdinal(source,(int)ordinal.Value,token);
-    }
     private async void CopyFileReference(object sender,RoutedEventArgs e)
     {
         await SetFileClipboard(false);

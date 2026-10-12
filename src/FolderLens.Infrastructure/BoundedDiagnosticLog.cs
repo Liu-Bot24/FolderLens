@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using FolderLens.Core;
 
 namespace FolderLens.Infrastructure;
 
@@ -8,10 +9,12 @@ namespace FolderLens.Infrastructure;
 /// and errors; never include media or credentials, or upload these logs.</summary>
 public sealed class BoundedDiagnosticLog : IAsyncDisposable
 {
-    private readonly Channel<object> events=Channel.CreateBounded<object>(new BoundedChannelOptions(128){FullMode=BoundedChannelFullMode.DropOldest,SingleReader=true});
+    private readonly Channel<object>? events;
     private readonly Task writer;
     public BoundedDiagnosticLog(string directory)
     {
+        if(!DevelopmentDiagnostics.Enabled){writer=Task.CompletedTask;return;}
+        events=Channel.CreateBounded<object>(new BoundedChannelOptions(128){FullMode=BoundedChannelFullMode.DropOldest,SingleReader=true});
         writer=Task.Run(async()=>
         {
             try
@@ -29,6 +32,6 @@ public sealed class BoundedDiagnosticLog : IAsyncDisposable
         });
     }
     public string? Failure {get;private set;}
-    public void Write(string kind,object details)=>events.Writer.TryWrite(new{utc=DateTimeOffset.UtcNow,kind,details});
-    public async ValueTask DisposeAsync(){events.Writer.TryComplete();await writer.ConfigureAwait(false);}
+    public void Write(string kind,object details)=>events?.Writer.TryWrite(new{utc=DateTimeOffset.UtcNow,kind,details});
+    public async ValueTask DisposeAsync(){events?.Writer.TryComplete();await writer.ConfigureAwait(false);}
 }

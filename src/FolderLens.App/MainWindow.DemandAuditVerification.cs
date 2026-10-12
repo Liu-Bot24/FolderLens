@@ -64,7 +64,10 @@ public sealed partial class MainWindow
         var released=Enumerable.Range(0,4).Select(_=>new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
         var retiredRequests=new List<CancellationTokenSource>();reads=0;
         verifyVideoPropertiesRead=async _=>{int index=reads++;entered[index].TrySetResult();await released[index].Task;};
-        var loading=LoadRowProperties(row);
+        // The preceding assertion deliberately loaded these properties. Request
+        // a fresh read so this phase actually reaches the recycle barrier.
+        var loading=LoadRowProperties(row,refresh:true);
+        if(loading.IsCompleted)throw new InvalidOperationException("属性回收夹具未建立正在读取的请求。");
         try
         {
             for(int index=0;index<4;index++)

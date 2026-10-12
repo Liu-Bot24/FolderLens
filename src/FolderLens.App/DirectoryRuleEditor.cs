@@ -15,14 +15,24 @@ internal sealed class DirectoryRuleEditor
     private readonly ComboBox target=Options("匹配内容",("文件夹名称","name"),("相对路径","path"));
     private readonly ComboBox match=Options("匹配方式",("完全相同","equals"),("包含","contains"),("开头是","startsWith"),("通配符","wildcard"),("正则表达式（高级）","regex"));
     private readonly TextBox pattern=new(){Header="名称或规则",PlaceholderText="例如：仅预览"};
+    private readonly TextBox basePath=new(){Header="这条旧相对路径规则的原根目录",PlaceholderText=@"例如 D:\照片",Visibility=Visibility.Collapsed};
     private readonly CheckBox children=new(){Content="包括匹配文件夹的子文件夹",IsChecked=true};
     private int editingIndex=-1;
     private readonly Button add=new(){Content="添加规则"};
     private readonly Button cancelEdit=new(){Content="取消编辑",Visibility=Visibility.Collapsed};
-    internal DirectoryRuleEditor(DirectoryRule[] initial,Func<Task<string?>> pick,Func<DirectoryRule[],CancellationToken,Task<DirectoryRulePreview>> preview,CancellationToken cancellation)
+    internal DirectoryRuleEditor(DirectoryRule[] initial,Func<Task<string?>> pick,Func<DirectoryRule[],CancellationToken,Task<DirectoryRulePreview>> preview,CancellationToken cancellation,bool collection=false)
     {
         rules=initial.Distinct().ToList();
-        View.Children.Add(new TextBlock{Text="按文件夹名称或相对路径筛选，不区分大小写，不检查文件名。例外保留优先于排除。规则只改变显示，不需要重新扫描。",TextWrapping=TextWrapping.Wrap});
+        if(collection)
+        {
+            target.Items.Clear();target.Items.Add(new ComboBoxItem{Content="文件夹名称",Tag="name"});target.Items.Add(new ComboBoxItem{Content="完整源目录路径",Tag="sourcePath"});
+            if(initial.Any(rule=>rule.Target=="path"))target.Items.Add(new ComboBoxItem{Content="旧相对路径（指定原根目录）",Tag="path"});
+            target.SelectedIndex=0;
+        }
+        else if(initial.Any(rule=>rule.Target=="sourcePath"))target.Items.Add(new ComboBoxItem{Content="完整源目录路径",Tag="sourcePath"});
+        void UpdateBasis()=>basePath.Visibility=Tag(target)=="path"&&(collection||basePath.Text.Length>0)?Visibility.Visible:Visibility.Collapsed;
+        target.SelectionChanged+=(_,_)=>UpdateBasis();
+        View.Children.Add(new TextBlock{Text=collection?"按来源文件夹名称或完整源目录路径筛选，不区分大小写，不检查文件名。例外保留优先于排除。刷新或重新打开收藏不会改变规则的起点。":"按文件夹名称或相对路径筛选，不区分大小写，不检查文件名。例外保留优先于排除。规则只改变显示，不需要重新扫描。",TextWrapping=TextWrapping.Wrap});
         View.Children.Add(list);
         var remove=new Button{Content="删除选中规则",IsEnabled=false};
         var edit=new Button{Content="编辑选中规则",IsEnabled=false};
@@ -32,22 +42,24 @@ internal sealed class DirectoryRuleEditor
         {
             if(list.SelectedIndex<0)return;
             editingIndex=list.SelectedIndex;var rule=rules[editingIndex];
-            Select(action,rule.Action);Select(target,rule.Target);Select(match,rule.Match);pattern.Text=rule.Pattern;children.IsChecked=rule.IncludeChildren;
+            Select(action,rule.Action);Select(target,rule.Target);Select(match,rule.Match);pattern.Text=rule.Pattern;children.IsChecked=rule.IncludeChildren;basePath.Text=rule.BasePath??"";UpdateBasis();
             add.Content="保存规则";cancelEdit.Visibility=Visibility.Visible;pattern.Focus(FocusState.Programmatic);
         };
-        View.Children.Add(action);View.Children.Add(target);View.Children.Add(match);View.Children.Add(pattern);View.Children.Add(children);
+        View.Children.Add(action);View.Children.Add(target);View.Children.Add(match);View.Children.Add(pattern);View.Children.Add(basePath);View.Children.Add(children);
         View.Children.Add(new TextBlock{Text="通配符：* 匹配任意长度，? 匹配一个字符，都不跨越文件夹层级。例如 cache* 匹配 cache 和 cache01。子文件夹由上方勾选项控制。",TextWrapping=TextWrapping.Wrap});
         var browse=new Button{Content="选择文件夹…"};browse.Click+=async(_,_)=>
         {
-            try{string? path=await pick();if(path is null||cancellation.IsCancellationRequested)return;target.SelectedIndex=1;match.SelectedIndex=0;pattern.Text=path;}
+            try{string? path=await pick();if(path is null||cancellation.IsCancellationRequested)return;target.SelectedIndex=1;match.SelectedIndex=0;pattern.Text=path;basePath.Text="";UpdateBasis();}
             catch(Exception ex){feedback.Text=UserMessages.Error(ex);}
         };View.Children.Add(browse);
         add.Click+=(_,_)=>
         {
             try
             {
-                var rule=new DirectoryRule(Tag(action),Tag(target),Tag(match),pattern.Text.Trim(),children.IsChecked==true);rule.Validate();
-                if(editingIndex>=0&&rules.Where((_,i)=>i!=editingIndex).Any(other=>other.Action==rule.Action&&other.Target==rule.Target&&other.Match==rule.Match&&other.Pattern==rule.Pattern&&other.IncludeChildren==rule.IncludeChildren))throw new ArgumentException("已经存在相同规则，请编辑原规则或取消本次修改。");
+                string? basis=Tag(target)=="path"&&!string.IsNullOrWhiteSpace(basePath.Text)?CollectionDirectoryContext.Normalize(basePath.Text.Trim()):null;
+                var rule=new DirectoryRule(Tag(action),Tag(target),Tag(match),pattern.Text.Trim(),children.IsChecked==true,BasePath:basis);rule.Validate();
+                if(collection&&rule.Target=="path"&&basis is null)throw new LegacyCollectionRuleContextException();
+                if(editingIndex>=0&&rules.Where((_,i)=>i!=editingIndex).Any(other=>other.Action==rule.Action&&other.Target==rule.Target&&other.Match==rule.Match&&other.Pattern==rule.Pattern&&other.IncludeChildren==rule.IncludeChildren&&other.BasePath==rule.BasePath))throw new ArgumentException("已经存在相同规则，请编辑原规则或取消本次修改。");
                 if(editingIndex>=0)rules[editingIndex]=rule with{Enabled=rules[editingIndex].Enabled};
                 else
                 {
@@ -78,6 +90,7 @@ internal sealed class DirectoryRuleEditor
         {
             int index=i;var rule=rules[index];
             var label=new TextBlock{Text=$"{(rule.Action=="include"?"仅查看":rule.Action=="keep"?"例外保留":"排除")} · {(rule.Target=="name"?"名称":"路径")} · {rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是","wildcard"=>"通配符",_=>"正则"}}：{rule.Pattern}",TextWrapping=TextWrapping.Wrap};
+            if(rule.BasePath is {} basis)label.Text+="\n原根目录："+basis;
             var box=new CheckBox{IsChecked=rule.Enabled,Content=label};
             ToolTipService.SetToolTip(box,$"{rule.Match switch{"equals"=>"完全相同","contains"=>"包含","startsWith"=>"开头是","wildcard"=>"通配符",_=>"正则表达式"}}；{(rule.IncludeChildren?"包括子文件夹":"仅本层文件")}");
             box.Checked+=(_,_)=>{rules[index]=rules[index] with{Enabled=true};list.SelectedIndex=index;feedback.Text="";};
@@ -91,7 +104,7 @@ internal sealed class DirectoryRuleEditor
         _=new DirectoryRuleSet(rules);return rules.ToArray();
     }
     private static string Tag(ComboBox box)=>(string)((ComboBoxItem)box.SelectedItem).Tag;
-    private void EndEdit(){editingIndex=-1;pattern.Text="";add.Content="添加规则";cancelEdit.Visibility=Visibility.Collapsed;feedback.Text="";}
+    private void EndEdit(){editingIndex=-1;pattern.Text="";basePath.Text="";basePath.Visibility=Visibility.Collapsed;add.Content="添加规则";cancelEdit.Visibility=Visibility.Collapsed;feedback.Text="";}
     private static void Select(ComboBox box,string tag)=>box.SelectedItem=box.Items.OfType<ComboBoxItem>().First(item=>item.Tag as string==tag);
     private static ComboBox Options(string header,params (string Label,string Tag)[] entries)
     {

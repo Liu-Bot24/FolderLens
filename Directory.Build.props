@@ -9,5 +9,19 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Deterministic>true</Deterministic>
     <Version>0.1.0</Version>
+    <!-- Optimization level and diagnostic policy are independent. Release is
+         safe by default; optimized developer builds opt in explicitly. -->
+    <FolderLensBuildFlavor Condition="'$(FolderLensBuildFlavor)' == '' And ('$(Configuration)' == 'Debug' Or '$(Configuration)' == '')">Development</FolderLensBuildFlavor>
+    <FolderLensBuildFlavor Condition="'$(FolderLensBuildFlavor)' == ''">Production</FolderLensBuildFlavor>
+    <DefineConstants Condition="'$(FolderLensBuildFlavor)' == 'Development'">$(DefineConstants);FOLDERLENS_DEVELOPMENT</DefineConstants>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FolderLens.BuildFlavor</_Parameter1>
+      <_Parameter2>$(FolderLensBuildFlavor)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <Target Name="ValidateFolderLensBuildFlavor" BeforeTargets="CoreCompile">
+    <Error Condition="'$(FolderLensBuildFlavor)' != 'Development' And '$(FolderLensBuildFlavor)' != 'Production'" Text="FolderLensBuildFlavor must be Development or Production." />
+  </Target>
 </Project>

@@ -24,7 +24,7 @@ public partial class LensApplication : Application
         try
         {
             string[] command=Environment.GetCommandLineArgs();string directory=await AppPaths.DataDirectory(command);
-            diagnosticDirectory=Path.Combine(directory,"logs");
+            if(FolderLens.Core.DevelopmentDiagnostics.Enabled)diagnosticDirectory=Path.Combine(directory,"logs");
             var broker=await SingleInstanceBroker.Acquire(directory,ActivationRequest.Parse(command) with{RequestedForeground=launchForeground});if(broker is null){Exit();return;}
             var main=new MainWindow{InstanceBroker=broker,InitialDataDirectory=directory};window=main;
             if(command.Contains("--verify-refresh"))
@@ -46,19 +46,5 @@ public partial class LensApplication : Application
             window=new Window{Title="FolderLens",Content=new Microsoft.UI.Xaml.Controls.TextBlock{Text="无法启动 FolderLens："+UserMessages.Error(error),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(24)}};window.Closed+=(_,_)=>Exit();WindowFocus.Show(window,launchForeground);
         }
     }
-    private void RecordFatal(Exception error)
-    {
-        // Two small local records, never full memory dumps or private file copies.
-        // Keep the framework's normal failure behavior; do not mark it handled.
-        try
-        {
-            if(diagnosticDirectory is null)return;
-            Directory.CreateDirectory(diagnosticDirectory);
-            string path=Path.Combine(diagnosticDirectory,"fatal-latest.json");
-            if(File.Exists(path))File.Copy(path,Path.Combine(diagnosticDirectory,"fatal-previous.json"),true);
-            string detail=error.ToString();
-            File.WriteAllText(path,System.Text.Json.JsonSerializer.Serialize(new{utc=DateTimeOffset.UtcNow,process=Environment.ProcessId,build=typeof(LensApplication).Assembly.GetName().Version?.ToString(),error.HResult,exception=detail[..Math.Min(detail.Length,16384)]}));
-        }
-        catch(Exception logError){Console.Error.WriteLine("Fatal diagnostic unavailable: "+logError.GetType().Name);}
-    }
+    private void RecordFatal(Exception error)=>FatalDiagnosticLog.Record(diagnosticDirectory,error,typeof(LensApplication).Assembly.GetName().Version?.ToString());
 }

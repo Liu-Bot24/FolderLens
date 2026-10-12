@@ -149,13 +149,19 @@ public sealed class WorkerClient : IAsyncDisposable
         if(operation is not("textExcerpt" or "textWindow" or "textFind" or "textLinePosition" or "textIndexStep"))throw new ArgumentException("未知文本工作进程操作。",nameof(operation));
         return RequestCore(path,operation,context,parameters,cancellation,sourceStamp,true,allowCloud:allowCloud);
     }
+    internal Func<string,CancellationToken,Task>? BeforeResponseRead {get;set;}
     private async Task<ImageReply> RequestCore(string? path,string operation,RequestContext context,object parameters,CancellationToken cancellation,SourceFileStamp? sourceStamp,bool dataOnly,bool fileless=false,bool allowCloud=false)
     {
         if(!fileless)path=PathRules.ValidateSource(path!);sourceStamp?.Validate();
         using var linked=CancellationTokenSource.CreateLinkedTokenSource(cancellation,lifetime.Token);cancellation=linked.Token;
         await requestGate.WaitAsync(cancellation).ConfigureAwait(false);
         WorkerResources.Lease? lease=null;CancellationTokenSource? deadline=null;Timer? diskGuard=null;
-        int diskFailure=0;bool ownsGate=false;
+        Exception? diskFailure=null;bool ownsGate=false;
+        async ValueTask RetireDiskGuard()
+        {
+            var guard=diskGuard;diskGuard=null;
+            if(guard is not null)await guard.DisposeAsync().ConfigureAwait(false);
+        }
         try
         {
             lease=await resources.Acquire(priority,cancellation).ConfigureAwait(false);
@@ -172,7 +178,7 @@ public sealed class WorkerClient : IAsyncDisposable
             diskGuard=new Timer(_=>
             {
                 try{temporarySession?.CheckBudget(1L<<30);}
-                catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception){Interlocked.Exchange(ref diskFailure,1);try{deadline.Cancel();}catch(ObjectDisposedException){}}
+                catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException){Interlocked.CompareExchange(ref diskFailure,ex,null);try{deadline.Cancel();}catch(ObjectDisposedException){}}
             },null,TimeSpan.FromMilliseconds(250),TimeSpan.FromMilliseconds(250));
             // Only local approval descriptors are read/written by the host. All
             // source stat calls, including unindexed opens, belong to the worker.
@@ -188,6 +194,7 @@ public sealed class WorkerClient : IAsyncDisposable
             long outputLimit=parameters is ImageParameters{PixelOutput:true}?PixelPayload.MaximumBytes:128L<<20;
             var request=new WorkerEnvelope{WorkerInstanceId=instance!,RequestId=requestId,Context=context,Operation=operation,FileRef=fileless?null:new(context.RootId+":"+Path.GetFileName(path),currentInput!),DeadlineUtc=DateTimeOffset.UtcNow.AddSeconds(seconds),ResourceBudget=new(memoryLimit,1L<<30,lease.CpuThreads,MaxOutputBytes:outputLimit),Parameters=JsonSerializer.SerializeToElement(parameters,WorkerProtocol.Json)};
             await WorkerProtocol.Write(pipe!,request,token).ConfigureAwait(false);
+            if(BeforeResponseRead is not null)await BeforeResponseRead(operation,token).ConfigureAwait(false);
             var response=await WorkerProtocol.Read(pipe!,token).ConfigureAwait(false);token.ThrowIfCancellationRequested();
             if(response.Type!="response"||response.WorkerInstanceId!=instance||response.RequestId!=requestId||response.Context!=context)throw new InvalidDataException("Stale or mismatched worker response.");
             if(response.Status!="ok")
@@ -223,22 +230,32 @@ public sealed class WorkerClient : IAsyncDisposable
                 if(response.AssetFormat is not(null or "png" or "jpeg")||response.AssetFormat=="jpeg"&&parameters is not ImageParameters{CompactThumbnail:true})throw new InvalidDataException("Unexpected asset format.");
                 asset=Path.Combine(taskDirectory!,assetToken+(operation=="markdownRender"?".html":response.AssetFormat=="jpeg"?".jpg":".png"));using(var verified=ThumbnailCache.OpenOwnedRead(asset)){}producedAssets.Add(assetToken,(asset,instance!));
             }
+            // Include an already-running final sample in the outcome. Checking
+            // cancellation before retiring it can otherwise return false success.
+            await RetireDiskGuard().ConfigureAwait(false);
             token.ThrowIfCancellationRequested();return new(response,asset){PixelBytes=pixels};
         }
         catch(OperationCanceledException)
         {
+            // Stop disposes the temporary session and its namespace pins. Wait
+            // for every sampling callback before releasing either of them.
+            await RetireDiskGuard().ConfigureAwait(false);
             // Cancellation while waiting for admission has not touched this
             // worker. Keep its warm decoder and previously handed-out assets.
             if(ownsGate)await Stop().ConfigureAwait(false);
             if(cancellation.IsCancellationRequested)throw;
-            if(diskFailure!=0)throw new WorkerResourceLimitException("工作进程临时磁盘预算已触发，任务已停止。");
+            if(Volatile.Read(ref diskFailure) is {} failure)
+            {
+                if(failure is WorkerResourceLimitException)throw new WorkerResourceLimitException("工作进程临时磁盘预算已触发，任务已停止。");
+                throw new WorkerTemporaryAccessException("工作进程临时目录无法安全访问，任务已停止。",failure);
+            }
             if(lease?.PressureCancellation.IsCancellationRequested==true)throw new WorkerResourceLimitException("内存保护已暂停后台媒体任务。");
             throw new TimeoutException("媒体工作进程任务超时。");
         }
-        catch{if(ownsGate)await Stop().ConfigureAwait(false);throw;}
+        catch{await RetireDiskGuard().ConfigureAwait(false);if(ownsGate)await Stop().ConfigureAwait(false);throw;}
         finally
         {
-            if(diskGuard is not null)await diskGuard.DisposeAsync().ConfigureAwait(false);
+            await RetireDiskGuard().ConfigureAwait(false);
             deadline?.Dispose();lease?.Dispose();if(ownsGate){ArmIdleReclaim();gate.Release();}requestGate.Release();
         }
     }

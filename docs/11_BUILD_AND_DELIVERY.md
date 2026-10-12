@@ -18,6 +18,10 @@ MSBuild初始方向：WindowsPackageType=None，WindowsAppSDKSelfContained=true�
 
 ## 3. 必须实现的脚本契约
 
+构建属性 `FolderLensBuildFlavor` 区分 `Development` 与 `Production`，独立于 Debug/Release 优化配置。直接 MSBuild 的 Release 默认 Production；`Build.ps1` 默认 Development，便于开发时保留本机排错记录；`Publish.ps1` 默认 Production。需要优化的开发候选时显式使用 `-BuildFlavor Development`。构建和发布清单记录该属性。正式版关闭扫描、预览、查询失败、未处理异常和 WebView 诊断日志，`--diagnostic-ui` 也不能开启；正常错误提示和扫描状态保持有效。开发日志可能含本机文件路径，不能作为普通公开附件。
+
+构建工具的输出与显式隔离验证报告保存在程序目录之外，均不属于产品包。打包拒绝日志目录、`.log`、`.jsonl` 及崩溃诊断文件，不从运行过的数据目录递归收集内容。
+
 以下是Codex需要创建并测试的交付脚本，不是本规划包已经提供的软件。每个脚本支持-Help，遇错返回非零exit code，保留原始日志；不得catch后打印成功。外部工具退出码逐项检查。
 
 | 脚本 | 参数/行为 |

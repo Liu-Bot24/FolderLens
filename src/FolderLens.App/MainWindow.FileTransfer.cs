@@ -46,12 +46,12 @@ public sealed partial class MainWindow
     {
         var owner=CaptureShellRefreshOwner();var view=ActiveBrowser;long selectedVersion=selection;
         var ranges=view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)).ToArray();
-        string filter=System.Text.Json.JsonSerializer.Serialize(CurrentFilter());
+        string filter=System.Text.Json.JsonSerializer.Serialize(submittedBrowserFilter);
         bool wasImmersive=immersive,wasFullScreen=fullScreen;
         return ()=>!closing&&owner.RootVersion==rootChangeVersion&&owner.ViewRevision==viewRestoreRevision
             &&owner.RootId==rootId&&owner.Collection==activeCollectionId&&ReferenceEquals(view,ActiveBrowser)&&selectedVersion==selection
             &&wasImmersive==immersive&&wasFullScreen==fullScreen&&ranges.SequenceEqual(view.SelectedRanges.Select(r=>(r.FirstIndex,r.Length)))
-            &&filter==System.Text.Json.JsonSerializer.Serialize(CurrentFilter());
+            &&filter==System.Text.Json.JsonSerializer.Serialize(submittedBrowserFilter);
     }
     private async Task<FileOperationTarget[]> CaptureTransferSelection()
     {

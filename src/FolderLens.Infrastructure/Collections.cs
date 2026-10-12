@@ -98,6 +98,20 @@ public sealed partial class CatalogStore
         catch(SqliteException ex)when(ex.SqliteErrorCode==19){throw new ArgumentException("同名收藏夹已存在。",ex);}
     },cancellation);
     public Task<bool> DeleteCollection(string id,CancellationToken cancellation=default)=>writer.Execute(c=>Execute(c,"DELETE FROM Collections WHERE collection_id=$id",("$id",id))==1,cancellation);
+    public Task<string> CollectionSourceDirectory(string id,string path,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
+    {
+        path=CollectionDirectoryContext.Normalize(path);
+        RegisterFunctions(c);
+        var query=FilterSql.Build(new(){RootId="collection:"+id,CollectionId=id,Kinds=[],ShowHidden=true});
+        using var command=c.CreateCommand();command.CommandText=$"SELECT DISTINCT lens_source_directory(r.display_path,d.relative_path) FROM (SELECT DISTINCT f.directory_id FROM Files f WHERE {query.MatchExpression}) n JOIN Directories d ON d.directory_id=n.directory_id JOIN Roots r ON r.root_id=d.root_id";
+        foreach(var parameter in query.Parameters)command.Parameters.AddWithValue(parameter.Key,parameter.Value);
+        using var rows=command.ExecuteReader();while(rows.Read())
+        {
+            cancellation.ThrowIfCancellationRequested();string source=rows.GetString(0);
+            if(CollectionDirectoryContext.RelativeTo(source,path) is not null||CollectionDirectoryContext.RelativeTo(path,source) is not null)return path;
+        }
+        throw new ArgumentException("请选择某个收藏来源的文件夹、上层或子文件夹。");
+    },cancellation);
     public Task<string> RelativeCollectionDirectory(string id,string path,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
     {
         using var command=c.CreateCommand();command.CommandText="SELECT DISTINCT r.display_path FROM Roots r JOIN Files f ON f.root_id=r.root_id JOIN CollectionMembers m ON m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id) WHERE m.collection_id=$id ORDER BY length(r.display_path) DESC";command.Parameters.AddWithValue("$id",id);

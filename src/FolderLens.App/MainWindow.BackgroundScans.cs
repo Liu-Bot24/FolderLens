@@ -7,6 +7,9 @@ public sealed partial class MainWindow
     private readonly List<BackgroundScan> backgroundScans=[];
     private readonly ScanScheduler scanScheduler=new();
     private BackgroundScan? activeBackgroundScan;
+    // Retirement may resume off the UI thread. The bounded channel is safe for
+    // that callback; the UI-owned diagnostic list is not.
+    private void RecordRetiredRootFailure(Exception error)=>scanLog?.Write("retired-root-failure",new{type=error.GetType().Name,error.HResult});
     private async Task ObserveBackgroundCompletion(BackgroundScan scan)
     {
         using var operation=browserWork.Enter();if(operation is null)return;

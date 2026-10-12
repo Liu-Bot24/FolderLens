@@ -70,7 +70,7 @@ internal sealed class StaticDecoder : IDisposable
                 using var magick=new MagickImage(source,new MagickReadSettings{Format=Format switch{"bmp"=>MagickFormat.Bmp,"ico"=>MagickFormat.Ico,"heic"=>MagickFormat.Heic,_=>MagickFormat.Jxl},FrameIndex=selectedFrame,FrameCount=1});
                 if((ulong)magick.Width*magick.Height>300_000_000)throw new InvalidDataException("Image pixel budget exceeded.");
                 encodedWidth=checked((int)magick.Width);encodedHeight=checked((int)magick.Height);sourceDepth=checked((int)magick.Depth);sourceHasAlpha=magick.HasAlpha;
-                magick.AutoOrient();using var buffer=new MemoryStream();magick.Write(buffer,MagickFormat.Png);image=VImage.NewFromBuffer(buffer.ToArray());Provider="Magick.NET 14.17.1";
+                magick.AutoOrient();using var buffer=new MemoryStream();magick.Write(buffer,MagickFormat.Png);image=VImage.NewFromBuffer(buffer.ToArray());Provider="Magick.NET "+typeof(MagickImage).Assembly.GetName().Version?.ToString(3);
             }
             else
             {

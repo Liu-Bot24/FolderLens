@@ -16,6 +16,7 @@ public sealed partial class MainWindow
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         monitor?.Dispose();monitor=null;DetailsMode.IsChecked=false;ToggleView(DetailsMode,new());FilesGrid.UpdateLayout();
         await WaitUntil(()=>visible.Any(r=>r.Item is not null&&r.Thumbnail is not null),TimeSpan.FromSeconds(10));
+        await WaitUntil(()=>!browserMovementPending&&!queryBusy,TimeSpan.FromSeconds(5));
         var row=visible.First(r=>r.Item is not null&&r.Thumbnail is not null);
         var image=row.Thumbnail;var itemsSource=FilesGrid.ItemsSource;var container=FilesGrid.ContainerFromItem(row);
         var old=row.Item!;string previousSession=resultHandle!.Id;

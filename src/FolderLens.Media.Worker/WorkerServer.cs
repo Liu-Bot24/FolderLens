@@ -80,7 +80,7 @@ internal static class WorkerServer
                         using var deadline=new CancellationTokenSource(request.DeadlineUtc.Value-DateTimeOffset.UtcNow);
                         await AnimationFrameRenderer.RenderTile(input.Path,decoder.Format,decoder.Width,decoder.Height,parameters,outputPath,deadline.Token,rendered);
                         CheckSource();
-                        response=response with{Status="ok",Quality="full",AssetToken=token,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,width=decoder.Width,height=decoder.Height,frameIndex=parameters.FrameIndex,isAnimated=true,provider=decoder.Format=="apng"?"FFmpeg 8.0.1":"NetVips 3.2.0"})};
+                        response=response with{Status="ok",Quality="full",AssetToken=token,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,width=decoder.Width,height=decoder.Height,frameIndex=parameters.FrameIndex,isAnimated=true,provider=decoder.Format=="apng"?"FFmpeg 8.1.2":"NetVips 3.2.0"})};
                         await SendResponse();continue;
                     }
                     if(request.Operation=="page"||decoder!.Format=="tiff"&&request.Operation is "fit" or "fullTile")decoder!.SelectPage(parameters.PageIndex);

@@ -52,21 +52,23 @@ public sealed partial class MainWindow
         TreeViewNode? closest=null;int closestLength=0;
         while(existing.TryDequeue(out var candidate))
         {
-            if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.OrdinalIgnoreCase))
+            // A node's own case mode says nothing about its name in the parent
+            // directory. Without proof of an alias, preserve exact path spelling.
+            if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.Ordinal))
             {
                 activeTreeRoot=candidate;
                 for(var ancestor=candidate;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
                 FolderTree.SelectedNode=candidate;nextTreeRefresh=0;physicalTreeTask=RefreshAncestors(candidate,rootChangeVersion,physicalTreeStop.Token);return;
             }
             if(candidate.Content is FolderNode {PageOffset:null} ancestorFolder&&ancestorFolder.Path.Length>closestLength&&
-                path.StartsWith(ancestorFolder.Path.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))
+                path.StartsWith(ancestorFolder.Path.TrimEnd('\\')+"\\",StringComparison.Ordinal))
             {closest=candidate;closestLength=ancestorFolder.Path.Length;}
             foreach(var child in candidate.Children)existing.Enqueue(child);
         }
         TreeViewNode? parent=closest;
         var ancestors=new Stack<string>();
         string? stopAt=(closest?.Content as FolderNode)?.Path;
-        for(string? current=path;current is not null&&!string.Equals(current,stopAt,StringComparison.OrdinalIgnoreCase);current=Path.GetDirectoryName(current))ancestors.Push(current);
+        for(string? current=path;current is not null&&!string.Equals(current,stopAt,StringComparison.Ordinal);current=Path.GetDirectoryName(current))ancestors.Push(current);
         foreach(string ancestor in ancestors)
         {
             var node=new TreeViewNode{Content=new FolderNode(ancestor,FolderLabel(ancestor)),HasUnrealizedChildren=true};

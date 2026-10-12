@@ -20,6 +20,13 @@ foreach($bad in @((Entry 'data/catalog.sqlite'),[pscustomobject]@{path='../outsi
 }
 try{$null=@(Get-PackageFiles $root ([pscustomobject]@{files=@($public,$public)}))}catch{$failures++}
 if($failures -ne 6){throw 'Duplicate manifest entry was accepted.'}
+foreach($path in @('logs/scan.jsonl','scan.jsonl.previous','fatal-latest.json','fatal-previous.json','webview-events.log','query-failures.jsonl')){
+ if(-not(Test-PrivateReleasePath $path)){throw "Diagnostic file could enter package: $path"}
+ try{$null=@(Get-PackageFiles $root ([pscustomobject]@{files=@([pscustomobject]@{path=$path;bytes=1;sha256='bad'})}))}
+ catch{continue}
+ throw 'Diagnostic package input was accepted.'
+}
+if(Test-PrivateReleasePath 'runtime/logging.dll'){throw 'Ordinary runtime component was mistaken for a diagnostic file.'}
 $installer=Get-Content -LiteralPath (Join-Path $script:ProjectRoot 'installer\FolderLens.iss') -Raw
 if($installer -match 'recursesubdirs' -or $installer -notmatch '#include SourceFileList'){throw 'Installer still collects a directory instead of the verified manifest.'}
 Write-Host 'PASS: runtime allowlist; private data, traversal, wildcard, backup, changed file and duplicate rejected; installer uses the same explicit list.'

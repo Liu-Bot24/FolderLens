@@ -22,4 +22,13 @@ public sealed class NavigationHistoryTests
         for(int i=149;i>=50;i--)Assert.Equal(i,history.GoBack(i+1));
         Assert.False(history.CanGoBack);Assert.True(history.CanGoForward);
     }
+    [Fact]public void PeekingRejectedNavigationDoesNotConsumeHistory()
+    {
+        var history=new NavigationHistory<string>();history.VisitFrom("A");long revision=history.Revision;
+        Assert.Equal("A",history.PeekBack());Assert.Equal("A",history.PeekBack());
+        Assert.Equal(revision,history.Revision);Assert.False(history.CanGoForward);
+        Assert.Equal("A",history.GoBack("B"));Assert.True(history.Revision>revision);
+        revision=history.Revision;Assert.Equal("B",history.PeekForward());Assert.Equal(revision,history.Revision);
+        Assert.Equal("B",history.GoForward("A"));Assert.True(history.Revision>revision);
+    }
 }

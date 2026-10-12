@@ -2,6 +2,25 @@ namespace FolderLens.Core;
 
 public static class BasicFilterRanges
 {
+    public static Dictionary<string,IntRange> MergeExactDimensions(IReadOnlyDictionary<string,IntRange>? advanced,double minMiB,double maxMiB,string? minWidth,string? minHeight)
+    {
+        var ranges=Merge(advanced,minMiB,maxMiB,double.NaN,double.NaN);
+        void Set(string key,string? text)
+        {
+            long? minimum=null;
+            if(!string.IsNullOrWhiteSpace(text))
+            {
+                if(!long.TryParse(text,System.Globalization.NumberStyles.Integer|System.Globalization.NumberStyles.AllowThousands,System.Globalization.CultureInfo.CurrentCulture,out long value))
+                    throw new ArgumentException("宽度和高度必须是有效整数，且不要超过支持的最大值。");
+                minimum=value;
+            }
+            long? maximum=ranges.GetValueOrDefault(key)?.Max;
+            ranges.Remove(key);
+            if(minimum is null&&maximum is null)return;
+            var range=new IntRange(minimum,maximum);range.Validate();ranges[key]=range;
+        }
+        Set("width",minWidth);Set("height",minHeight);return ranges;
+    }
     public static Dictionary<string,IntRange> Merge(IReadOnlyDictionary<string,IntRange>? advanced,double minMiB,double maxMiB,double minWidth,double minHeight)
     {
         var ranges=advanced is null?new Dictionary<string,IntRange>():new Dictionary<string,IntRange>(advanced);

@@ -63,8 +63,16 @@ public sealed record FilterSpec
 
     public FilterSpec ForBrowserView()=>this with
     {
-        Recursive=true,MaxFolderLevels=Recursive?MaxFolderLevels:1,SearchScope="name"
+        Recursive=true,MaxFolderLevels=Recursive?MaxFolderLevels:1,SearchScope="name",SchemaVersion=CollectionId is not null&&SchemaVersion==1?2:SchemaVersion
     };
+    public bool NeedsCollectionRuleBase=>CollectionId is not null&&DirectoryRules.Any(rule=>rule.Target=="path"&&rule.BasePath is null);
+    public FilterSpec WithCollectionRuleBase(string root)
+    {
+        if(SchemaVersion is not (1 or 2))throw new ArgumentException("筛选版本无效。");
+        root=CollectionDirectoryContext.Normalize(root);
+        var result=this with{SchemaVersion=2,DirectoryRules=DirectoryRules.Select(rule=>rule.Target=="path"&&rule.BasePath is null?rule with{BasePath=root}:rule).ToArray()};
+        result.Validate();return result;
+    }
 
     public bool HasSameScanPolicy(FilterSpec other)=>Recursive==other.Recursive&&
         Exclusions.Where(r=>r.Mode=="skipScan").Select(r=>r.RelativePath.Replace('/','\\')).ToHashSet(StringComparer.Ordinal)
@@ -80,11 +88,13 @@ public sealed record FilterSpec
         if(MaxFolderLevels is <1 or >32767)throw new ArgumentException("查看层级必须是 1 至 32767 的整数，或所有层级。");
         if(FileExtensions.Length>64||FileExtensions.Distinct(StringComparer.Ordinal).Count()!=FileExtensions.Length||FileExtensions.Any(e=>e.Length>255||e!=e.ToLowerInvariant()||e.Any(c=>char.IsControl(c)||"\\/:*?\"<>|".Contains(c))))throw new ArgumentException("扩展名选择无效。");
         _=new DirectoryRuleSet(DirectoryRules);
+        if(NeedsCollectionRuleBase)throw new LegacyCollectionRuleContextException();
+        if(SchemaVersion==1&&DirectoryRules.Any(rule=>rule.Target=="sourcePath"||rule.BasePath is not null))throw new ArgumentException("源目录规则需要新版筛选格式。");
         if(Extensions.Length>64||Extensions.Any(e=>!Regex.IsMatch(e,"^[a-z0-9][a-z0-9._+-]{0,31}$",RegexOptions.CultureInvariant)))throw new ArgumentException("扩展名筛选无效。");
         if(DirectoryScope is null||DirectoryScope.Length>32767||DirectoryScope.Any(c=>char.IsControl(c)||":*?\"<>|".Contains(c))||
             DirectoryScope.Length>0&&(Path.IsPathRooted(DirectoryScope)||DirectoryScope.Split('\\','/').Any(p=>p is "" or "." or "..")))
             throw new ArgumentException("浏览目录范围必须是根目录内的相对路径。");
-        if (SchemaVersion != 1 || string.IsNullOrWhiteSpace(RootId) || RootId.Length > 128) throw new ArgumentException("筛选版本或根目录无效。");
+        if (SchemaVersion is not (1 or 2) || string.IsNullOrWhiteSpace(RootId) || RootId.Length > 128) throw new ArgumentException("筛选版本或根目录无效。");
         if (Raw is not ("any" or "only" or "exclude") || Animation is not ("any" or "static" or "animated")) throw new ArgumentException("筛选模式无效。");
         if (SearchScope is not ("name" or "nameAndPath") || NamePathQuery.Length > 4096) throw new ArgumentException("搜索条件无效。");
         if (Orientation is not ("any" or "landscape" or "portrait" or "square")) throw new ArgumentException("方向条件无效。");

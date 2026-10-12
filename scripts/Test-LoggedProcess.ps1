@@ -19,9 +19,11 @@ if(-not $result.timedOut -or $result.exitCode -ne 124){throw 'Sleeper was not re
 if(-not(Test-Path $pidFile)){throw 'Fixture child was not started.'}
 $childId=[int](Get-Content -LiteralPath $pidFile)
 if(Get-Process -Id $childId -ErrorAction SilentlyContinue){throw 'Timed-out child process survived tree cleanup.'}
-if((Get-Content -LiteralPath $result.stdout -Raw) -notmatch 'parent-started'){throw 'Output was not preserved.'}
+if(-not ([string](Get-Content -LiteralPath $result.stdout -Raw) -match 'parent-started')){throw 'Output was not preserved.'}
 $normal=Invoke-LoggedProcess (Get-ScriptShell) @('-NoProfile','-Command','Write-Output normal; exit 0') (Join-Path $EvidenceRoot 'normal') -TimeoutSeconds 5
 if($normal.exitCode -ne 0 -or $normal.timedOut){throw 'Successful execution was misclassified.'}
-$failed=Invoke-LoggedProcess (Get-ScriptShell) @('-NoProfile','-Command','exit 7') (Join-Path $EvidenceRoot 'failed') -TimeoutSeconds 5 -AllowFailure
+if(-not ([string](Get-Content -LiteralPath $normal.stdout -Raw) -match 'normal')){throw 'Successful command output was lost.'}
+$failed=Invoke-LoggedProcess (Get-ScriptShell) @('-NoProfile','-Command','[Console]::Out.WriteLine("capture-stdout"); [Console]::Error.WriteLine("capture-stderr"); exit 7') (Join-Path $EvidenceRoot 'failed') -TimeoutSeconds 5 -AllowFailure
 if($failed.exitCode -ne 7 -or $failed.timedOut){throw 'Ordinary nonzero exit was misclassified.'}
+if(-not ([string](Get-Content -LiteralPath $failed.stdout -Raw) -match 'capture-stdout') -or -not ([string](Get-Content -LiteralPath $failed.stderr -Raw) -match 'capture-stderr')){throw 'Failed command stdout/stderr was lost.'}
 Write-Host 'PASS: timeout evidence, process-tree cleanup, output retention and normal/nonzero exit.'

@@ -89,8 +89,8 @@ public sealed partial class MainWindow
             if(verifyMarkdownResourceBarrier is {} barrier)await barrier(resource.RelativeUrl,token);
             if(!Current())return;
             if(!resource.Video&&markdownImages.TryGetValue(key,out var cached)){e.Response=Response(cached,200,"OK","Content-Type: image/png");return;}
-            string path=await prefetchSourceProbe.ResolveImage(resource.Root,resource.Document,resource.RelativeUrl,token);
-            var stamp=await prefetchSourceProbe.Read(path,token);if(!Current())return;
+            using var authorization=await prefetchSourceProbe.AuthorizeImage(resource.Root,resource.Document,resource.RelativeUrl,token);
+            string path=authorization.Path;var stamp=authorization.Stamp;if(!Current())return;
             if(resource.Stamp is {} prior&&(prior!=stamp||resource.Path!=path))throw new InvalidDataException("Markdown 媒体已发生变化。");
             resource.Path=path;resource.Stamp=stamp;
             if(resource.Video)

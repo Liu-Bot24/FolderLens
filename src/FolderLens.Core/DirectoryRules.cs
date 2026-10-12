@@ -2,13 +2,16 @@ using System.Text.RegularExpressions;
 
 namespace FolderLens.Core;
 
-public sealed record DirectoryRule(string Action, string Target, string Match, string Pattern, bool IncludeChildren = true, bool Enabled = true)
+public sealed record DirectoryRule(string Action, string Target, string Match, string Pattern, bool IncludeChildren = true, bool Enabled = true, string? BasePath = null)
 {
     public void Validate()
     {
-        if(Action is not ("include" or "exclude" or "keep") || Target is not ("name" or "path") || Match is not ("equals" or "contains" or "startsWith" or "wildcard" or "regex"))
+        if(Action is not ("include" or "exclude" or "keep") || Target is not ("name" or "path" or "sourcePath") || Match is not ("equals" or "contains" or "startsWith" or "wildcard" or "regex"))
             throw new ArgumentException("文件夹规则类型无效。");
         if(string.IsNullOrWhiteSpace(Pattern)||Pattern.Length>512||Pattern.Any(char.IsControl))throw new ArgumentException("文件夹规则不能为空，且最多为 512 个字符。");
+        if(BasePath is not null)
+        {if(Target!="path")throw new ArgumentException("只有相对路径规则需要原根目录。");_=CollectionDirectoryContext.Normalize(BasePath);}
+        if(Target=="sourcePath"&&Match is "equals" or "startsWith")_=CollectionDirectoryContext.Normalize(Pattern);
         if(Match=="regex")
         {
             try { _=CreateRegex(); }
@@ -41,16 +44,21 @@ public sealed class DirectoryRuleSet
         rules=items.Where(r=>r.Enabled).Select(r=>(r,r.Match is "regex" or "wildcard"?r.CreateRegex():null)).ToArray();
         hasIncludes=rules.Any(r=>r.Rule.Action=="include");
     }
-    public bool IsVisible(string relativeDirectory)
+    public bool IsVisible(string relativeDirectory,string? sourceDirectory=null)
     {
-        string path=relativeDirectory.Replace('/','\\');bool included=!hasIncludes,excluded=false,kept=false;
+        bool included=!hasIncludes,excluded=false,kept=false;
         foreach(var (rule,regex) in rules)
         {
-            string candidate=path;
+            string? candidate=rule.Target=="sourcePath"?sourceDirectory:
+                rule.BasePath is {} basis&&sourceDirectory is not null?CollectionDirectoryContext.RelativeTo(sourceDirectory,basis):relativeDirectory;
+            if(candidate is null)continue;
+            candidate=candidate.Replace('/','\\').TrimEnd('\\');
             while(candidate.Length>0)
             {
                 string value=rule.Target=="name"?candidate[(candidate.LastIndexOf('\\')+1)..]:candidate;
+                if(rule.Target=="name"&&Path.IsPathRooted(candidate)&&Path.GetPathRoot(candidate)?.TrimEnd('\\')==candidate)break;
                 string pattern=rule.Match=="regex"?rule.Pattern:rule.Pattern.Replace('/','\\');
+                if(rule.Target=="sourcePath"&&rule.Match is "equals" or "startsWith")pattern=CollectionDirectoryContext.Normalize(pattern).TrimEnd('\\');
                 bool match=rule.Match switch
                 {
                     "equals"=>value.Equals(pattern,StringComparison.OrdinalIgnoreCase),

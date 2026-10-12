@@ -183,12 +183,12 @@ public sealed partial class CatalogStore : IAsyncDisposable
         c.CreateFunction("lens_natural",(string s)=>NaturalOrder.Key(s),true);
         using var cmd=c.CreateCommand();
         cmd.CommandText="""
-        INSERT OR IGNORE INTO Roots(root_id,display_path,canonical_key,root_epoch,availability,scan_state) VALUES('benchmark','fixture','fixture',1,'online','ready');
+        INSERT OR IGNORE INTO Roots(root_id,display_path,canonical_key,root_epoch,availability,scan_state) VALUES('benchmark',$source,'fixture',1,'online','ready');
         INSERT OR IGNORE INTO Directories(directory_id,root_id,name,relative_path,canonical_key,case_mode) VALUES('benchmark-dir','benchmark','','','','sensitive');
         WITH RECURSIVE nums(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM nums WHERE n<$count)
         INSERT INTO Files(entry_id,root_id,directory_id,name,extension,relative_path,canonical_key,path_sort_key,name_sort_key,natural_key_version,stat_signature,kind,kind_confidence,logical_bytes,mtime_utc_ticks,updated_revision)
         SELECT printf('%012d',n),'benchmark','benchmark-dir','file'||n||'.jpg','.jpg','file'||n||'.jpg','file'||n||'.jpg',CAST(printf('%012d',n) AS BLOB),lens_natural('file'||n||'.jpg'),1,'synthetic','image','extension',n*1024,1,0 FROM nums;
-        """;cmd.Parameters.AddWithValue("$count",count);return cmd.ExecuteNonQuery();
+        """;cmd.Parameters.AddWithValue("$count",count);cmd.Parameters.AddWithValue("$source",Path.Combine(Path.GetTempPath(),"FolderLens-synthetic-fixture"));return cmd.ExecuteNonQuery();
     },cancellation);
 
     public Task<FirstResultPage> ReadFirstPage(FilterSpec filter,CancellationToken cancellation=default,bool deferGrouping=false)=>interactiveReader.Execute(c=>
@@ -227,6 +227,12 @@ public sealed partial class CatalogStore : IAsyncDisposable
         {
             if(previous!=json){compiled=new DirectoryRuleSet(System.Text.Json.JsonSerializer.Deserialize<DirectoryRule[]>(json)!);previous=json;}
             return compiled!.IsVisible(path);
+        },true);
+        connection.CreateFunction("lens_source_directory",(string root,string relative)=>CollectionDirectoryContext.SourceDirectory(root,relative),true);
+        connection.CreateFunction("lens_directory_visible_source",(string relative,string source,string json)=>
+        {
+            if(previous!=json){compiled=new DirectoryRuleSet(System.Text.Json.JsonSerializer.Deserialize<DirectoryRule[]>(json)!);previous=json;}
+            return compiled!.IsVisible(relative,source);
         },true);
     }
     private static long FileBytes(string path)=>File.Exists(path)?new FileInfo(path).Length:0;

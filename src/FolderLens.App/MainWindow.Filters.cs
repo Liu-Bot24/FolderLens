@@ -8,6 +8,14 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private ContentDialog? advancedFilterDialog;
+    private Action<AdvancedFilterEditor>? verifyAdvancedFilterDraft;
+    private void SyncDimensionMinima(FilterSpec filter)
+    {
+        // Integer text is exact both before and after focus changes. Clearing a
+        // quick field is an explicit empty bound, never a fallback to old state.
+        MinWidth.Text=filter.Ranges.GetValueOrDefault("width")?.Min?.ToString(System.Globalization.CultureInfo.CurrentCulture)??"";
+        MinHeight.Text=filter.Ranges.GetValueOrDefault("height")?.Min?.ToString(System.Globalization.CultureInfo.CurrentCulture)??"";
+    }
     private void ShowActiveFilters(FilterSpec filter)
     {
         var parts=new List<string>();
@@ -49,7 +57,7 @@ public sealed partial class MainWindow
     private Task StartMetadataRefresh(bool explicitRequest=false)
     {
         if(closing||scanStop.IsCancellationRequested)return Task.CompletedTask;
-        if(!TryCurrentFilter(out var filter))return Task.CompletedTask;
+        if(!TrySubmittedBrowserFilter(out var filter))return Task.CompletedTask;
         if(!explicitRequest&&!MetadataDemand.ForQuery(filter)){if(!explicitMetadataPending)metadataRefreshPending=false;return Task.CompletedTask;}
         explicitMetadataPending|=explicitRequest;metadataRefreshPending=true;
         return metadataTask is {IsCompleted:false}?metadataTask:metadataTask=DrainMetadataRefresh();
@@ -69,7 +77,7 @@ public sealed partial class MainWindow
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(catalog is null||catalog.BrowsingBudgetReached||metadataWorker is null||media is null||rootId.Length==0)return;string activeId=rootId;long revision=rootChangeVersion;var token=scanStop.Token;
         using var demand=CancellationTokenSource.CreateLinkedTokenSource(token,metadataDemandStop.Token);token=demand.Token;
-        if(!TryCurrentFilter(out var filter)||!explicitRequest&&!MetadataDemand.ForQuery(filter))return;
+        if(!TrySubmittedBrowserFilter(out var filter)||!explicitRequest&&!MetadataDemand.ForQuery(filter))return;
         bool Current()=>activeId==rootId&&revision==rootChangeVersion&&!closing&&!token.IsCancellationRequested;
         try
         {
@@ -92,6 +100,8 @@ public sealed partial class MainWindow
         }
     }
     private async void AdvancedFilters(object sender,RoutedEventArgs e)
+        =>await EditAdvancedFilters();
+    private async Task EditAdvancedFilters()
     {
         if(rootId.Length==0||closing)return;
         try
@@ -105,7 +115,7 @@ public sealed partial class MainWindow
             {
                 var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));
                 var folder=await picker.PickSingleFolderAsync();if(folder is null)return null;
-                if(sourceCollection is not null)return await catalog!.RelativeCollectionDirectory(sourceCollection,folder.Path,dialogStop.Token);
+                if(sourceCollection is not null)return await catalog!.CollectionSourceDirectory(sourceCollection,folder.Path,dialogStop.Token);
                 string relative=Path.GetRelativePath(sourceRoot,folder.Path);
                 if(Path.IsPathRooted(relative)||relative=="."||relative.Split('\\','/').Contains(".."))throw new ArgumentException("请选择当前根目录内的子文件夹。");
                 return relative;
@@ -114,7 +124,7 @@ public sealed partial class MainWindow
             var folderSection=editor.View.Children.Last();editor.View.Children.Remove(folderSection);editor.View.Children.Insert(0,folderSection);
             var previewCatalog=catalog!;string previewRootId=rootId;
             var directoryEditor=new DirectoryRuleEditor(CurrentFilter().DirectoryRules,PickDirectory,
-                (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token,sourceCollection),dialogStop.Token);
+                (draft,token)=>previewCatalog.PreviewDirectoryRules(previewRootId,draft,token,sourceCollection),dialogStop.Token,collection:sourceCollection is not null);
             exclusions.Children.Add(directoryEditor.View);
             if(legacyRules.Count>0)
             {
@@ -154,10 +164,11 @@ public sealed partial class MainWindow
                 catch(Exception ex){candidate=null;args.Cancel=true;error.Text=UserMessages.Error(ex);error.Visibility=Visibility.Visible;}
             };
             advancedFilterDialog=dialog;
+            verifyAdvancedFilterDraft?.Invoke(editor);
             ContentDialogResult result;
             try{result=await dialog.ShowAsync();}finally{dialogStop.Cancel();advancedFilterDialog=null;}
             if(result!=ContentDialogResult.Primary||candidate is null||closing||revision!=rootChangeVersion)return;
-            advanced=candidate;MinWidth.Value=double.NaN;MinHeight.Value=double.NaN;
+            advanced=candidate;SyncDimensionMinima(candidate);
             await ApplyBrowserFilters();
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}

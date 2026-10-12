@@ -36,10 +36,19 @@ public sealed partial class MainWindow
             verifyCandidateBarrier=_=>throw new IOException("InjectedSnapshotFailure");
             await RefreshQuery();AssertRetained("第一次失败");
             await RefreshQuery(scanPreview:true);AssertRetained("第二次失败");
-            string diagnostic=await File.ReadAllTextAsync(Path.Combine(RuntimeDataDirectory,"query-failures.jsonl"));
-            if(diagnostic.Split('\n').Count(line=>line.Contains("\"errorType\":\"IOException\""))<2||diagnostic.Contains(source,StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("查询失败历史未保留，或记录了源文件夹完整路径。");
-            report["failureHistoryRetainedWithoutSourcePaths"]=true;
+            string diagnosticPath=Path.Combine(RuntimeDataDirectory,"query-failures.jsonl");
+            if(FolderLens.Core.DevelopmentDiagnostics.Enabled)
+            {
+                string diagnostic=await File.ReadAllTextAsync(diagnosticPath);
+                if(diagnostic.Split('\n').Count(line=>line.Contains("\"errorType\":\"IOException\""))<2||diagnostic.Contains(source,StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("开发版查询失败历史未保留，或记录了源文件夹完整路径。");
+                report["failureHistoryRetainedWithoutSourcePaths"]=true;
+            }
+            else
+            {
+                if(File.Exists(diagnosticPath))throw new InvalidOperationException("正式版写入了查询诊断日志。");
+                report["productionHasNoFailureLog"]=true;
+            }
             if(publications!=1)throw new InvalidOperationException("重试重复发布首批列表。");
             FileRow? chosen=null;Task? coalesced=null;
             verifyCandidateBarrier=async token=>

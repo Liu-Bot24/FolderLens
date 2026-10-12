@@ -7,6 +7,13 @@ namespace FolderLens.App;
 public sealed partial class MainWindow
 {
     private string? firstPageFilter;
+    private FilterSpec? submittedBrowserFilter;
+    private bool TrySubmittedBrowserFilter(out FilterSpec filter)
+    {
+        filter=submittedBrowserFilter!;
+        return filter is not null&&filter.RootId==rootId&&filter.CollectionId==activeCollectionId
+            &&(activeCollectionId is not null||filter.ObservedRootEpoch==epoch);
+    }
     private FileRow[] firstPageSequence=[];
     private bool automaticQueryPending;
     private Task queryCompletion=Task.CompletedTask;
@@ -37,6 +44,7 @@ public sealed partial class MainWindow
         // Invalid submitted controls are also a new intent. They must retire a
         // still-running old query rather than let it repopulate the new category.
         CancelPendingSearch();generation++;queryRequest++;queryStop.Cancel();metadataDemandStop.Cancel();
+        submittedBrowserFilter=null;
         automaticQueryPending=false;metadataRefreshPending=false;explicitMetadataPending=false;queryBusy=false;
         string? previous=RetireBrowserResults();submittedSearch=Search.Text;
         ActiveFilterSummary.Visibility=Microsoft.UI.Xaml.Visibility.Collapsed;

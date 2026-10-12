@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:folderlens:filter:v1",
-  "title": "FolderLens FilterSpec v1",
+  "$id": "urn:folderlens:filter:v2",
+  "title": "FolderLens FilterSpec v1 and v2 (source directory context)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,6 +13,21 @@
     "raw",
     "animation",
     "sort"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "schemaVersion": { "const": 1 } } },
+      "then": { "properties": { "directoryRules": { "items": { "properties": {
+        "target": { "enum": ["name", "path"] }, "basePath": { "type": "null" }
+      } } } } }
+    },
+    {
+      "if": { "required": ["collectionId"], "properties": { "schemaVersion": { "const": 2 }, "collectionId": { "type": "string" } } },
+      "then": { "properties": { "directoryRules": { "items": {
+        "if": { "properties": { "target": { "const": "path" } } },
+        "then": { "required": ["basePath"], "properties": { "basePath": { "type": "string", "minLength": 1 } } }
+      } } } }
+    }
   ],
   "properties": {
     "collectionId": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{32}$", "description": "Browse this collection across catalog roots; null keeps the physical root scope."},
@@ -34,7 +49,8 @@
         "required": ["action", "target", "match", "pattern"],
         "properties": {
           "action": { "enum": ["include", "exclude", "keep"] },
-          "target": { "enum": ["name", "path"] },
+          "target": { "enum": ["name", "path", "sourcePath"] },
+          "basePath": { "type": ["string", "null"], "description": "V2: explicitly confirmed full source root for a legacy relative path rule. Required before executing a collection path rule; never inferred from synthetic playlist roots." },
           "match": { "enum": ["equals", "contains", "startsWith", "wildcard", "regex"] },
           "pattern": { "type": "string", "minLength": 1, "maxLength": 512 },
           "includeChildren": { "type": "boolean", "default": true },
@@ -54,7 +70,7 @@
       }
     },
     "schemaVersion": {
-      "const": 1
+      "enum": [1, 2]
     },
     "rootId": {
       "type": "string",

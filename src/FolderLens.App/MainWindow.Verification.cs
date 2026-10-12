@@ -26,6 +26,14 @@ public sealed partial class MainWindow
         finally{PostVerificationClose(WinRT.Interop.WindowNative.GetWindowHandle(this),0x0010,0,0);}
     }
     private Action? verifyPublishFault;
+    private Action<Exception>? verifyScanFailure;
+    private Func<CancellationToken,Task>? verifyRootPreflightBarrier;
+    private Func<CancellationToken,Task>? verifySameRootRestoreBarrier;
+    private Func<CancellationToken,Task>? verifyFitResponseBarrier;
+    private Action? verifyFitDecodeRequested;
+    private Func<CancellationToken,Task>? verifyFileOpenPageBarrier;
+    private Action<ContentDialog,TextBox>? verifyCollectionRuleMigration;
+    private Func<CancellationToken,Task>? verifyCollectionRefreshBarrier;
     private Func<CancellationToken,Task>? verifyCandidateBarrier,verifyScanBarrier,verifyPageBarrier,verifyPreviewBarrier,verifyFirstPageBarrier;
     private Func<Task>? verifyClosingState;
     private Func<long,Task>? verifyTreePageReadBarrier;
@@ -78,6 +86,14 @@ public sealed partial class MainWindow
             byte[] pixels=new byte[64*48*4];for(int index=0;index<pixels.Length;index+=4){pixels[index]=40;pixels[index+1]=100;pixels[index+2]=200;pixels[index+3]=255;}
             encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Premultiplied,64,48,96,96,pixels);await encoder.FlushAsync();stream.Seek(0);byte[] png=new byte[checked((int)stream.Size)];await stream.ReadAsync(png.AsBuffer(),(uint)png.Length,InputStreamOptions.None);
             for(int index=0;index<12;index++)await File.WriteAllBytesAsync(Path.Combine(first,$"image-{index:D2}.png"),png);
+            if(arguments.Contains("--verify-audit-parent")){await VerifyAuditParentNavigation(source,report);return;}
+            if(arguments.Contains("--verify-diagnostic-policy")){await VerifyDiagnosticPolicy(source,report);return;}
+            if(arguments.Contains("--verify-rotated-fit")){await VerifyRotatedFitResolution(source,report);return;}
+            if(arguments.Contains("--verify-explicit-file-open")){await VerifyExplicitFileOpen(source,report);return;}
+            if(arguments.Contains("--verify-tree-case-selection")){VerifyTreeCaseSelection(source,report);return;}
+            if(arguments.Contains("--verify-collection-directory-context")){await VerifyCollectionDirectoryContext(source,report);return;}
+            if(arguments.Contains("--verify-advanced-submission")){await VerifyAdvancedSubmission(source,report);return;}
+            if(arguments.Contains("--verify-saved-view-admission")){await VerifySavedViewAdmission(source,report,arguments.Contains("--late-admission"));return;}
             if(arguments.Contains("--verify-independent-query")){await VerifyIndependentQuery(source,report);return;}
             if(arguments.Contains("--verify-audio-freshness")){await VerifyAudioFreshness(source,report);return;}
             if(arguments.Contains("--verify-soak")||arguments.Contains("--verify-soak-smoke")||arguments.Contains("--verify-audio-retention")){await VerifySoak(source,report);return;}
@@ -199,8 +215,15 @@ public sealed partial class MainWindow
             folderGrouping=new(true);UpdateGroupingButton();await OpenRoot(source);
             // Automatic initialization and the scan must be done before observing steady state.
             if(metadataTask is not null)await metadataTask;await RefreshQuery();
-            await WaitUntil(()=>visible.Count>0&&visible.All(row=>row.Thumbnail is not null),TimeSpan.FromSeconds(20));
-            var row=visible.Where(row=>row.Thumbnail is not null).OrderBy(row=>row.Ordinal).First();
+            FileRow[] ViewportRows()=>visible.Where(item=>IsThumbnailInViewport(FilesGrid,item)).ToArray();
+            bool ViewportReady()=>ViewportRows() is {Length:>0} rows&&rows.All(item=>item.Thumbnail is not null);
+            try{await WaitUntil(ViewportReady,TimeSpan.FromSeconds(20));}
+            finally
+            {
+                report["startupThumbnailObservation"]=new{queryBusy,rootReady=browserRootReady,gridVisibility=FilesGrid.Visibility.ToString(),details=DetailsMode.IsChecked,count=resultHandle?.Count,
+                    rows=visible.Select(item=>new{item.Ordinal,item.Name,inViewport=IsThumbnailInViewport(FilesGrid,item),hasBitmap=item.Thumbnail is not null,state=item.ThumbnailState.ToString(),item.ThumbnailError}).ToArray()};
+            }
+            var row=ViewportRows().OrderBy(row=>row.Ordinal).First();
             var thumbnail=row.Thumbnail;var container=FilesGrid.ContainerFromItem(row);var sourceObject=FilesGrid.ItemsSource;
             if(container is null)throw new InvalidOperationException("真实 GridView 容器尚未创建。");
             int frames=0,missingFrames=0,containerChanges=0;
@@ -235,26 +258,35 @@ public sealed partial class MainWindow
             finally{CompositionTarget.Rendering-=Observe;}
             folderGrouping=new();UpdateGroupingButton();await RefreshQuery();
             report["flatInitialStaleVisibleRows"]=visible.Count(item=>flatBrowserItems!.IndexOf(item)<0||FilesGrid.ContainerFromItem(item) is null);
-            await WaitUntil(()=>visible.Count>0&&visible.All(item=>item.Thumbnail is not null&&flatBrowserItems!.IndexOf(item)>=0&&FilesGrid.ContainerFromItem(item) is not null),TimeSpan.FromSeconds(10));
-            var flatRow=visible.OrderBy(item=>item.Ordinal).First();var flatContainer=FilesGrid.ContainerFromItem(flatRow);var flatThumbnail=flatRow.Thumbnail;var flatSource=FilesGrid.ItemsSource;
+            await WaitUntil(()=>ViewportReady()&&visible.All(item=>flatBrowserItems!.IndexOf(item)>=0&&FilesGrid.ContainerFromItem(item) is not null),TimeSpan.FromSeconds(10));
+            var flatRow=ViewportRows().OrderBy(item=>item.Ordinal).First();var flatContainer=FilesGrid.ContainerFromItem(flatRow);var flatThumbnail=flatRow.Thumbnail;var flatSource=FilesGrid.ItemsSource;
             await RefreshQuery(scanPreview:true);await Task.Delay(100);
             await File.WriteAllBytesAsync(Path.Combine(second,"z-last.png"),png);
             await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);await Task.Delay(100);
             if(resultHandle?.Count!=15||!ReferenceEquals(FilesGrid.ItemsSource,flatSource)||!ReferenceEquals(FilesGrid.ContainerFromItem(flatRow),flatContainer)||!ReferenceEquals(flatRow.Thumbnail,flatThumbnail))throw new InvalidOperationException("未分组列表刷新破坏了已有容器或缩略图。");
             report["flatListRetained"]=true;report["flatItems"]=resultHandle.Count;
-            // Hold all real decoder slots to reproduce a cold/queued visible request.
-            for(int slot=0;slot<WorkerResources.Shared.ThumbnailConcurrency;slot++)await thumbnailSlots.WaitAsync();
-            Task pendingThumbnail;
-            try
+            // A warm cache correctly bypasses decoder admission. Use a fresh
+            // cache and clear retained bitmaps to exercise a genuinely cold queue.
+            await WaitUntil(()=>thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
+            await using(var coldCache=new ThumbnailCache(Path.Combine(dataDirectory,"pending-thumbnail-cache")))
             {
-                flatRow.Thumbnail=null;pendingThumbnail=LoadThumbnail(FilesGrid,flatRow);
-                var pendingRequest=thumbnailRequests[flatRow];
-                for(int iteration=0;iteration<4;iteration++)await RefreshQuery(scanPreview:true);
-                if(!thumbnailRequests.TryGetValue(flatRow,out var surviving)||!ReferenceEquals(surviving,pendingRequest))throw new InvalidOperationException("增量刷新重启了未完成的可见缩略图任务。");
+                await coldCache.Initialize();var priorCache=thumbnailCache;thumbnailCache=coldCache;ClearThumbnailBitmaps();
+                for(int slot=0;slot<WorkerResources.Shared.ThumbnailConcurrency;slot++)await thumbnailSlots.WaitAsync();
+                Task pendingThumbnail=Task.CompletedTask;
+                try
+                {
+                    flatRow.Thumbnail=null;flatRow.SetThumbnailState(ThumbnailLoadState.None);pendingThumbnail=LoadThumbnail(FilesGrid,flatRow);
+                    var pendingRequest=thumbnailRequests[flatRow];
+                    for(int iteration=0;iteration<4;iteration++)await RefreshQuery(scanPreview:true);
+                    if(pendingThumbnail.IsCompleted||!thumbnailRequests.TryGetValue(flatRow,out var surviving)||!ReferenceEquals(surviving,pendingRequest))throw new InvalidOperationException("增量刷新重启了未完成的可见缩略图任务。");
+                }
+                finally
+                {
+                    thumbnailSlots.Release(WorkerResources.Shared.ThumbnailConcurrency);
+                    try{await pendingThumbnail;}finally{thumbnailCache=priorCache;}
+                }
+                if(flatRow.Thumbnail is null)throw new InvalidOperationException("保留的缩略图请求没有完成。");
             }
-            finally{thumbnailSlots.Release(WorkerResources.Shared.ThumbnailConcurrency);}
-            await pendingThumbnail;
-            if(flatRow.Thumbnail is null)throw new InvalidOperationException("保留的缩略图请求没有完成。");
             report["pendingThumbnailRetained"]=true;
             await OpenRoot(first);if(physicalTreeTask is not null)await physicalTreeTask;
             if(resultHandle?.Count!=13||RootPath.Text!=first)throw new InvalidOperationException("进入明确含图的子目录后结果未联动。");
@@ -295,7 +327,11 @@ public sealed partial class MainWindow
             suppressFilters=true;SelectTag(Category,"image");suppressFilters=false;
             await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();await SelectPreview((FileRow)results![0]!);
             viewerGestureSelection=selection;viewerLastPoint=new(ImageCanvas.ActualWidth/2,ImageCanvas.ActualHeight/2);StartViewerMagnifier();
-            await WaitUntil(()=>lensTiles.Count>0,TimeSpan.FromSeconds(10));ResetViewerGesture();
+            // The 64x48 fixture already fits at original resolution. Its native
+            // magnifier must reuse those pixels instead of requesting extra tiles.
+            await WaitUntil(()=>viewerGesture==ViewerGesture.Magnifier&&!lensLoading&&!lensPending&&PreviewSurface.MagnifierWidth>0,TimeSpan.FromSeconds(10));
+            if(!FitContainsOriginalPixels()||lensTiles.Count!=0)throw new InvalidOperationException("小图放大镜未复用完整原始像素。");
+            report["magnifierReusesFullResolutionFit"]=true;ResetViewerGesture();
             rotation=1;viewerScaleIntent=ViewerScaleIntent.Custom;viewerCustomPhysicalScale=2.5;ApplyViewerScaleIntent();
             await RestoreImageDevice(Shell.XamlRoot.RasterizationScale,Shell.XamlRoot.RasterizationScale);
             if(imagePage!=0||rotation!=1||viewerScaleIntent!=ViewerScaleIntent.Custom||viewerCustomPhysicalScale!=2.5)throw new InvalidOperationException("图片设备恢复丢失旋转或自定义倍率。");
@@ -322,17 +358,22 @@ public sealed partial class MainWindow
             try
             {
                 int warningsBefore=webviewEvents.Count(message=>message.StartsWith("ThumbnailCache: ",StringComparison.Ordinal));
-                thumbnailCache=unavailableCache;var visibleRow=visible.First(item=>item.Item is not null);visibleRow.Thumbnail=null;await LoadThumbnail(FilesGrid,visibleRow);
+                thumbnailCache=unavailableCache;ClearThumbnailBitmaps();var visibleRow=ViewportRows().First(item=>item.Item is not null);visibleRow.Thumbnail=null;visibleRow.SetThumbnailState(ThumbnailLoadState.None);await LoadThumbnail(FilesGrid,visibleRow);
                 if(visibleRow.Thumbnail is null||visibleRow.ThumbnailError.Length>0)throw new InvalidOperationException("缓存空间保护拒绝写入后，已解码图片没有显示。");
-                if(webviewEvents.Count(message=>message.StartsWith("ThumbnailCache: ",StringComparison.Ordinal))<=warningsBefore)throw new InvalidOperationException("缓存写入警告未记录。");
+                if(DevelopmentDiagnostics.Enabled&&webviewEvents.Count(message=>message.StartsWith("ThumbnailCache: ",StringComparison.Ordinal))<=warningsBefore)throw new InvalidOperationException("开发版缓存写入警告未记录。");
+                if(!DevelopmentDiagnostics.Enabled&&webviewEvents.Count!=0)throw new InvalidOperationException("正式版保留了开发诊断事件。");
             }
             finally{thumbnailCache=normalCache;}
             report["cacheWriteFailureStillDisplaysImage"]=true;
+            // This insertion scenario needs ten images simultaneously on screen,
+            // rather than relying on decode of realized offscreen buffer items.
+            double testScale=Shell.XamlRoot.RasterizationScale;
+            AppWindow.Resize(new((int)Math.Ceiling(1280*testScale),(int)Math.Ceiling(1000*testScale)));
             folderGrouping=new(true);sortDescending=false;await OpenRoot(source);
             if(metadataTask is not null)await metadataTask;await RefreshQuery();
             FilesGrid.ScrollIntoView(results![0],ScrollIntoViewAlignment.Leading);Shell.UpdateLayout();
-            await WaitUntil(()=>visible.Count(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)&&FilesGrid.ContainerFromItem(item) is not null)>=10&&visible.All(item=>item.Thumbnail is not null),TimeSpan.FromSeconds(10));
-            var stableRows=visible.Where(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)).Select(item=>(Row:item,Container:FilesGrid.ContainerFromItem(item),Thumbnail:item.Thumbnail)).ToArray();
+            await WaitUntil(()=>ViewportRows().Count(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal))>=10&&ViewportReady(),TimeSpan.FromSeconds(10));
+            var stableRows=ViewportRows().Where(item=>item.Item is not null&&item.RelativePath.StartsWith("A\\",StringComparison.Ordinal)).Select(item=>(Row:item,Container:FilesGrid.ContainerFromItem(item),Thumbnail:item.Thumbnail)).ToArray();
             await File.WriteAllBytesAsync(Path.Combine(first,"image-02a.png"),png);await File.WriteAllBytesAsync(Path.Combine(first,"image-08a.png"),png);
             await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);await Task.Delay(100);
             if(stableRows.Length<10)throw new InvalidOperationException("未覆盖中部插入之间的可见图片。");
@@ -343,8 +384,13 @@ public sealed partial class MainWindow
             await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);
             if(!ReferenceEquals(insertionSource,FilesGrid.ItemsSource))throw new InvalidOperationException("新增多个文件夹组导致重新绑定。");
             var priorGroupSource=FilesGrid.ItemsSource;var groupIdentities=browserGroups!.Cast<BrowserFileGroup>().ToDictionary(group=>group.Info.Id);
-            folderGrouping=folderGrouping with{Direction=folderGrouping.Direction=="asc"?"desc":"asc"};await RefreshQuery(scanPreview:true);await Task.Delay(100);
+            var priorGroupOrder=browserGroups.Select(group=>group.Info.Id).ToArray();
+            // Real background capacity changes reorder the accepted grouping;
+            // changing an unsubmitted control draft must never do so.
+            await File.WriteAllBytesAsync(Path.Combine(source,"F","capacity-only.bin"),new byte[64*1024]);
+            await new DirectoryIndexer(catalog!).Scan(rootId,root,epoch,true,[],null,lifetime.Token);await RefreshQuery(scanPreview:true);await Task.Delay(100);
             var ordered=await catalog!.ReadGroups(resultHandle!.Id);
+            if(priorGroupOrder.SequenceEqual(ordered.Select(group=>group.Id))||ordered[0].RelativePath!="F")throw new InvalidOperationException("容量变化没有实际触发已提交分组的重排。");
             report["groupOrderBindingRetained"]=ReferenceEquals(FilesGrid.ItemsSource,priorGroupSource);report["groupOrderViewCount"]=FilesGrid.Items.Count;report["groupOrderSnapshotCount"]=resultHandle.Count;
             if(!ReferenceEquals(FilesGrid.ItemsSource,priorGroupSource)||FilesGrid.Items.Count!=resultHandle.Count||!browserGroups!.Cast<BrowserFileGroup>().Select(group=>group.Info).SequenceEqual(ordered))throw new InvalidOperationException("真实分组视图重排后的数量/顺序/绑定不一致。");
             foreach(var group in browserGroups.Cast<BrowserFileGroup>())if(!ReferenceEquals(group,groupIdentities[group.Info.Id]))throw new InvalidOperationException("重排创建了不同的旧组对象。");
@@ -403,7 +449,7 @@ public sealed partial class MainWindow
     private async Task VerifyRefreshMetadata(string source,Dictionary<string,object> report)
     {
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;
-        MinWidth.Value=32;PendingView.IsChecked=false;await ApplyBrowserFilters();
+        MinWidth.Text="32";PendingView.IsChecked=false;await ApplyBrowserFilters();
         await StartMetadataRefresh();await RefreshQuery();
         if(resultHandle?.Count!=12)throw new InvalidOperationException("元数据刷新反例的初始图片不完整。");
         string previous=resultHandle.Id;long request=queryRequest;var oldMetadata=metadataTask;

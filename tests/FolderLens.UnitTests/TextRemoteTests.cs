@@ -95,8 +95,14 @@ public sealed class TextRemoteTests
         var f=Fixture(string.Concat(Enumerable.Repeat("abcdef\n",200_000)),"utf-8");
         await using var worker=new WorkerClient(Worker(),Path.Combine(f.Root,"worker"));var context=new RequestContext("root",1,1,1,1,1);
         var first=await worker.RequestData(f.Path,"textWindow",context,new TextWorkerParameters(),CancellationToken.None);Assert.Null(first.AssetPath);Assert.Null(first.Message.AssetToken);
-        using var cancel=new CancellationTokenSource();var pending=worker.RequestData(f.Path,"textIndexStep",context,new TextWorkerParameters(StepPages:16),cancel.Token);cancel.Cancel();
+        // Cancelling before resource admission correctly retains the warm worker.
+        // This case specifically exercises cancellation of an admitted request.
+        var sent=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        worker.BeforeResponseRead=async(operation,token)=>{if(operation!="textIndexStep")return;sent.TrySetResult();await Task.Delay(Timeout.Infinite,token);};
+        using var cancel=new CancellationTokenSource();var pending=worker.RequestData(f.Path,"textIndexStep",context,new TextWorkerParameters(StepPages:16),cancel.Token);
+        await sent.Task.WaitAsync(TimeSpan.FromSeconds(5));cancel.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>pending.WaitAsync(TimeSpan.FromSeconds(3)));
+        worker.BeforeResponseRead=null;
         var next=await worker.RequestData(f.Path,"textWindow",context,new TextWorkerParameters(),CancellationToken.None);Assert.NotEqual(first.Message.WorkerInstanceId,next.Message.WorkerInstanceId);Assert.Null(next.AssetPath);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(f.Root,"worker"),"*.png",SearchOption.AllDirectories));
     }

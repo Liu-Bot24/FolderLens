@@ -114,13 +114,22 @@ public sealed partial class MainWindow
         try
         {
             await OpenRoot(rejectedRoot);await RefreshQuery();
+            // A watcher may reconcile the retained directory while the component
+            // is unavailable. Finish that real failed scan before pressing F5.
+            reconcilePending=true;await Reconcile(force:true);
+            if(scanTask?.IsFaulted!=true)throw new InvalidOperationException("Recovery fixture did not retain a failed scan task.");
             bool visible=Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar&&bar.IsOpen;
             if(browserScanError is null||replacingRoot||rootId!=acceptedRoot||FilesGrid.Items.Count!=12||!visible)
                 throw new InvalidOperationException("Rejected root admission lost the accepted results or hid the scan error.");
         }
         finally{verifyScanWorkerExecutable=null;}
-        await RefreshCurrentRoot();if(metadataTask is not null)await metadataTask;await RefreshQuery();
-        if(browserScanError is not null||resultHandle?.Count!=12)throw new InvalidOperationException("Browser did not recover after a failed root open.");
+        long previousEpoch=epoch;
+        verifyScanFailure=error=>report["recoveryException"]=error.ToString();
+        try{await RefreshCurrentRoot();if(metadataTask is not null)await metadataTask;await RefreshQuery();}
+        finally{verifyScanFailure=null;}
+        report["recoveryState"]=new{root,rootId,epoch,count=resultHandle?.Count,browserScanError,browserEmptyError,replacingRoot,status=Status.Text,
+            submittedEpoch=submittedBrowserFilter?.ObservedRootEpoch,scanState=scanTask?.Status.ToString(),scanCancelled=scanStop.IsCancellationRequested};
+        if(browserScanError is not null||resultHandle?.Count!=12||epoch<=previousEpoch)throw new InvalidOperationException("Browser did not recover with a fresh scan after a failed root open.");
         report["scanFailureVisibleAndRecovery"]=true;
         report["phase"]="complete";report["status"]="PASS";
     }

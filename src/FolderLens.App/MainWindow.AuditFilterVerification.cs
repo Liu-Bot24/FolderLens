@@ -22,7 +22,7 @@ public sealed partial class MainWindow
             await ApplyBrowserFilters();
             if(queryRequest!=query||!ReferenceEquals(resultHandle,accepted))throw new InvalidOperationException("溢出输入启动了查询。");
             ApplySavedFilter(policy with{Ranges=new(){["width"]=new(1920,4096),["height"]=new(1080,null)}});
-            MinWidth.Value=double.NaN;MinHeight.Value=double.NaN;
+            MinWidth.Text=MinHeight.Text="";
             var cleared=CurrentFilter();
             if(cleared.Ranges["width"]!=new IntRange(null,4096)||cleared.Ranges.ContainsKey("height"))throw new InvalidOperationException("清空宽高下限未清除保存视图中的旧下限。");
             ApplySavedFilter(policy);await ApplyBrowserFilters();

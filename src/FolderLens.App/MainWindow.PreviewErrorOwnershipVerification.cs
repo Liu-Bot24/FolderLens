@@ -78,11 +78,13 @@ public sealed partial class MainWindow
                 finally{release.TrySetResult();verifyPreviewUpdateBarrier=null;await pending;}
             }
 
-            await SetImmersive(false);ChooseBrowserView(DetailsMode,new RoutedEventArgs());Shell.UpdateLayout();
+            await SetImmersive(false);ChooseBrowserView(ThumbnailMode,new RoutedEventArgs());Shell.UpdateLayout();
+            FilesGrid.ScrollIntoView(plain,ScrollIntoViewAlignment.Leading);Shell.UpdateLayout();
+            await WaitUntil(()=>IsThumbnailInViewport(FilesGrid,plain),TimeSpan.FromSeconds(5));
             await WaitUntil(()=>thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
             foreach(bool retired in new[]{true,false})
             {
-                CancelThumbnails();var container=new GridViewItem();BindVisibleContainer(FilesGrid,container,plain);
+                CancelThumbnails();var container=FilesGrid.ContainerFromItem(plain)??throw new InvalidOperationException("Thumbnail error fixture is not realized.");BindVisibleContainer(FilesGrid,container,plain);
                 var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 verifyThumbnailCleanupBarrier=async row=>{if(!ReferenceEquals(row,plain))return;entered.TrySetResult();await release.Task;throw new IOException("Controlled thumbnail cleanup failure.");};
@@ -93,7 +95,8 @@ public sealed partial class MainWindow
                     if(retired)CancelThumbnails();
                     const string expectedStatus="Current browser operation.";Status.Text=expectedStatus;
                     release.TrySetResult();await pending.WaitAsync(TimeSpan.FromSeconds(3));
-                    bool passed=retired?Status.Text==expectedStatus&&webviewEvents.Any(value=>value.StartsWith("Retired thumbnail cleanup failed:",StringComparison.Ordinal)):
+                    bool diagnosticCorrect=FolderLens.Core.DevelopmentDiagnostics.Enabled?webviewEvents.Any(value=>value.StartsWith("Retired thumbnail cleanup failed:",StringComparison.Ordinal)):webviewEvents.Count==0;
+                    bool passed=retired?Status.Text==expectedStatus&&diagnosticCorrect:
                         Status.Text.StartsWith("操作未完成：",StringComparison.Ordinal);
                     checks.Add(new{entry="thumbnail-cleanup",retired,passed,quality=Status.Text});
                     if(!passed)failures.Add(retired?"Retired thumbnail cleanup did not preserve the current browser status and diagnostics.":"Current thumbnail cleanup failure was not reported.");

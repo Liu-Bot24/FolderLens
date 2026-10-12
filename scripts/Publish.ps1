@@ -1,9 +1,9 @@
 [CmdletBinding()]
-param([ValidateSet('Release')][string]$Configuration='Release',[ValidateSet('win-x64')][string]$Runtime='win-x64',[switch]$Help)
-if($Help){Write-Output 'Publish.ps1 [-Configuration Release] [-Runtime win-x64]: locked self-contained publish to a new artifacts/publish/<buildId> directory; includes media/content/scan workers, RawBridge, official CRT, FFmpeg and fixed WebView2. Produces a candidate manifest, never GO.';exit 0}
+param([ValidateSet('Release')][string]$Configuration='Release',[ValidateSet('win-x64')][string]$Runtime='win-x64',[ValidateSet('Production','Development')][string]$BuildFlavor='Production',[switch]$Help)
+if($Help){Write-Output 'Publish.ps1 [-Configuration Release] [-Runtime win-x64] [-BuildFlavor Production|Development]: locked self-contained candidate publish. Production is the default and disables application diagnostic logs. Build/verification evidence stays outside the app and package.';exit 0}
 . "$PSScriptRoot\Common.ps1"
 $inputs=Get-BuildInputs
-$id='0.1.0-candidate-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+$inputs.sha256.Substring(0,12).ToLowerInvariant()
+$id='0.1.0-'+$BuildFlavor.ToLowerInvariant()+'-candidate-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')+'-'+$inputs.sha256.Substring(0,12).ToLowerInvariant()
 $releaseRoot=Join-Path $script:ProjectRoot ('artifacts\publish\'+$id)
 $appRoot=Join-Path $releaseRoot 'app'
 New-Item -ItemType Directory -Path $appRoot | Out-Null
@@ -26,7 +26,7 @@ foreach($project in $projects){
  if($projectRuntime -ne $Runtime){throw "Project runtime '$projectRuntime' differs from requested '$Runtime': $projectFile"}
  # Executables declare their RID locally. A command-line -r also changes the RID of
  # shared libraries, which intentionally have RID-neutral locked restore graphs.
- $arguments=@('publish',$projectFile,'-c',$Configuration,'--self-contained','true','-p:RestoreLockedMode=true','-p:PublishTrimmed=false','-p:PublishSingleFile=false','-p:DebugType=None','-p:DebugSymbols=false','-p:ContinuousIntegrationBuild=true',('-p:OutDir='+$buildOutput),'-o',$output)
+ $arguments=@('publish',$projectFile,'-c',$Configuration,'--self-contained','true','-p:RestoreLockedMode=true','-p:PublishTrimmed=false','-p:PublishSingleFile=false','-p:DebugType=None','-p:DebugSymbols=false','-p:ContinuousIntegrationBuild=true',('-p:FolderLensBuildFlavor='+$BuildFlavor),('-p:OutDir='+$buildOutput),'-o',$output)
  $null=Invoke-LoggedProcess $dotnet $arguments (Join-Path $releaseRoot ('logs\publish-'+$project.name))
  Copy-VerifiedTree $output $project.destination
 }
@@ -62,9 +62,11 @@ $capability=[ordered]@{buildId=$id;workerSha256=(Get-FileHash -LiteralPath $work
 Write-JsonFile $capability (Join-Path $appRoot 'CAPABILITIES.json')
 $after=Get-BuildInputs
 if($inputs.sha256 -ne $after.sha256){throw "Source changed during publish; candidate incomplete and not certifiable: $releaseRoot"}
-Write-JsonFile ([ordered]@{buildId=$id;source=$after;runtime=$Runtime;configuration=$Configuration;status='CANDIDATE_UNVERIFIED';releaseVerdict='NO-GO';builtUtc=[DateTime]::UtcNow.ToString('o')}) (Join-Path $appRoot 'BUILD-INFO.json')
+Write-JsonFile ([ordered]@{buildId=$id;source=$after;runtime=$Runtime;configuration=$Configuration;buildFlavor=$BuildFlavor;developmentDiagnostics=($BuildFlavor -eq 'Development');status='CANDIDATE_UNVERIFIED';releaseVerdict='NO-GO';builtUtc=[DateTime]::UtcNow.ToString('o')}) (Join-Path $appRoot 'BUILD-INFO.json')
 $manifest=[ordered]@{schemaVersion=1;buildId=$id;sourceSha256=$after.sha256;status='CANDIDATE_UNVERIFIED';releaseVerdict='NO-GO';sourceGitHead=$after.gitHead;selfContainedDotNet=$true;selfContainedWindowsAppSdk=$true;requiredFiles=@('FolderLens.App.exe','FolderLens.App.dll','FolderLens.App.runtimeconfig.json','coreclr.dll','hostfxr.dll','hostpolicy.dll','Microsoft.UI.Xaml.dll','Microsoft.Graphics.Canvas.dll','WebView2Loader.dll','workers/FolderLens.Media.Worker.exe','workers/FolderLens.RawBridge.dll','workers/libraw.dll','workers/libvips-42.dll','workers/magick/policy.xml','content-worker/FolderLens.Content.Worker.exe','native/ffmpeg/ffmpeg.exe','native/ffmpeg/ffprobe.exe','runtime/webview2/msedgewebview2.exe','SBOM.json','THIRD-PARTY-NOTICES.md','BUILD-INFO.json','CAPABILITIES.json','portable.json');files=Get-ReleaseFiles $appRoot;gates=@{cleanOfflinePortable='NOT_RUN';cleanOfflineInstaller='NOT_RUN';upgradeCancelUninstall='NOT_RUN';allP1Acceptance='NOT_RUN';referenceHardwarePerformance='NOT_RUN';sourceLicenseObligations='BLOCKED'}}
 $manifest.requiredFiles+=@(Get-RequiredWorkerFiles)
+$manifest.buildFlavor=$BuildFlavor
+$manifest.developmentDiagnostics=($BuildFlavor -eq 'Development')
 $manifest.requiredFiles+=@('App.xbf','MainWindow.xbf','FolderLens.App.pri')
 Write-JsonFile $manifest (Join-Path $releaseRoot 'release-manifest.json')
 Write-JsonFile ([ordered]@{artifactRoot=$releaseRoot;buildId=$id}) (Join-Path $script:ProjectRoot 'artifacts\publish\latest-candidate.json')

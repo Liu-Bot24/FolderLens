@@ -9,10 +9,10 @@ public sealed partial class MainWindow
     private long directoryNavigationRequest;
     private string BrowsedDirectory=>activeCollectionId is null&&root.Length>0
         ?Path.Combine(root,advanced?.DirectoryScope??""):root;
-    private async Task<bool> TryBrowseCurrentRoot(string path,long navigation)
+    private async Task<bool> TryBrowseCurrentRoot(string path,long navigation,FilterSpec requestedFilter)
     {
         if(closing||replacingRoot||!browserRootReady||catalog is null||activeCollectionId is not null||rootId.Length==0||
-            scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(CurrentFilter()))return false;
+            scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(requestedFilter))return false;
         string? relative=DirectoryBrowseScope.Relative(root,path);
         // Only a same-directory refresh can reuse this scan. Navigating into a
         // child must retire the parent traversal and establish the chosen root.
@@ -29,7 +29,7 @@ public sealed partial class MainWindow
         if(!known)return false;
         await ReturnToBrowser();
         if(closing||version!=rootChangeVersion||navigation!=directoryNavigationRequest||view!=viewRestoreRevision)return true;
-        var current=CaptureView();
+        var current=CaptureView(requestedFilter);
         await RestoreSavedView(current with{Filter=current.Filter with{DirectoryScope=relative,ScopeDirectFiles=false},SelectedPath=null,ScrollAnchorPath=null,ScrollOffset=0,Preview=null},recheckDirectory:true);
         return true;
     }

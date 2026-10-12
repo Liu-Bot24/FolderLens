@@ -54,6 +54,7 @@ public sealed partial class MainWindow
     private void AcceptBrowserInteraction(bool changesViewport=false)
     {
         if(closing||updatingBrowser)return;
+        CancelPendingFileOpen();
         browserInteractionVersion++;pendingViewRestore=null;pendingPreviewRestore=null;
         if(changesViewport)BeginBrowserMovement();
         else if(browserOffsetOwner is {} owner)browserOffsetOwner=owner with{InteractionVersion=browserInteractionVersion};

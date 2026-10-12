@@ -14,6 +14,7 @@ public sealed partial class MainWindow
     private TextBlock? loadingText;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? fitResizeTimer;
     private long previewLayoutRevision;
+    private readonly SemaphoreSlim fitResolutionGate=new(1,1);
     private void InitializePreviewState()
     {
         ImageCanvas.CreateResources+=ImageResourcesCreated;
@@ -54,14 +55,32 @@ public sealed partial class MainWindow
     private async Task EnsureFitResolution(FileRow row,long current,CancellationToken cancellation)
     {
         using var operation=browserWork.Enter();if(operation is null||closing)return;
+        await fitResolutionGate.WaitAsync(cancellation);
+        bool IsCurrent()=>!closing&&current==selection&&ReferenceEquals(selected,row)&&!cancellation.IsCancellationRequested;
+        Func<bool> owns=IsCurrent;
+        try
+        {
+        if(!IsCurrent()||offlinePreview)return;
+        int requestedRotation=rotation,requestedPage=imagePage;long layout=previewLayoutRevision,device=imageResourceRevision;
+        double raster=Shell.XamlRoot.RasterizationScale,canvasWidth=ImageCanvas.ActualWidth,canvasHeight=ImageCanvas.ActualHeight;
+        owns=()=>IsCurrent()&&rotation==requestedRotation&&imagePage==requestedPage&&layout==previewLayoutRevision&&device==imageResourceRevision
+            &&Shell.XamlRoot.RasterizationScale==raster&&ImageCanvas.ActualWidth==canvasWidth&&ImageCanvas.ActualHeight==canvasHeight&&zoom<=0&&!offlinePreview;
         if(verifyPreviewUpdateBarrier is not null)await verifyPreviewUpdateBarrier("fit",cancellation);
-        if(rawPreviewOnly){await EnsureEmbeddedRawResolution(row,current,cancellation);return;}
+        if(!owns())return;
+        if(rawPreviewOnly){await EnsureEmbeddedRawResolution(row,current,cancellation,canPresent:owns);return;}
         if(fitBitmap is null||!animationNeedsOpen||sourceWidth<=0||sourceHeight<=0||zoom>0||row.Kind!="image")return;
-        double raster=Shell.XamlRoot.RasterizationScale,scale=EffectiveScale()*raster;var actual=fitBitmap.SizeInPixels;
+        double scale=EffectiveScale()*raster;var actual=fitBitmap.SizeInPixels;
         // Upscaling cannot reveal more detail than the original pixels.
         if(actual.Width+1>=Math.Min(sourceWidth,sourceWidth*scale)&&actual.Height+1>=Math.Min(sourceHeight,sourceHeight*scale))return;
-        int width=Math.Max(256,(int)(ImageCanvas.ActualWidth*raster)),height=Math.Max(256,(int)(ImageCanvas.ActualHeight*raster));
-        if(rotation%2!=0)(width,height)=(height,width);int heldRotation=rotation;
-        var reply=await previewWorker!.RequestPixels(SourcePath(row),"fit",Context(row,current),new(width,height,PageIndex:imagePage),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));await PresentFit(reply,current,cancellation);if(current==selection){rotation=heldRotation;ImageCanvas.Invalidate();}
+        int width=Math.Max(256,(int)(canvasWidth*raster)),height=Math.Max(256,(int)(canvasHeight*raster));
+        if(requestedRotation%2!=0)(width,height)=(height,width);
+        verifyFitDecodeRequested?.Invoke();
+        var reply=await previewWorker!.RequestPixels(SourcePath(row),"fit",Context(row,current),new(width,height,PageIndex:requestedPage),cancellation,Stamp(row),approvedCloud.Contains(CloudKey(row)));
+        try{if(verifyFitResponseBarrier is not null)await verifyFitResponseBarrier(cancellation);}
+        catch{await previewWorker.ReleaseAsset(reply);throw;}
+        await PresentFit(reply,current,cancellation,owns);
+        }
+        catch(Exception error) when(!owns()){RecordWebView("Retired fit refresh failed: "+error.GetType().Name);}
+        finally{fitResolutionGate.Release();}
     }
 }

@@ -16,18 +16,21 @@ public sealed partial class MainWindow
     {
         if(sender is FrameworkElement element)element.Clip=new RectangleGeometry{Rect=new(0,0,args.NewSize.Width,args.NewSize.Height)};
     }
-    private async Task<bool> SelectBrowserOrdinal(VirtualResults source,int index,CancellationToken cancellation)
+    private async Task<bool> SelectBrowserOrdinal(VirtualResults source,int index,CancellationToken cancellation,PendingFileOpen? fileOpen=null)
     {
-        CancelIncomingPreparation();AcceptBrowserInteraction(changesViewport:true);
+        if(fileOpen is null){CancelIncomingPreparation();AcceptBrowserInteraction(changesViewport:true);}
+        else if(!OwnsFileOpen(fileOpen))return false;
         long request=++browserSelectionRequest;
+        if(fileOpen is not null&&verifyFileOpenPageBarrier is not null)await verifyFileOpenPageBarrier(cancellation);
         var row=(FileRow)source[index]!;await EnsureCurrentRowLoaded(row,cancellation,foreground:true);
-        if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||results?.Contains(row)!=true)return false;
+        if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||results?.Contains(row)!=true||fileOpen is not null&&!OwnsFileOpen(fileOpen))return false;
         // The page read can outlive the input debounce. Reclaim positioning at
         // the actual navigation point, after its asynchronous boundary.
         BeginBrowserMovement();
         var view=ActiveBrowser;
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
         try{RevealBrowserRow(row);view.SelectedItem=row;view.ScrollIntoView(row);}finally{syncingBrowserSelection=prior;}
+        if(fileOpen is not null)pendingFileOpen=null;
         var preview=SelectPreview(row);long adopted=browserSelectionRequest;await preview;
         return adopted==browserSelectionRequest&&!closing&&!cancellation.IsCancellationRequested&&ReferenceEquals(selected,row);
     }

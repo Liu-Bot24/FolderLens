@@ -228,8 +228,8 @@ function Get-RequiredWorkerFiles {
 function Test-PrivateReleasePath([string]$Path) {
     $normalized=$Path.Replace('\','/')
     $name=($normalized -split '/')[-1]
-    return ($normalized -match '(^|/)(data|fixtures|\.git|\.nuget|obj|bin)/' -or
-        $name -match '\.(pdb|user)$|\.(sqlite|sqlite3|db)(-(wal|shm|journal))?$|\.bak($|[-.])')
+    return ($normalized -match '(^|/)(data|fixtures|logs|\.git|\.nuget|obj|bin)/' -or
+        $name -match '\.(pdb|user|log|jsonl)($|\.)|^fatal-(latest|previous)\.json$|\.(sqlite|sqlite3|db)(-(wal|shm|journal))?$|\.bak($|[-.])')
 }
 function Get-PackageFiles([string]$AppRoot, $Manifest) {
     $AppRoot=[IO.Path]::GetFullPath($AppRoot).TrimEnd('\')

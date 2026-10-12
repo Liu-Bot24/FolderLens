@@ -52,27 +52,27 @@
       "license": "LGPL-2.1-only OR CDDL-1.0"
     },
     {
-      "sourceObligation": "BLOCKED: exact Gyan build archive, linked-codec source revisions and complete corresponding source not yet captured",
+      "sourceObligation": "BLOCKED: official archive and FFmpeg commit captured; exact linked-codec source revisions and complete corresponding source still require capture",
       "buildConfiguration": "native/ffmpeg/buildconf.txt",
       "id": "FFmpeg",
-      "acquisition": "Copied from existing Gyan WinGet installation on development host",
-      "source": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+      "acquisition": "Downloaded official Gyan full-build archive; SHA256 checked against supplier sha256 file",
+      "source": "https://github.com/FFmpeg/FFmpeg/commit/38b88335f9",
       "files": [
         {
           "file": "ffmpeg.exe",
-          "Hash": "74DB6C184A03DBA2BDFE23E1A1F41CF5A8385BC1DE6A7A1B26DB1DC541ABEF93"
+          "Hash": "AD8F211BC894755E0061C55AB280AE00E8D3D4F15A8CC4372B24CFA247B5942E"
         },
         {
           "file": "ffprobe.exe",
-          "Hash": "55BB6C6289367AE2383EFA86B26BF2596F8ADB72AC747360EB13DF162354161C"
+          "Hash": "9DF3B0B5275E830961DF6D94E1F7A71121A7ABD5FF708E9FEC8A0B6084A55015"
         }
       ],
-      "version": "8.0.1-full_build-www.gyan.dev",
+      "version": "8.1.2-full_build-www.gyan.dev",
       "notices": [
         "native/ffmpeg/LICENSE.txt"
       ],
-      "archiveSha256": null,
-      "archiveUrl": null,
+      "archiveSha256": "0FFF188997A499B5382E0F66E845D4556C48C54F0113EBED4853D556DBDD7059",
+      "archiveUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-full_build.7z",
       "upstream": "https://www.gyan.dev/ffmpeg/builds/",
       "license": "GPL-3.0-or-later (actual --enable-gpl --enable-version3 build)"
     },

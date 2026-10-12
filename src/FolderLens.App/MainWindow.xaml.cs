@@ -167,19 +167,25 @@ public sealed partial class MainWindow : Window
         }
     }
     private static string Tag(ComboBox box)=>((ComboBoxItem)box.SelectedItem).Tag.ToString()!;
-    private FilterSpec CurrentFilter()
+    private FilterSpec CurrentFilter(bool navigationDraft=false)
     {
-        var ranges=BasicFilterRanges.Merge(advanced?.Ranges,MinSize.Value,MaxSize.Value,MinWidth.Value,MinHeight.Value);
+        var ranges=BasicFilterRanges.MergeExactDimensions(advanced?.Ranges,MinSize.Value,MaxSize.Value,MinWidth.Text,MinHeight.Text);
         string category=Tag(Category);
-        var filter=(advanced??new FilterSpec()) with{RootId=rootId,ObservedRootEpoch=activeCollectionId is null?epoch:null,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};filter.Validate();return filter;
+        var filter=(advanced??new FilterSpec()) with{RootId=rootId,ObservedRootEpoch=activeCollectionId is null?epoch:null,CollectionId=activeCollectionId,IncludeCollections=includedCollectionIds.ToArray(),ExcludeCollections=excludedCollectionIds.ToArray(),Kinds=FileCategories.Kinds(category),Extensions=FileCategories.Extensions(category),IncludePending=PendingView.IsChecked==true,Recursive=true,MaxFolderLevels=activeCollectionId is null?browseDepth:null,Raw=Tag(RawMode),Animation=Tag(AnimationMode),ShowHidden=ShowHidden.IsChecked==true,NamePathQuery=Search.Text,SearchScope="name",Formats=savedContentFormats.ToArray(),FileExtensions=selectedFileExtensions.ToArray(),Ranges=ranges,Grouping=folderGrouping,Sort=new(Tag(SortField),sortDescending?"desc":"asc")};
+        if(activeCollectionId is not null)filter=filter with{SchemaVersion=2};
+        // First navigation has no catalog root yet. Validate every control in a
+        // temporary scope, but return the unbound draft; OpenRoot must bind the
+        // accepted identity before assigning it as a submitted query.
+        if(navigationDraft&&filter.RootId.Length==0)(filter with{RootId="navigation-draft"}).Validate();else filter.Validate();
+        return filter;
     }
     private bool TryCurrentFilter(out FilterSpec filter)
     {
         bool valid=TryCurrentFilter(out filter,out var error);if(!valid)ShowError(error!);return valid;
     }
-    private bool TryCurrentFilter(out FilterSpec filter,out Exception? failure)
+    private bool TryCurrentFilter(out FilterSpec filter,out Exception? failure,bool navigationDraft=false)
     {
-        try{filter=CurrentFilter();failure=null;return true;}
+        try{filter=CurrentFilter(navigationDraft);failure=null;return true;}
         catch(Exception error) when(error is ArgumentException or OverflowException or FormatException)
         {
             filter=null!;failure=error;return false;
@@ -207,6 +213,7 @@ public sealed partial class MainWindow : Window
     private long scanCancelRevision;
     private void CancelScan(object sender,RoutedEventArgs e)
     {
+        CancelPendingFileOpen();
         scanCancelRevision++;activeBackgroundScan?.Cancel();scanStop.Cancel();Status.Text="正在停止扫描…";
         if(browserRootReady&&!replacingRoot)_=PublishStoppedScan(scanTask,scanStop,rootChangeVersion,directoryNavigationRequest,scanCancelRevision);
     }
@@ -222,32 +229,40 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception error){if(version==rootChangeVersion&&!closing)ShowScanError(error);}
     }
-    private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false)
+    private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false,SavedView? restoredView=null,Action? onAccepted=null,Func<bool>? canAccept=null,PendingFileOpen? fileOpen=null)
     {
+        if(!ReferenceEquals(pendingFileOpen,fileOpen))CancelPendingFileOpen();
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
         // Validate the draft before retiring work or recording navigation history.
-        if(rootId.Length>0&&!TryCurrentFilter(out _))return;
+        FilterSpec requestedFilter;
+        if(restoredView is not null){requestedFilter=restoredView.Filter;requestedFilter.Validate();}
+        else if(!TryCurrentFilter(out requestedFilter,out var draftError,navigationDraft:true)){ShowError(draftError!);return;}
         long navigation=++directoryNavigationRequest;
+        bool OwnsAdmission()=>!closing&&navigation==directoryNavigationRequest&&(canAccept?.Invoke()??true);
         CancelIncomingPreparation();
         CancelPendingSearch();
         SavedView? acceptedView=null;
-        var requestedAdvanced=advanced;
+        var requestedAdvanced=restoredView?.Filter??advanced;
         try
         {
-        acceptedView=rootId.Length>0?CaptureView():null;
+        acceptedView=previousView??CaptureAcceptedView();
         if(!forceRefresh&&!preserveDirectoryScope&&!path.StartsWith("collection:",StringComparison.Ordinal))
         {
             path=PathRules.ValidateSource(path);
-            if(await TryBrowseCurrentRoot(path,navigation))return;
-            if(closing||navigation!=directoryNavigationRequest)return;
+            if(await TryBrowseCurrentRoot(path,navigation,requestedFilter))return;
+            if(!OwnsAdmission())return;
         }
         // Refuse a scan that cannot start before cancelling the current view or
         // clearing its rows. Existing scope queries remain available at the limit.
-        if(!path.StartsWith("collection:",StringComparison.Ordinal))await catalog.EnsureBrowsingBudget(lifetime.Token);
-        if(closing||navigation!=directoryNavigationRequest)return;
+        if(!path.StartsWith("collection:",StringComparison.Ordinal))
+        {
+            if(verifyRootPreflightBarrier is not null)await verifyRootPreflightBarrier(lifetime.Token);
+            await catalog.EnsureBrowsingBudget(lifetime.Token);
+        }
+        if(!OwnsAdmission())return;
         }
         catch(OperationCanceledException){return;}
-        catch(Exception error){if(navigation==directoryNavigationRequest)ShowScanError(error);return;}
+        catch(Exception error){if(OwnsAdmission())ShowScanError(error);return;}
         long requested=++rootChangeVersion;
         if(!preserveDirectoryScope||pendingViewRestore?.RootVersion!=requested)
         {
@@ -270,12 +285,12 @@ public sealed partial class MainWindow : Window
             // Keep the accepted rows, snapshot and root until admission succeeds.
             // Another scan can exhaust the budget during the identity probe.
             replacingRoot=true;
-            await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion)return;
-            await ReturnToBrowser();if(requested!=rootChangeVersion||closing)return;
+            await rootChangeGate.WaitAsync(lifetime.Token);acquired=true;if(requested!=rootChangeVersion||!OwnsAdmission())return;
+            await ReturnToBrowser();if(requested!=rootChangeVersion||!OwnsAdmission())return;
             bool ownedScan=backgroundScans.Any(s=>ReferenceEquals(s.Completion,scanTask));
-            await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token);scanTask=null;metadataTask=null;
+            await RootTaskRetirement.Wait(ownedScan?null:scanTask,metadataTask,scanStop.Token,lifetime.Token,RecordRetiredRootFailure);scanTask=null;metadataTask=null;
             await StopScansForNavigation();
-            if(requested!=rootChangeVersion)return;
+            if(requested!=rootChangeVersion||!OwnsAdmission())return;
             scanStop.Dispose();scanStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             if(collectionScope)
             {
@@ -285,10 +300,13 @@ public sealed partial class MainWindow : Window
             {
                 if(verifyRootAdmissionBarrier is not null)await verifyRootAdmissionBarrier(scanStop.Token);
                 var opened=await new RootIdentityResolver(catalog,verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Open(path,scanStop.Token);
-                if(requested!=rootChangeVersion||closing)return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=null;
+                if(requested!=rootChangeVersion||!OwnsAdmission())return;root=path;rootId=opened.RootId;epoch=opened.Epoch;activeBackgroundScan=null;
             }
             accepted=true;
-            if(pendingViewRestore is null)ResetBrowserStart();
+            if(restoredView is not null)
+            {
+                ApplySavedFilter(restoredView.Filter);DetailsMode.IsChecked=restoredView.Details;UpdatePathPresentationControl();
+            }
             monitor?.Dispose();monitor=null;
             scanProgress.Clear();
             if(recordHistory&&acceptedView is not null&&!string.Equals(acceptedView.Root,path,StringComparison.Ordinal))navigationHistory.VisitFrom(previousView??acceptedView);
@@ -301,6 +319,11 @@ public sealed partial class MainWindow : Window
             browserScanError=null;browserEmptyError=null;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
             firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
             browserRootReady=true;
+            var acceptedFilter=requestedFilter with{RootId=rootId,ObservedRootEpoch=collectionScope?null:epoch,CollectionId=activeCollectionId,
+                DirectoryScope=advanced?.DirectoryScope??"",ScopeDirectFiles=advanced?.ScopeDirectFiles??false};
+            submittedBrowserFilter=acceptedFilter;
+            onAccepted?.Invoke();
+            if(pendingViewRestore is null)ResetBrowserStart();
             if(activeTreeRoot is {} treeRoot)treeRoot.Content=new FolderNode(path,(treeRoot.Content as FolderNode)?.Label??FolderLabel(path),rootId,"",path,Icon:(treeRoot.Content as FolderNode)?.Icon);
             QueueTreeRefresh();
             var oldHandle=resultHandle;resultHandle=null;
@@ -313,6 +336,7 @@ public sealed partial class MainWindow : Window
                 // Releasing the admission gate lets navigation cancel this work.
                 rootChangeGate.Release();acquired=false;
                 var collectionToken=scanStop.Token;long nextPublication=0;
+                if(verifyCollectionRefreshBarrier is {} collectionBarrier)await collectionBarrier(collectionToken);
                 await foreach(var _ in catalog.RefreshPlaylistBatches(activeCollectionId!,collectionToken))
                 {
                     if(requested!=rootChangeVersion||closing||collectionToken.IsCancellationRequested)return;
@@ -336,14 +360,16 @@ public sealed partial class MainWindow : Window
                 if(activeId!=rootId || activeEpoch!=epoch || replacingRoot || closing)return;scanProgress[activeId]=(p,DateTimeOffset.UtcNow);
                 Status.Text=(advanced?.DirectoryScope is {Length:>0}?"后台根目录扫描：":"")+$"已发现 {p.Files:N0} 个文件 · {p.Directories:N0} 个目录 · {p.Errors:N0} 个错误 · {p.State switch{"ready"=>"扫描完成","partial"=>"部分目录未完成","cancelled"=>"已取消",_=>"正在扫描"}}";
                 if(Stopwatch.GetTimestamp()>=nextTreeRefresh){nextTreeRefresh=Stopwatch.GetTimestamp()+Stopwatch.Frequency;QueueTreeRefresh();_=RefreshCollectionsAfterScan();}
-                if(scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
+                bool fileAwaitingPublication=p.Files>0&&pendingFileOpen is {} requestedFile&&OwnsFileOpen(requestedFile);
+                if(fileAwaitingPublication&&queryBusy)automaticQueryPending=true;
+                else if(fileAwaitingPublication||scanPreviewRefresh.TryBegin(p.Files,resultHandle is not null,queryBusy,BrowserSequenceLocked,Stopwatch.GetElapsedTime(0)))
                 {
                     _=RefreshQuery(preserveViewport:true,scanPreview:true);
                 }
             });
             Status.Text="正在查找文件…";
-            bool recursive=true;scannedPolicy=CurrentFilter();
-            ExclusionSpec[] exclusions=ScanExclusions();
+            bool recursive=true;scannedPolicy=acceptedFilter;
+            ExclusionSpec[] exclusions=ScanExclusions(acceptedFilter);
             string? scanWorker=verifyScanWorkerExecutable??ScanWorkerClient.FindExecutable(ScanWorkerDirectory);
             var rootToken=scanStop.Token;
             var indexer=new DirectoryIndexer(catalog,scanWorker){Scheduler=scanScheduler};
@@ -354,7 +380,7 @@ public sealed partial class MainWindow : Window
             _=ObserveBackgroundCompletion(activeBackgroundScan);
             scanTask=activeBackgroundScan!.Completion;
             var openedScanTask=activeBackgroundScan.Completion;
-            PreferScanDirectory(activeId,CurrentFilter().DirectoryScope);
+            PreferScanDirectory(activeId,acceptedFilter.DirectoryScope);
             UpdateBrowserEmptyState();
             rootChangeGate.Release();acquired=false;
             await RefreshQuery(preserveViewport:true,scanPreview:true);
@@ -380,7 +406,7 @@ public sealed partial class MainWindow : Window
             if(reconcilePending)_=Reconcile();
         }
         catch(OperationCanceledException){}
-        catch(Exception ex){if(requested==rootChangeVersion)ShowScanError(ex);}
+        catch(Exception ex){if(requested==rootChangeVersion&&(accepted||OwnsAdmission()))ShowScanError(ex);}
         finally
         {
             if(acquired){if(requested==rootChangeVersion)replacingRoot=false;rootChangeGate.Release();}
@@ -439,18 +465,34 @@ public sealed partial class MainWindow : Window
     private async void ApplyFilters(object sender,RoutedEventArgs e){FilterFlyout?.Hide();searchTimer?.Stop();await ApplyBrowserFilters();}
     private async Task ApplyBrowserFilters()
     {
+        CancelPendingFileOpen();
         if(rootId.Length==0)return;
-        if(!TryCurrentFilter(out var filter,out var error)){await RejectBrowserFilter(error!);return;}
+        // An invalid Apply draft has not changed the visible category or the
+        // accepted query. Keep it usable. Immediate category changes still use
+        // RefreshQuery's rejection path to retire mismatched rows.
+        if(!TryCurrentFilter(out var filter,out var error)){ShowError(error!);return;}
         if(activeCollectionId is null&&(scannedPolicy is null||!scannedPolicy.HasSameScanPolicy(filter)))
             await OpenRoot(root,true,recordHistory:false,preserveDirectoryScope:true);
         else await RefreshQuery();
     }
     private async Task RefreshQuery(bool preserveViewport=false,bool scanPreview=false)
     {
+        if(!scanPreview)CancelPendingFileOpen();
         if(!scanPreview)CancelPendingSearch();
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
         if(!browserRootReady)return;
-        if(!TryCurrentFilter(out var filter,out var error)){await RejectBrowserFilter(error!);return;}
+        FilterSpec filter;
+        if(scanPreview)
+        {
+            // A scan or metadata completion publishes the accepted query. It
+            // must not parse or submit controls the user is still editing.
+            if(!TrySubmittedBrowserFilter(out filter))return;
+        }
+        else
+        {
+            if(!TryCurrentFilter(out filter,out var error)){await RejectBrowserFilter(error!);return;}
+            submittedBrowserFilter=filter;
+        }
         if(!scanPreview)submittedSearch=Search.Text;
         CancelStaleIncomingPreparation();
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
@@ -482,6 +524,8 @@ public sealed partial class MainWindow : Window
                 var first=await catalog.ReadFirstPage(filter,queryToken,deferGrouping:filter.Grouping.Enabled);if(!IsCurrent()||closing||PreviewInterrupted())return;
                 PublishFirstPage(filter,first.Items);
                 ResultSummary.Text=filter.Grouping.Enabled?$"已显示 {first.Items.Count:N0} 个文件，正在整理文件夹分组和顺序…":$"已显示前 {first.Items.Count:N0} 个文件，正在整理完整列表…";
+                await TryConsumeFileOpen();
+                if(!IsCurrent()||closing)return;
                 if(verifyFirstPageBarrier is not null)await verifyFirstPageBarrier(queryToken);
             }
             queryPhase="createSnapshot";var handle=await catalog.CreateSnapshot(filter,epoch,gen,queryToken);
@@ -624,7 +668,7 @@ public sealed partial class MainWindow : Window
                     else{ActiveBrowser.SelectedItem=null;ClearResultSelection();}
                 }
             }
-            if(IsCurrent()&&!closing){RestoreBrowserStart(ActiveBrowser);await TryRestoreBrowserView();QueueThumbnailViewport();}
+            if(IsCurrent()&&!closing){RestoreBrowserStart(ActiveBrowser);await TryRestoreBrowserView();await TryConsumeFileOpen();QueueThumbnailViewport();}
         }
         catch(OperationCanceledException ex){await RecordQueryFailure(ex,queryPhase,attempt,candidateLease);}
         catch(Exception ex){failed=true;await RecordQueryFailure(ex,queryPhase,attempt,candidateLease);if(IsCurrent()&&!closing)ShowBrowserError(ex);}
@@ -772,7 +816,7 @@ public sealed partial class MainWindow : Window
         catch(OperationCanceledException){}
         catch(Exception error){if(current==selection&&!closing)ShowError(error);}
     }
-    private async Task EnsureEmbeddedRawResolution(FileRow row,long current,CancellationToken token,bool nativeSize=false)
+    private async Task EnsureEmbeddedRawResolution(FileRow row,long current,CancellationToken token,bool nativeSize=false,Func<bool>? canPresent=null)
     {
         if(!rawPreviewOnly||fitBitmap is null)return;
         double scale=nativeSize||zoom>0?1:EffectiveScale()*Shell.XamlRoot.RasterizationScale;
@@ -780,7 +824,7 @@ public sealed partial class MainWindow : Window
         int height=Math.Clamp((int)Math.Ceiling(sourceHeight*Math.Min(1,scale)),1,16384);
         if(fitBitmap.SizeInPixels.Width+1>=width&&fitBitmap.SizeInPixels.Height+1>=height)return;
         var reply=await previewWorker!.RequestPixels(SourcePath(row),"rawEmbedded",Context(row,current),new(width,height),token,Stamp(row),approvedCloud.Contains(CloudKey(row)));
-        await PresentFit(reply,current,token);
+        await PresentFit(reply,current,token,canPresent);
     }
     private async Task AdvanceAnimation(bool open)
     {
@@ -925,11 +969,11 @@ public sealed partial class MainWindow : Window
         return CanvasBitmap.CreateFromBytes(ImageCanvas,pixels,layout.Width,layout.Height,
             Windows.Graphics.DirectX.DirectXPixelFormat.R8G8B8A8UIntNormalized,96,CanvasAlphaMode.Premultiplied);
     }
-    private async Task PresentFit(ImageReply reply,long current,CancellationToken cancellation)
+    private async Task PresentFit(ImageReply reply,long current,CancellationToken cancellation,Func<bool>? canPresent=null)
     {
-        if(current!=selection||cancellation.IsCancellationRequested){await previewWorker!.ReleaseAsset(reply);cancellation.ThrowIfCancellationRequested();return;}
+        if(current!=selection||cancellation.IsCancellationRequested||canPresent?.Invoke()==false){await previewWorker!.ReleaseAsset(reply);cancellation.ThrowIfCancellationRequested();return;}
         RecordPreviewStage(current,"bitmap");
-        var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || cancellation.IsCancellationRequested){bitmap.Dispose();return;}
+        var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || cancellation.IsCancellationRequested||canPresent?.Invoke()==false){bitmap.Dispose();return;}
         fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";TrackDisplayedFit(reply.Message);ImageCanvas.Opacity=1;ApplyViewerSizing();
         RecordPreviewStage(current,"presented");
     }
@@ -1342,7 +1386,7 @@ public sealed partial class MainWindow : Window
             finally{if(entered){markdownLoading=false;UpdateReaderControls();ScheduleMarkdownRelease();markdownLoadGate.Release();}}
         }
     }
-    private void RecordWebView(string message){if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
+    private void RecordWebView(string message){if(!DevelopmentDiagnostics.Enabled)return;if(webviewEvents.Count>=128)webviewEvents.RemoveAt(0);webviewEvents.Add(message);}
     private void Navigate(int delta){AcceptBrowserInteraction(changesViewport:true);int count=results?.Count??firstPageSequence.Length;if(count==0)return;int index=selected is null?(delta<0?count-1:0):Math.Clamp((int)selected.Ordinal+delta,0,count-1);var row=results is not null?(FileRow)results[index]!:firstPageSequence[index];RevealBrowserRow(row);ActiveBrowser.SelectedItem=row;if(!immersive)ActiveBrowser.ScrollIntoView(row);if(viewerTop?.Visibility==Visibility.Visible&&viewerStrip is not null){viewerStrip.SelectedIndex=index;viewerStrip.ScrollIntoView(row);}}
     private void Previous(object sender,RoutedEventArgs e)=>Navigate(-1);private void Next(object sender,RoutedEventArgs e)=>Navigate(1);
     private void CopyPath(object sender,RoutedEventArgs e){if(selected is null)return;try{writePreviewClipboard(SourcePath(selected));}catch(Exception error){ShowError(error);}}
@@ -1382,7 +1426,13 @@ public sealed partial class MainWindow : Window
         {
             var filter=CurrentFilter();var views=await settings!.Load<Dictionary<string,SavedView>>("views.json")??[];var name=new TextBox{Header="浏览设置名称",Text="我的浏览设置",MaxLength=100};var dialog=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="保存浏览设置",Content=name,PrimaryButtonText="保存",CloseButtonText="取消"};if(await dialog.ShowAsync()!=ContentDialogResult.Primary||string.IsNullOrWhiteSpace(name.Text))return;
             if(views.ContainsKey(name.Text)){var confirm=new ContentDialog{XamlRoot=Shell.XamlRoot,Title="替换同名浏览设置？",Content=name.Text,PrimaryButtonText="替换",CloseButtonText="取消"};if(await confirm.ShowAsync()!=ContentDialogResult.Primary)return;}
-            views[name.Text]=CaptureView();await settings.Save("views.json",views);Status.Text="浏览设置已保存。";
+            var captured=CaptureView();await settings.Update<Dictionary<string,SavedView>>("views.json",latest=>
+            {
+                latest??=[];
+                if(views.TryGetValue(name.Text,out var expected))RequireUnchangedSavedView(latest,name.Text,expected);
+                else if(latest.ContainsKey(name.Text))throw new InvalidOperationException("同名浏览设置刚刚被保存，请重新确认是否替换。");
+                latest[name.Text]=captured;return latest;
+            });Status.Text="浏览设置已保存。";
         }catch(Exception ex){ShowError(ex);}
     }
     private async void RestoreView(object sender,RoutedEventArgs e)
@@ -1434,6 +1484,6 @@ public sealed partial class MainWindow : Window
             if(browsingStorage is not null&&markdownRuntimeRetirement.IsCompletedSuccessfully)await Cleanup(()=>browsingStorage.DisposeAsync().AsTask());
             else if(catalog is not null){await Cleanup(()=>catalog.DisposeAsync().AsTask());if(browsingStorage is not null)RecordWebView("MarkdownRuntime not retired; retaining temporary session directory");}
         }
-        finally{try{if(Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))await File.WriteAllLinesAsync(Path.Combine(dataDirectory,"webview-events.log"),webviewEvents);}finally{if(InstanceBroker is not null)await InstanceBroker.DisposeAsync();finalWindowClose=true;Close();Application.Current.Exit();}}
+        finally{try{if(DevelopmentDiagnostics.Enabled&&Environment.GetCommandLineArgs().Contains("--diagnostic-ui"))await File.WriteAllLinesAsync(Path.Combine(dataDirectory,"webview-events.log"),webviewEvents);}finally{if(InstanceBroker is not null)await InstanceBroker.DisposeAsync();finalWindowClose=true;Close();Application.Current.Exit();}}
     }
 }

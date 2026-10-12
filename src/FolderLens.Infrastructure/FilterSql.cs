@@ -65,7 +65,16 @@ public static class FilterSql
         if(filter.DirectoryRules.Any(r=>r.Enabled))
         {
             string rules=Param(System.Text.Json.JsonSerializer.Serialize(filter.DirectoryRules));
-            Known(filter.CollectionId is null?$"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))":$"f.directory_id IN(SELECT d.directory_id FROM Directories d WHERE d.directory_id IN(SELECT source.directory_id FROM CollectionMembers member JOIN Files source ON source.location_key=member.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=source.directory_id)=member.directory_location_id WHERE member.collection_id={Param(filter.CollectionId)}) AND lens_directory_visible(d.relative_path,{rules}))");
+            if(filter.CollectionId is null&&filter.DirectoryRules.All(rule=>rule.Target!="sourcePath"&&rule.BasePath is null))
+                Known($"f.directory_id IN (SELECT directory_id FROM Directories WHERE root_id={Param(filter.RootId)} AND lens_directory_visible(relative_path,{rules}))");
+            else
+            {
+            string source="lens_source_directory(r.display_path,d.relative_path)";
+            string context=filter.CollectionId is null?"d.relative_path":source;
+            Known($"f.directory_id IN (SELECT d.directory_id FROM Directories d JOIN Roots r ON r.root_id=d.root_id WHERE "+
+                (filter.CollectionId is null?$"d.root_id={Param(filter.RootId)} AND ":$"d.directory_id IN(SELECT source.directory_id FROM CollectionMembers member JOIN Files source ON source.location_key=member.location_key AND (SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=source.directory_id)=member.directory_location_id WHERE member.collection_id={Param(filter.CollectionId)}) AND ")+
+                $"lens_directory_visible_source({context},{source},{rules}))");
+            }
         }
         Set("f.format_id",filter.Formats,"identity");
         if(filter.Raw!="any")

@@ -5,6 +5,25 @@ namespace FolderLens.UnitTests;
 
 public sealed class RootTaskRetirementTests
 {
+    [Fact]public async Task NewNavigationObservesOldFailureAndStillWaitsForOtherProducer()
+    {
+        using var retired=new CancellationTokenSource();retired.Cancel();
+        var error=new IOException("previous scan failed");var observed=new List<Exception>();
+        var metadata=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting=RootTaskRetirement.Wait(Task.FromException(error),metadata.Task,retired.Token,CancellationToken.None,observed.Add);
+        Assert.Same(error,Assert.Single(observed));Assert.False(waiting.IsCompleted);
+        metadata.SetResult();await waiting;
+        using var resumed=await RootTaskRetirement.ResumeForNavigation(retired,Task.FromException(error),null,CancellationToken.None,observed.Add);
+        Assert.False(resumed.IsCancellationRequested);Assert.Equal(2,observed.Count);
+    }
+    [Fact]public async Task FailureObserverCannotHideActiveRootFailureOrShutdown()
+    {
+        var observed=new List<Exception>();
+        await Assert.ThrowsAsync<IOException>(()=>RootTaskRetirement.Wait(Task.FromException(new IOException("active failure")),null,CancellationToken.None,CancellationToken.None,observed.Add));
+        using var stopped=new CancellationTokenSource();stopped.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>RootTaskRetirement.Wait(Task.CompletedTask,null,stopped.Token,stopped.Token,observed.Add));
+        Assert.Empty(observed);
+    }
     [Fact]public async Task CancelledReconciliationDoesNotPreventSuccessiveRootOpens()
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-root-retirement",Guid.NewGuid().ToString("N"));

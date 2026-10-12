@@ -17,8 +17,14 @@ public sealed partial class MainWindow
         if(!forward&&(immersive||fullScreen)){await ReturnToBrowser();UpdateNavigationButtons();return;}
         if(forward?!navigationHistory.CanGoForward:!navigationHistory.CanGoBack)return;
         await ReturnToBrowser();
-        var target=forward?navigationHistory.GoForward(CaptureView()):navigationHistory.GoBack(CaptureView());
-        UpdateNavigationButtons();await RestoreSavedView(target,false,recheckDirectory:true);
+        long historyRevision=navigationHistory.Revision;var current=CaptureAcceptedView();if(current is null)return;
+        var target=forward?navigationHistory.PeekForward():navigationHistory.PeekBack();
+        await RestoreSavedView(target,false,recheckDirectory:true,onAccepted:()=>
+        {
+            if(historyRevision!=navigationHistory.Revision)return;
+            if(forward)navigationHistory.GoForward(current);else navigationHistory.GoBack(current);
+            UpdateNavigationButtons();
+        });
     }
     private async void BackFolder(object sender,RoutedEventArgs e){try{await NavigateHistory(false);}catch(Exception ex){ShowError(ex);}}
     private async void ForwardFolder(object sender,RoutedEventArgs e){try{await NavigateHistory(true);}catch(Exception ex){ShowError(ex);}}

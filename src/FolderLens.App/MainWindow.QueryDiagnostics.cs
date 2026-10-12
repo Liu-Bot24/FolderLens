@@ -12,6 +12,7 @@ public sealed partial class MainWindow
     private static string QueryFilterHash(FolderLens.Core.FilterSpec filter)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(filter))));
     private async Task RecordQueryFailure(Exception error,string phase,QueryAttempt attempt,string? candidateId)
     {
+        if(!FolderLens.Core.DevelopmentDiagnostics.Enabled)return;
         string? reason=error.Data["FolderLens.SnapshotFailure"] as string;
         if(reason is not ("Cancelled" or "Timeout" or "CatalogWalLimit" or "SessionDiskLimit" or "DiskFull" or "SnapshotFailed"))reason=null;
         var entry=new

@@ -197,7 +197,7 @@ public sealed partial class MainWindow
             var old=resultHandle;resultHandle=null;
             activeCollectionId=null;root=rootId="";activeTreeRoot=null;replacingRoot=false;generation++;queryBusy=false;
             if(advanced is not null)advanced=advanced with{CollectionId=null,RootId="",DirectoryScope=""};
-            lastAppliedFilter=null;RootPath.Text="";RootPath.IsReadOnly=false;
+            lastAppliedFilter=null;submittedBrowserFilter=null;RootPath.Text="";RootPath.IsReadOnly=false;
             GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=true;FolderTree.SelectedNode=collectionsTreeRoot;
             browserEmptyError=browserScanError=null;ResultSummary.Text="尚未打开目录";
             UpdatePathPresentationControl();UpdateNavigationButtons();UpdateBrowserEmptyState();

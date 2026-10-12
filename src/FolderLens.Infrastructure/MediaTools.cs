@@ -79,7 +79,7 @@ public sealed class MediaTools(string ffprobe,string ffmpeg)
         }
         return info;
     }
-    public const string CoverStrategyVersion="cover-v3-square-pixel-display-aspect";
+    public const string CoverStrategyVersion="cover-v4-ffmpeg-8.1.2-display-aspect";
     private const string AllowedFormats="mov,matroska,webm,avi,mpegts,wav,mp3,flac,ogg,aac,asf,gif,apng";
     public async Task<MediaMetadata> Probe(string path,CancellationToken cancellation,WorkerPriority priority=WorkerPriority.Metadata)
     {

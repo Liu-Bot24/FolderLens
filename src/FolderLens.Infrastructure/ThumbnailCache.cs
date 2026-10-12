@@ -372,7 +372,16 @@ public sealed class ThumbnailCache : IAsyncDisposable
         catch(EndOfStreamException error){throw new InvalidDataException("缓存 JPEG 文件头不完整。",error);}
         throw new InvalidDataException("缓存 JPEG 尺寸无效或超过缩略图像素等级。");
     }
-    internal static SafeFileHandle PinDirectory(string path)=>Pin(path,0x80,true);
+    // FILE_TRAVERSE participates in share enforcement without requiring
+    // FILE_LIST_DIRECTORY on every ancestor. Deny delete sharing to pin the
+    // directory name, but allow write sharing: Windows needs it for legitimate
+    // atomic replacements of child files. Reparse checks remain handle based.
+    internal static SafeFileHandle PinDirectory(string path)=>Pin(path,0xA0,true);
+    internal static void ValidateDirectoryPin(SafeFileHandle handle)
+    {
+        if(!GetFileInformationByHandle(handle,out var info))throw new Win32Exception(Marshal.GetLastWin32Error());
+        if((info.Attributes&1024)!=0||(info.Attributes&16)==0)throw new IOException("临时目录身份不再安全。");
+    }
     internal static SafeFileHandle PinOwnedFile(string path,uint access,uint creation=3,uint share=3)=>Pin(path,access,false,creation,share);
     internal static long OwnedFileLength(string path)
     {

@@ -23,15 +23,19 @@ public sealed partial class MainWindow
         };
         try
         {
-            await RefreshQuery(preserveViewport:true,scanPreview:true);
+            // This is an explicit grouping choice. Automatic scan publication
+            // intentionally ignores unsubmitted control changes.
+            await RefreshQuery(preserveViewport:true);
+            report["promotionState"]=new{grouping=submittedBrowserFilter?.Grouping.Enabled,groups=browserGroups?.Count,chosen=chosen is not null,
+                selectionRetained=chosen is not null&&ReferenceEquals(selected,chosen),rowRetained=chosen is not null&&results?.Contains(chosen)==true,hasBitmap=fitBitmap is not null};
             if(browserGroups is null||chosen is null||!ReferenceEquals(selected,chosen)||results?.Contains(chosen)!=true||fitBitmap is null)
                 throw new InvalidOperationException("正式分组发布丢失了首批选择或预览。");
             report["groupedFirstPagePreviewSurvivesPromotion"]=true;
             var saved=CaptureView() with{ScrollOffset=99999,ScrollAnchorPath="not-scanned-yet.png"};
-            pendingViewRestore=new(saved,viewRestoreRevision,rootChangeVersion,browserInteractionVersion);
+            pendingViewRestore=new(saved,viewRestoreRevision,rootChangeVersion,browserInteractionVersion,directoryNavigationRequest);
             await SelectPreview(chosen);
             if(pendingViewRestore is not null)throw new InvalidOperationException("新选择没有撤销旧历史恢复。");
-            pendingViewRestore=new(saved,viewRestoreRevision,rootChangeVersion,browserInteractionVersion);
+            pendingViewRestore=new(saved,viewRestoreRevision,rootChangeVersion,browserInteractionVersion,directoryNavigationRequest);
             Navigate(0);
             if(pendingViewRestore is not null)throw new InvalidOperationException("查看器导航没有撤销旧历史恢复。");
             report["newSelectionCancelsHistoryRestore"]=true;

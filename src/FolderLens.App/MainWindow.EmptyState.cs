@@ -12,6 +12,7 @@ public sealed partial class MainWindow
     private bool browserRootReady;
     private void ShowScanError(Exception error)
     {
+        verifyScanFailure?.Invoke(error);
         browserScanError=UserMessages.Error(error);reconcilePending=false;ShowBrowserError(error);
     }
     private void ClearScanError()
@@ -65,7 +66,7 @@ public sealed partial class MainWindow
         {
             BrowserEmptyTitle.Text="从一个文件夹开始";
             BrowserEmptyDescription.Text="集中浏览文件夹及各层子文件夹中的文件。";
-            BrowserEmptyDetail.Text="选择顶部文件夹，也可以把文件夹拖到这里。";
+            BrowserEmptyDetail.Text="点击“打开文件夹”，或在顶部地址栏输入文件夹路径。";
         }
         else if(replacingRoot||queryBusy||scanTask is {IsCompleted:false}&&!scanStop.IsCancellationRequested)
         {

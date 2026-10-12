@@ -4,6 +4,17 @@ using Xunit;
 namespace FolderLens.UnitTests;
 public sealed class SettingsTests
 {
+    [Fact] public async Task AtomicUpdatesRetainConcurrentEntriesAndFailedUpdateLeavesFileIntact()
+    {
+        var settings=new AtomicSettings(Path.Combine(Path.GetTempPath(),"FolderLens-settings",Guid.NewGuid().ToString("N")));
+        await settings.Save("views.json",new Dictionary<string,string>{{"original","old"}});
+        await Task.WhenAll(Enumerable.Range(0,20).Select(i=>settings.Update<Dictionary<string,string>>("views.json",latest=>
+        {latest??=[];latest[i.ToString()]="saved";return latest;})));
+        await settings.Update<Dictionary<string,string>>("views.json",latest=>{latest!["original"]="migrated";return latest;});
+        var values=await settings.Load<Dictionary<string,string>>("views.json");Assert.Equal(21,values!.Count);Assert.Equal("migrated",values["original"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>settings.Update<Dictionary<string,string>>("views.json",_=>throw new InvalidOperationException("conflict")));
+        Assert.Equal(values,await settings.Load<Dictionary<string,string>>("views.json"));
+    }
     [Fact] public async Task AtomicSettingsKeepPreviousRevisionAndRejectCorruption()
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));var settings=new AtomicSettings(directory);

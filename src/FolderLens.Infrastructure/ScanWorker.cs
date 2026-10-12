@@ -11,7 +11,7 @@ namespace FolderLens.Infrastructure;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ScanWorkerMessage(string Type,string Instance,string Nonce,string RequestId="",string? Directory=null,
-    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v7",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null,SourceFileStamp? Expected=null,SourceParentAuthorization? Parent=null);
+    bool AllowCloud=false,ScanDirectoryPacket? Packet=null,int Version=1,string Build="folderlens-scan-0.1.0-v8",string? Document=null,string? RelativeUrl=null,string? ResolvedImage=null,string? ResourceError=null,SourceFileStamp? Expected=null,SourceParentAuthorization? Parent=null,SourceImageAuthorization? ImageAuthorization=null);
 
 public static class ScanWorkerProtocol
 {
@@ -30,7 +30,7 @@ public static class ScanWorkerProtocol
         int length=BinaryPrimitives.ReadInt32LittleEndian(header);if(length is <2 or >1024*1024)throw new InvalidDataException("Invalid scan frame length.");
         byte[] bytes=new byte[length];await stream.ReadExactlyAsync(bytes,cancellation).ConfigureAwait(false);
         var message=JsonSerializer.Deserialize<ScanWorkerMessage>(bytes,Json)??throw new InvalidDataException("Empty scan message.");
-        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v7" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "packet" or "resolveImage" or "imagePath"))throw new InvalidDataException("Scan protocol mismatch.");
+        if(message.Version!=1 || message.Build!="folderlens-scan-0.1.0-v8" || message.Instance.Length!=32 || message.Nonce.Length!=64 || message.Type is not ("hello" or "directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "packet" or "resolveImage" or "imagePath" or "authorizeImage" or "imageAuthorization" or "releaseImage" or "imageReleased"))throw new InvalidDataException("Scan protocol mismatch.");
         return message;
     }
     public static async Task Serve(string pipeName,string instance,string nonce,CancellationToken cancellation=default)
@@ -39,13 +39,33 @@ public static class ScanWorkerProtocol
         await pipe.ConnectAsync(10000,cancellation).ConfigureAwait(false);
         await Write(pipe,new("hello",instance,nonce),cancellation).ConfigureAwait(false);
         var cursors=new Dictionary<string,IEnumerator<ScanDirectoryPacket>>();
+        var imageLeases=new Dictionary<string,SourceImageLease>();
         try
         {
         while(true)
         {
             ScanWorkerMessage message;
             try{message=await Read(pipe,cancellation).ConfigureAwait(false);}catch(EndOfStreamException){return;}
-            if(message.Type is not ("directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "resolveImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type is not ("directory" or "cursorOpen" or "cursorNext" or "stat" or "prepareRead" or "volume" or "resolveImage" or "authorizeImage" or "releaseImage") || message.Instance!=instance || message.Nonce!=nonce || message.RequestId.Length!=32 || message.Directory is null)throw new InvalidDataException("Invalid scan request.");
+            if(message.Type=="releaseImage")
+            {
+                if(!imageLeases.Remove(message.RequestId,out var held))throw new InvalidDataException("Unknown image authorization.");
+                held.Dispose();await Write(pipe,new("imageReleased",instance,nonce,message.RequestId),cancellation).ConfigureAwait(false);continue;
+            }
+            if(message.Type=="authorizeImage")
+            {
+                if(message.Document is null||message.RelativeUrl is null||imageLeases.Count>=16||imageLeases.ContainsKey(message.RequestId))throw new InvalidDataException("Invalid image authorization request.");
+                SourceImageAuthorization? authorization=null;string? error=null;
+                try
+                {
+                    var held=LocalResourceRules.AuthorizeImage(message.Directory,message.Document,message.RelativeUrl);
+                    imageLeases.Add(message.RequestId,held);authorization=held.Export();
+                }
+                catch(UnauthorizedAccessException){error="denied";}
+                catch(NotSupportedException){error="unsupported";}
+                catch(Exception ex) when(ex is IOException or System.ComponentModel.Win32Exception or ArgumentException){error="unavailable";}
+                await Write(pipe,new("imageAuthorization",instance,nonce,message.RequestId,ResourceError:error,ImageAuthorization:authorization),cancellation).ConfigureAwait(false);continue;
+            }
             if(message.Type is "cursorOpen" or "cursorNext")
             {
                 if(message.Type=="cursorOpen")
@@ -97,7 +117,7 @@ public static class ScanWorkerProtocol
             if(failure is not null)await Write(pipe,new("packet",instance,nonce,message.RequestId,Packet:failure),cancellation).ConfigureAwait(false);
         }
         }
-        finally{foreach(var cursor in cursors.Values)cursor.Dispose();}
+        finally{foreach(var cursor in cursors.Values)cursor.Dispose();foreach(var lease in imageLeases.Values)lease.Dispose();}
     }
 }
 
@@ -238,6 +258,42 @@ public sealed class ScanWorkerClient(string executable,TimeSpan? operationTimeou
         }
         catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("Markdown 图片路径核验超时。");}
         finally{try{if(!completed)await Stop().ConfigureAwait(false);}finally{Interlocked.Exchange(ref busy,0);}}
+    }
+    public async Task<SourceImageLease> AuthorizeImage(string root,string document,string relativeUrl,CancellationToken cancellation)
+    {
+        if(Interlocked.Exchange(ref busy,1)!=0)throw new InvalidOperationException("A scan worker has one active request.");
+        using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(operationTimeout??TimeSpan.FromSeconds(20));
+        bool completed=false;SourceImageLease? local=null;
+        try
+        {
+            if(stopRequired)await Stop().ConfigureAwait(false);
+            if(process is null)await Start(timeout.Token,cancellation).ConfigureAwait(false);
+            string request=Guid.NewGuid().ToString("N");
+            await ScanWorkerProtocol.Write(pipe!,new("authorizeImage",instance,nonce,request,PathRules.ValidateSource(root),Document:PathRules.ValidateSource(document),RelativeUrl:relativeUrl),timeout.Token).ConfigureAwait(false);
+            var reply=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
+            if(reply.Type!="imageAuthorization"||reply.Instance!=instance||reply.Nonce!=nonce||reply.RequestId!=request||
+                ((reply.ImageAuthorization is null)==(reply.ResourceError is null))||reply.ResourceError is not (null or "denied" or "unsupported" or "unavailable"))throw new InvalidDataException("Invalid image authorization response.");
+            if(reply.ResourceError is {} error)
+            {
+                completed=true;
+                throw error switch{"denied"=>new UnauthorizedAccessException("Markdown 图片不在允许范围内或仅在线。"),"unsupported"=>new NotSupportedException("该格式不用于 Markdown 内嵌预览。"),_=>new IOException("Markdown 图片暂不可用。")};
+            }
+            // Duplicate into this process before acknowledging release. A lost
+            // response leaves handles only in the worker, which Stop reclaims;
+            // a retired worker cannot release already duplicated local pins.
+            local=SourceImageLease.Duplicate(process!,reply.ImageAuthorization!);
+            await ScanWorkerProtocol.Write(pipe!,new("releaseImage",instance,nonce,request,root),timeout.Token).ConfigureAwait(false);
+            var released=await ScanWorkerProtocol.Read(pipe!,timeout.Token).ConfigureAwait(false);
+            if(released.Type!="imageReleased"||released.Instance!=instance||released.Nonce!=nonce||released.RequestId!=request)throw new InvalidDataException("Invalid image authorization release.");
+            timeout.Token.ThrowIfCancellationRequested();completed=true;
+            var result=local;local=null;return result;
+        }
+        catch(OperationCanceledException) when(!cancellation.IsCancellationRequested){throw new TimeoutException("Markdown 图片授权超时。");}
+        finally
+        {
+            local?.Dispose();
+            try{if(!completed)await Stop().ConfigureAwait(false);}finally{Interlocked.Exchange(ref busy,0);}
+        }
     }
     private async Task Start(CancellationToken cancellation,CancellationToken callerCancellation)
     {
