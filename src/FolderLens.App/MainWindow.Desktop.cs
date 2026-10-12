@@ -29,9 +29,9 @@ public sealed partial class MainWindow
     private readonly HashSet<FileRow> propertyRefreshPending=[];
     private readonly Dictionary<(ListViewBase View,DependencyObject Container),FileRow> visibleContainers=[];
     private readonly Dictionary<FileRow,int> visibleConsumerCounts=[];
-    private readonly SemaphoreSlim thumbnailSlots=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency,FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency);
-    // Bound metadata tails as well as active decoders; slow writes cannot create
-    // an unbounded backlog of completed image requests on smaller machines.
+    private readonly PriorityAdmissionGate thumbnailSlots=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency);
+    private readonly PriorityAdmissionGate propertySlots=new(1);
+    // Bounds page/property/cache work independently from decoder admission.
     private readonly FolderLens.Core.PriorityAdmissionGate thumbnailPipelines=new(FolderLens.Infrastructure.WorkerResources.Shared.ThumbnailConcurrency*2);
     private readonly List<FolderLens.Infrastructure.WorkerClient> extraThumbnailWorkers=[];
     private int thumbnailWorkCount;

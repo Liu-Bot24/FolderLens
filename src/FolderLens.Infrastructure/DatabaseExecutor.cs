@@ -8,6 +8,8 @@ public sealed class DatabaseExecutor : IAsyncDisposable
 {
     public static Action<string,double>? OperationMeasured {get;set;}
     private readonly Channel<Action<SqliteConnection>> queue = Channel.CreateBounded<Action<SqliteConnection>>(new BoundedChannelOptions(32) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+    private readonly Channel<Action<SqliteConnection>> foregroundQueue = Channel.CreateBounded<Action<SqliteConnection>>(new BoundedChannelOptions(8) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+    private readonly SemaphoreSlim queued = new(0);
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread thread;
@@ -24,14 +26,18 @@ public sealed class DatabaseExecutor : IAsyncDisposable
             using (var connection = Open(path))
             {
                 ready.TrySetResult();
-                while (queue.Reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
-                    while (queue.Reader.TryRead(out var action)) action(connection);
+                while(true)
+                {
+                    queued.Wait();
+                    if(foregroundQueue.Reader.TryRead(out var action)||queue.Reader.TryRead(out action))action(connection);
+                    else if(foregroundQueue.Reader.Completion.IsCompleted&&queue.Reader.Completion.IsCompleted)break;
+                }
             }
             // Closing SQLite may checkpoint/delete its WAL and shared-memory files.
             // Do not release owners or let a replacement reopen until that has finished.
             stopped.TrySetResult();
         }
-        catch (Exception ex) { ready.TrySetException(ex); stopped.TrySetException(ex); queue.Writer.TryComplete(ex); }
+        catch (Exception ex) { ready.TrySetException(ex); stopped.TrySetException(ex); queue.Writer.TryComplete(ex); foregroundQueue.Writer.TryComplete(ex); }
     }
     internal static SqliteConnection Open(string path)
     {
@@ -48,11 +54,11 @@ public sealed class DatabaseExecutor : IAsyncDisposable
         }
         catch { connection.Dispose(); throw; }
     }
-    public async Task<T> Execute<T>(Func<SqliteConnection, T> action, CancellationToken cancellation = default)
+    public async Task<T> Execute<T>(Func<SqliteConnection, T> action, CancellationToken cancellation = default,bool foreground=false)
     {
         await ready.Task.WaitAsync(cancellation).ConfigureAwait(false);
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await queue.Writer.WriteAsync(connection =>
+        await (foreground?foregroundQueue:queue).Writer.WriteAsync(connection =>
         {
             if (cancellation.IsCancellationRequested) { completion.TrySetCanceled(cancellation); return; }
             using var registration = cancellation.Register(() => SQLitePCL.raw.sqlite3_interrupt(connection.Handle));
@@ -62,7 +68,8 @@ public sealed class DatabaseExecutor : IAsyncDisposable
             catch (Exception ex) { completion.TrySetException(ex); }
             finally { measured?.Invoke(action.Method.DeclaringType?.FullName+"."+action.Method.Name,System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds); }
         }, cancellation).ConfigureAwait(false);
+        queued.Release();
         return await completion.Task.ConfigureAwait(false);
     }
-    public async ValueTask DisposeAsync() { queue.Writer.TryComplete(); await stopped.Task.ConfigureAwait(false); }
+    public async ValueTask DisposeAsync() { queue.Writer.TryComplete();foregroundQueue.Writer.TryComplete();queued.Release();await stopped.Task.ConfigureAwait(false); }
 }

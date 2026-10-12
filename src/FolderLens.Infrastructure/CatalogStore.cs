@@ -41,6 +41,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private readonly DatabaseExecutor reader;
     private readonly DatabaseExecutor interactiveReader;
     private readonly DatabaseExecutor sessionReader;
+    private readonly DatabaseExecutor sessionComparisonReader;
     private readonly string sessionPath;
     private readonly string catalogPath;
     private readonly string? playlistPath;
@@ -75,6 +76,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         interactiveReader=new(catalogPath);
         sessionPath=Path.Combine(dataDirectory,"sessions.sqlite");
         sessionReader=new(sessionPath);
+        sessionComparisonReader=new(sessionPath);
     }
     public async Task Initialize(CancellationToken cancellation=default,Action<string>? progress=null)
     {
@@ -189,8 +191,9 @@ public sealed partial class CatalogStore : IAsyncDisposable
         """;cmd.Parameters.AddWithValue("$count",count);return cmd.ExecuteNonQuery();
     },cancellation);
 
-    public Task<FirstResultPage> ReadFirstPage(FilterSpec filter,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
+    public Task<FirstResultPage> ReadFirstPage(FilterSpec filter,CancellationToken cancellation=default,bool deferGrouping=false)=>interactiveReader.Execute(c=>
     {
+        if(deferGrouping)filter=filter with{Grouping=new()};
         FilterQuery query=FilterSql.Build(filter); RegisterFunctions(c);
         using var transaction=c.BeginTransaction(deferred:true);
         using var revision=c.CreateCommand();revision.Transaction=transaction;revision.CommandText="SELECT catalog_revision FROM SchemaInfo";long rev=(long)revision.ExecuteScalar()!;
@@ -202,7 +205,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var rows=cmd.ExecuteReader();var items=new List<SnapshotItem>(256);
         while(rows.Read()){cancellation.ThrowIfCancellationRequested();items.Add(new(items.Count,rows.GetString(0),rows.GetInt64(1),rows.GetString(2),rows.GetString(3),rows.GetInt64(4),rows.IsDBNull(5)?null:rows.GetInt64(5),rows.GetString(6)){SourceRootId=rows.GetString(7),SourceRootPath=rows.GetString(8),SourceRootEpoch=rows.GetInt64(9),PathRevision=rows.GetInt64(10),DirectoryLocationId=rows.GetString(11),BindingRevision=rows.GetInt64(12),PhysicalIdentity=rows.IsDBNull(13)?null:rows.GetString(13)});}
         rows.Close();transaction.Commit();return new FirstResultPage(items,rev,filter.IncludePending);
-    },cancellation);
+    },cancellation,foreground:true);
 
     public Task<DirectoryListing> ReadChildDirectories(string rootId,string relativeParent,string basePath,string storage,CancellationToken cancellation=default)=>interactiveReader.Execute(c=>
     {
@@ -211,7 +214,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         using var rows=cmd.ExecuteReader();IEnumerable<string> Paths(){while(rows.Read()){cancellation.ThrowIfCancellationRequested();yield return Path.Combine(basePath,rows.GetString(0));}}return DirectoryListing.Create(storage,Paths(),cancellation);
     },cancellation);
 
-    public Task<long?> FindOrdinal(string snapshotId,string relativePath,CancellationToken cancellation=default)=>sessionReader.Execute<long?>(c=>
+    public Task<long?> FindOrdinal(string snapshotId,string relativePath,CancellationToken cancellation=default)=>sessionComparisonReader.Execute<long?>(c=>
     {
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND (snapshot_relative_path=$path OR lens_location(source_root_path,snapshot_relative_path,'sensitive')=$path) ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
     },cancellation);
@@ -430,7 +433,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         Execute(session,"DELETE FROM ResultSessions WHERE active_leases=0 AND session_id<>$active AND session_id NOT IN (SELECT session_id FROM ResultSessions WHERE state='ready' AND active_leases=0 AND session_id<>$active ORDER BY created_utc_ticks DESC,session_id DESC LIMIT $keep)",("$active",activeSessionId??""),("$keep",keep-held));
         Checkpoint(session,sessionPath,true);
     }
-    public Task<IReadOnlyList<SnapshotItem>> ReadPage(string sessionId,long ordinal,int count=256,CancellationToken cancellation=default)
+    public Task<IReadOnlyList<SnapshotItem>> ReadPage(string sessionId,long ordinal,int count=256,CancellationToken cancellation=default,bool foreground=false)
     {
         if(ordinal<0 || count is <1 or >256)throw new ArgumentOutOfRangeException(nameof(ordinal));
         return sessionReader.Execute<IReadOnlyList<SnapshotItem>>(c=>
@@ -440,10 +443,10 @@ public sealed partial class CatalogStore : IAsyncDisposable
             using var rows=cmd.ExecuteReader();var result=new List<SnapshotItem>(count);
             while(rows.Read())result.Add(new(rows.GetInt64(0),rows.GetString(1),rows.GetInt64(2),rows.GetString(3),rows.GetString(4),rows.GetInt64(5),rows.IsDBNull(6)?null:rows.GetInt64(6),rows.GetString(7)){Group=rows.IsDBNull(8)?null:ReadGroup(rows,8),SourceRootId=rows.IsDBNull(16)?null:rows.GetString(16),SourceRootPath=rows.IsDBNull(17)?null:rows.GetString(17),SourceRootEpoch=rows.IsDBNull(18)?null:rows.GetInt64(18),PathRevision=rows.GetInt64(19),DirectoryLocationId=rows.IsDBNull(20)?null:rows.GetString(20),BindingRevision=rows.GetInt64(21),PhysicalIdentity=rows.IsDBNull(22)?null:rows.GetString(22)});
             return result;
-        },cancellation);
+        },cancellation,foreground);
     }
     private static SnapshotGroup ReadGroup(SqliteDataReader rows,int offset)=>new(rows.GetString(offset),rows.GetString(offset+1),rows.GetInt64(offset+2),rows.GetInt64(offset+3),rows.GetInt64(offset+4),rows.GetInt64(offset+5),rows.GetString(offset+6),rows.GetString(offset+7));
-    public Task<IReadOnlyList<SnapshotGroup>> ReadGroups(string sessionId,CancellationToken cancellation=default)=>sessionReader.Execute<IReadOnlyList<SnapshotGroup>>(c=>
+    public Task<IReadOnlyList<SnapshotGroup>> ReadGroups(string sessionId,CancellationToken cancellation=default)=>sessionComparisonReader.Execute<IReadOnlyList<SnapshotGroup>>(c=>
     {
         using var command=c.CreateCommand();command.CommandText="SELECT group_id,relative_path,logical_bytes,match_count,start_ordinal,item_count,scan_state,capacity_scope FROM ResultGroups WHERE session_id=$session ORDER BY start_ordinal";command.Parameters.AddWithValue("$session",sessionId);
         using var rows=command.ExecuteReader();var result=new List<SnapshotGroup>();long bytes=0;
@@ -510,5 +513,5 @@ public sealed partial class CatalogStore : IAsyncDisposable
         if(changed>0)DirectoryIndexer.Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");t.Commit();return changed>0;
     },cancellation);
     public Task<T> Read<T>(Func<SqliteConnection,T> action,CancellationToken cancellation=default)=>reader.Execute(action,cancellation);
-    public async ValueTask DisposeAsync(){await writer.DisposeAsync();await reader.DisposeAsync();await interactiveReader.DisposeAsync();await sessionReader.DisposeAsync();}
+    public async ValueTask DisposeAsync(){await writer.DisposeAsync();await reader.DisposeAsync();await interactiveReader.DisposeAsync();await sessionReader.DisposeAsync();await sessionComparisonReader.DisposeAsync();}
 }

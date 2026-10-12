@@ -31,13 +31,13 @@ public sealed partial class CatalogStore
         using var row=cmd.ExecuteReader();return row.Read()?new(row.GetInt64(0),row.GetString(1),row.GetString(2),row.GetString(3),row.GetInt64(4),row.GetString(5),row.GetInt64(6),row.IsDBNull(7)?null:row.GetString(7),row.IsDBNull(8)?null:row.GetString(8)):null;
     }
     internal Func<string,bool,SourceFileStamp?,CancellationToken,Task<ScanDirectoryPacket>>? ReadBindingProbeOverride {get;set;}
-    public async Task<FileProperties> ResolveFileRead(string rootId,string entryId,long version,SourceFileProbe probe,bool allowCloud,CancellationToken token)
+    public async Task<FileProperties> ResolveFileRead(string rootId,string entryId,long version,SourceFileProbe probe,bool allowCloud,CancellationToken token,bool foreground=false)
     {
-        var file=await ReadFileProperties(rootId,entryId,version,token).ConfigureAwait(false)??throw new IOException("FileChanged");
+        var file=await ReadFileProperties(rootId,entryId,version,token,foreground).ConfigureAwait(false)??throw new IOException("FileChanged");
         if(file.HydrationState=="placeholder"&&!allowCloud)return file;
         if(file.HydrationState!="placeholder"&&SourceObservationSignature.Parse(file.SourceSignature).Identity.Length>0)return file;
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(30));var cancellation=deadline.Token;
-        var owner=await interactiveReader.Execute(c=>{using var t=c.BeginTransaction(deferred:true);return ReadBindingPosition(c,t,rootId,entryId,version);},cancellation).ConfigureAwait(false)??throw new IOException("FileChanged");
+        var owner=await interactiveReader.Execute(c=>{using var t=c.BeginTransaction(deferred:true);return ReadBindingPosition(c,t,rootId,entryId,version);},cancellation,foreground).ConfigureAwait(false)??throw new IOException("FileChanged");
         if(owner.Signature!=file.SourceSignature)throw new IOException("FileChanged");
         string root=Path.GetFullPath(owner.Root).TrimEnd('\\','/')+Path.DirectorySeparatorChar;
         string path=FolderLens.Core.PathRules.ValidateSource(Path.GetFullPath(Path.Combine(root,owner.Relative)));
@@ -75,8 +75,8 @@ public sealed partial class CatalogStore
                 ("$entry",entryId),("$version",boundVersion),("$scan",owner.Signature),("$path",owner.PathRevision),("$epoch",owner.Epoch),("$location",owner.Location),("$binding",owner.Binding),("$signature",signature),("$hydration",full.Hydration));
             DirectoryIndexer.Execute(c,t,"DELETE FROM FieldStates WHERE entry_id=$entry AND source_version=$version AND error_code='FileChanged'",("$entry",entryId),("$version",version));
             t.Commit();return changed;
-        },cancellation).ConfigureAwait(false);
+        },cancellation,foreground).ConfigureAwait(false);
         if(contentChanged)throw new IOException("FileChanged");
-        return await ReadFileProperties(rootId,entryId,version,cancellation).ConfigureAwait(false)??throw new IOException("FileChanged");
+        return await ReadFileProperties(rootId,entryId,version,cancellation,foreground).ConfigureAwait(false)??throw new IOException("FileChanged");
     }
 }

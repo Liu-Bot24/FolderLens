@@ -18,10 +18,10 @@ public sealed partial class MainWindow
     }
     private async Task<bool> SelectBrowserOrdinal(VirtualResults source,int index,CancellationToken cancellation)
     {
-        CancelIncomingPreparation();
+        CancelIncomingPreparation();AcceptBrowserInteraction();
         long request=++browserSelectionRequest;
-        var row=(FileRow)source[index]!;await source.EnsureLoaded(row,cancellation);
-        if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||!ReferenceEquals(results,source))return false;
+        var row=(FileRow)source[index]!;await EnsureCurrentRowLoaded(row,cancellation,foreground:true);
+        if(request!=browserSelectionRequest||closing||cancellation.IsCancellationRequested||results?.Contains(row)!=true)return false;
         var view=ActiveBrowser;
         bool prior=syncingBrowserSelection;syncingBrowserSelection=true;
         try{RevealBrowserRow(row);view.SelectedItem=row;view.ScrollIntoView(row);}finally{syncingBrowserSelection=prior;}

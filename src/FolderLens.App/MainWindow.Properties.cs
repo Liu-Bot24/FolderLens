@@ -35,7 +35,7 @@ public sealed partial class MainWindow
     private async Task<FileProperties> ResolveRow(FileRow row,string id,CancellationToken token)
     {
         long collectionVersion=collectionChangeVersion;
-        var file=await catalog!.ResolveFileRead(SourceRootId(row),row.Item!.EntryId,row.Item.Version,prefetchSourceProbe,approvedCloud.Contains(CloudKey(row)),token);
+        var file=await catalog!.ResolveFileRead(SourceRootId(row),row.Item!.EntryId,row.Item.Version,prefetchSourceProbe,approvedCloud.Contains(CloudKey(row)),token,foreground:ReferenceEquals(row,selected));
         token.ThrowIfCancellationRequested();
         row.UpdateProperties(file,collectionVersion==collectionChangeVersion);return file;
     }

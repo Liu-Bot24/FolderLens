@@ -61,6 +61,7 @@ public sealed partial class MainWindow
         var sequence=firstPageSequence;
         flatBrowserItems=new(sequence.Length,i=>sequence[i],item=>item is FileRow row?Array.IndexOf(sequence,row):-1);
         AttachBrowserView(flatBrowserItems);
+        RestoreBrowserStart(ActiveBrowser);
         if(viewerStrip is not null)viewerStrip.ItemsSource=flatBrowserItems;
     }
     private IReadOnlyList<RangeEdit> PromoteFirstPage(VirtualResults next,IReadOnlyList<SnapshotItem> matches)
@@ -81,6 +82,13 @@ public sealed partial class MainWindow
         // index once for a large publication; retained rows keep their decoded
         // thumbnails. Do not generate a managed row for each inserted position.
         flatBrowserItems!.UpdateRanges(changes,i=>(FileRow)next[i]!,next.IndexOf);
+        firstPageRows.Clear();firstPageSequence=[];firstPageFilter=null;
+    }
+    private void BindPromotedFirstPage(VirtualResults next,IReadOnlyList<SnapshotGroup> groups)
+    {
+        // Promote retained file identities into the final grouped projection.
+        // Do not clear a selected first-page image or its in-flight preview.
+        BindBrowserResults(next,groups);
         firstPageRows.Clear();firstPageSequence=[];firstPageFilter=null;
     }
 }

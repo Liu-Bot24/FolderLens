@@ -9,7 +9,7 @@ public sealed partial class MainWindow
 {
     private bool restoringView;
     private long viewRestoreRevision;
-    private sealed record PendingViewRestore(SavedView View,long Revision,long RootVersion);
+    private sealed record PendingViewRestore(SavedView View,long Revision,long RootVersion,long InteractionVersion);
     private PendingViewRestore? pendingViewRestore;
     private sealed record PendingPreviewRestore(PreviewBookmark Bookmark,string Path,long RootVersion);
     private PendingPreviewRestore? pendingPreviewRestore;
@@ -65,7 +65,9 @@ public sealed partial class MainWindow
         restoringView=true;long revision=++viewRestoreRevision,requestedRoot=rootChangeVersion+(sameRoot?0:1);
         RetireShellRefreshView();
         CancelIncomingPreparation();
-        pendingViewRestore=new(saved,revision,requestedRoot);
+        pendingViewRestore=new(saved,revision,requestedRoot,browserInteractionVersion);
+        keepBrowserStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
+        retainedViewportAnchor=null;
         try
         {
             if(sameRoot&&activeCollectionId is null&&(recheckDirectory||previous!.Filter.DirectoryScope!=saved.Filter.DirectoryScope))
@@ -124,12 +126,13 @@ public sealed partial class MainWindow
             var list=saved.Details?(ListViewBase)FilesList:FilesGrid;
             long? selectedOrdinal=saved.SelectedPath is {} path?await catalog.FindOrdinal(handle.Id,path,lifetime.Token):null;
             long? anchorOrdinal=saved.ScrollAnchorPath is {Length:>0} anchor?await catalog.FindOrdinal(handle.Id,anchor,lifetime.Token):null;
-            if(revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion||query!=generation||sourceResults!=results)return;
+            if(!ReferenceEquals(pendingViewRestore,pending)||pending.InteractionVersion!=browserInteractionVersion||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion||query!=generation||sourceResults!=results)return;
             // A partial first scan may not yet contain the saved file. Retry on its next snapshot.
             if((scanTask is {IsCompleted:false}||metadataTask is {IsCompleted:false})&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
             pendingViewRestore=null;
+            keepBrowserStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
             if(selectedOrdinal is not null&&saved.Preview is {} preview&&saved.SelectedPath is {} previewPath)pendingPreviewRestore=new(preview,previewPath,requestedRoot);
-            if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);list.SelectedItem=row;}
+            if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);RestoreBrowserSelection(list,row);}
             list.UpdateLayout();
             if((anchorOrdinal??selectedOrdinal) is {} visible)list.ScrollIntoView(sourceResults[(int)visible],ScrollIntoViewAlignment.Leading);
             else FindScrollViewer(list)?.ChangeView(null,double.IsFinite(saved.ScrollOffset)?Math.Max(0,saved.ScrollOffset):0,null,true);

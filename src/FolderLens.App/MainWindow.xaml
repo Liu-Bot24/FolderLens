@@ -18,6 +18,7 @@
           <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearanceThumbnailBorder}" CornerRadius="6">
             <Grid>
               <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+              <TextBlock Text="{x:Bind ThumbnailStatus, Mode=OneWay}" Visibility="{x:Bind ThumbnailStatusVisibility, Mode=OneWay}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" Margin="8" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False" />
               <TextBlock x:Name="TextCardExcerpt" Text="{x:Bind TextExcerpt, Mode=OneWay}" Visibility="{x:Bind TextExcerptVisibility, Mode=OneWay}" Margin="12" VerticalAlignment="Top" FontSize="12" LineHeight="16" LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="{x:Bind TextExcerptLines, Mode=OneWay}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" IsHitTestVisible="False" />
               <StackPanel Visibility="{x:Bind FileIconVisibility, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="5" ToolTipService.ToolTip="{x:Bind FileTypeLabel, Mode=OneWay}">
                 <FontIcon Glyph="&#xE8A5;" FontSize="28" Foreground="{ThemeResource SystemControlHighlightAccentBrush}" />

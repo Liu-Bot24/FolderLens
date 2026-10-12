@@ -47,12 +47,12 @@ public sealed partial class MainWindow
 
             ChooseBrowserView(DetailsMode,new RoutedEventArgs());Shell.UpdateLayout();
             var deadline=DateTime.UtcNow+TimeSpan.FromSeconds(3);
-            while(DateTime.UtcNow<deadline&&(!oldTokens.All(token=>token.IsCancellationRequested)||thumbnailWorkCount>0||detailsPropertyReads==0))
+            while(DateTime.UtcNow<deadline&&(!oldTokens.All(token=>token.IsCancellationRequested)||thumbnailWorkCount>0||!visible.Any(row=>row.DemandedPropertiesLoaded&&!row.DemandedPropertiesFailed&&row.ModifiedUtcTicks is not null&&row.Resolution!="未知")))
             {await Task.Delay(25);Shell.UpdateLayout();}
             bool allCancelled=oldTokens.All(token=>token.IsCancellationRequested);
             bool workExited=thumbnailWorkCount==0;
             bool detached=FilesGrid.ItemsSource is null&&FilesGrid.Visibility==Visibility.Collapsed;
-            bool detailsUsable=ActiveBrowser==FilesList&&FilesList.Items.Count==12&&detailsPropertyReads>0;
+            bool detailsUsable=ActiveBrowser==FilesList&&FilesList.Items.Count==12&&visible.Any(row=>row.DemandedPropertiesLoaded&&!row.DemandedPropertiesFailed&&row.ModifiedUtcTicks is not null&&row.Resolution!="未知");
             report["detailsTransition"]=new
             {
                 visibleCards,blockedCards=heldRows.Count,oldRequests=oldTokens.Length,allCancelled,workExited,detached,detailsUsable,

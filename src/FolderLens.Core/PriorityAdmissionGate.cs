@@ -9,15 +9,20 @@ public sealed class PriorityAdmissionGate(int concurrency)
     private readonly LinkedList<(Func<bool> Priority,TaskCompletionSource Ready)> waiting=new();
     private int available=concurrency>0?concurrency:throw new ArgumentOutOfRangeException(nameof(concurrency));
     public int CurrentCount { get { lock(sync)return available; } }
+    public Task WaitAsync(CancellationToken cancellation=default)=>WaitAsync(()=>false,cancellation);
     public async Task WaitAsync(Func<bool> priority,CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();TaskCompletionSource ready;
+        LinkedListNode<(Func<bool> Priority,TaskCompletionSource Ready)> pending;
         lock(sync)
         {
             if(available>0){available--;return;}
-            ready=new(TaskCreationOptions.RunContinuationsAsynchronously);waiting.AddLast((priority,ready));
+            ready=new(TaskCreationOptions.RunContinuationsAsynchronously);pending=waiting.AddLast((priority,ready));
         }
-        using var registration=cancellation.Register(()=>ready.TrySetCanceled(cancellation));
+        using var registration=cancellation.Register(()=>
+        {
+            lock(sync)if(ready.TrySetCanceled(cancellation)&&pending.List is not null)waiting.Remove(pending);
+        });
         await ready.Task;
     }
     public void Release()
@@ -41,5 +46,10 @@ public sealed class PriorityAdmissionGate(int concurrency)
             if(available==concurrency)throw new SemaphoreFullException();
             available++;
         }
+    }
+    public void Release(int count)
+    {
+        if(count<1)throw new ArgumentOutOfRangeException(nameof(count));
+        for(int i=0;i<count;i++)Release();
     }
 }

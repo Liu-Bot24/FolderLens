@@ -8,11 +8,30 @@ using Microsoft.UI.Xaml;
 
 namespace FolderLens.App;
 
+public enum ThumbnailLoadState { None,Queued,Loading,Deferred,Complete }
+
 public sealed class FileRow : ObservableObject
 {
+    internal bool DemandedPropertiesLoaded {get;set;}
+    internal bool DemandedPropertiesFailed {get;set;}
     public long Ordinal {get;private set;}
     private string name="加载中…",path="",detail="",cardInfo="";
     private ImageSource? thumbnail;
+    private ThumbnailLoadState thumbnailState;
+    public ThumbnailLoadState ThumbnailState=>thumbnailState;
+    public string ThumbnailStatus=>thumbnailState switch
+    {
+        ThumbnailLoadState.Queued=>"等待加载",
+        ThumbnailLoadState.Loading=>"正在加载…",
+        ThumbnailLoadState.Deferred=>"在线文件 · 打开后读取",
+        _=>""
+    };
+    public Visibility ThumbnailStatusVisibility=>Thumbnail is null&&ThumbnailError.Length==0&&ThumbnailStatus.Length>0?Visibility.Visible:Visibility.Collapsed;
+    public void SetThumbnailState(ThumbnailLoadState state)
+    {
+        if(!SetProperty(ref thumbnailState,state))return;
+        OnPropertyChanged(nameof(ThumbnailState));OnPropertyChanged(nameof(ThumbnailStatus));OnPropertyChanged(nameof(ThumbnailStatusVisibility));
+    }
     private bool isCollected,quickCollectBusy;
     public bool IsCollected=>isCollected;
     public string CollectionGlyph=>isCollected?"\uE735":"\uE734";
@@ -45,6 +64,7 @@ public sealed class FileRow : ObservableObject
     {
         string reason=UserMessages.Error(error);
         ThumbnailError=reason+" 按 F5 刷新后重试，或打开文件查看详情。";
+        OnPropertyChanged(nameof(ThumbnailStatusVisibility));
     }
     private string resolution="未知",allocation="未知",modified="",duration="",format="";
     public string Resolution {get=>resolution;private set=>SetProperty(ref resolution,value);}
@@ -77,7 +97,7 @@ public sealed class FileRow : ObservableObject
     public void SetCollectionView(bool value){collectionView=value;OnPropertyChanged(nameof(DisplayPath));}
     public string Detail {get=>detail;private set=>SetProperty(ref detail,value);}
     public string CardInfo {get=>cardInfo;private set=>SetProperty(ref cardInfo,value);}
-    public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value)){OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(AudioOnlyVisibility));}}}
+    public ImageSource? Thumbnail {get=>thumbnail;set{if(SetProperty(ref thumbnail,value)){OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(AudioOnlyVisibility));OnPropertyChanged(nameof(ThumbnailStatusVisibility));if(value is null)SetThumbnailState(ThumbnailLoadState.None);}}}
     public Visibility FileIconVisibility=>TextExcerptVisibility!=Visibility.Visible&&!IsAudioOnly&&Item is not null&&Kind is not ("image" or "video")&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     public string FileTypeLabel=>FileTypeDisplay.Label(Name,Kind);
     public string FileTypeBadge=>FileTypeDisplay.Badge(Name,Kind);
@@ -90,7 +110,7 @@ public sealed class FileRow : ObservableObject
             throw new InvalidOperationException("文件列表已变化，请刷新后重试。");
         Item=item;Ordinal=item.Ordinal;OnPropertyChanged(nameof(QuickCollectEnabled));
     }
-    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){SetTextExcerpt("",0,false);IsAudioOnly=false;DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
+    public void Fill(SnapshotItem item){bool replaced=Item is null||Item.EntryId!=item.EntryId||Item.Version!=item.Version;Item=item;if(replaced){DemandedPropertiesLoaded=false;DemandedPropertiesFailed=false;SetTextExcerpt("",0,false);IsAudioOnly=false;DurationText="";SetCollected(false);}OnPropertyChanged(nameof(QuickCollectEnabled));Name=System.IO.Path.GetFileName(item.RelativePath);RelativePath=item.RelativePath;Kind=item.Kind;OnPropertyChanged(nameof(DisplayName));OnPropertyChanged(nameof(DisplayPath));OnPropertyChanged(nameof(NavigationPath));FormatText=System.IO.Path.GetExtension(Name).TrimStart('.').ToUpperInvariant();CardInfo=FormatText;Detail=$"{CardInfo} · {SizeText}";OnPropertyChanged(nameof(SizeText));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(FileTypeLabel));OnPropertyChanged(nameof(FileTypeBadge));}
     public void Fail(Exception error){Name="加载失败";CardInfo="请刷新后重试";Detail=UserMessages.Error(error);}
     public void DescribeImage(int width,int height,string format){CardInfo=$"{width:N0} × {height:N0}  {format.ToUpperInvariant()}";Detail=$"{CardInfo} · {SizeText}";}
     public void UpdateProperties(FileProperties file,bool updateCollection=true)
@@ -113,6 +133,7 @@ public sealed class FileRow : ObservableObject
 public sealed partial class VirtualResults : IList,IDisposable
 {
     private readonly DemandPageCache<SnapshotItem> data;
+    private readonly Func<int,CancellationToken,Task<IReadOnlyList<SnapshotItem>>> foregroundRead;
     private readonly CancellationTokenSource stop=new();
     private readonly Dictionary<int,FileRow[]> pages=[];
     private readonly LinkedList<int> recent=[];
@@ -132,17 +153,21 @@ public sealed partial class VirtualResults : IList,IDisposable
     private readonly bool collectionView;
     public void SetPresentation(double width,bool paths){cardWidth=width;showPaths=paths;foreach(var row in CachedRows())row.SetPresentation(width,paths);}
     public VirtualResults(CatalogStore catalog,ResultHandle handle,DispatcherQueue dispatcher)
-        :this(checked((int)handle.Count),(page,token)=>catalog.ReadPage(handle.Id,page*256,256,token)){collectionView=handle.CollectionId is not null;}
-    internal VirtualResults(int count,Func<int,CancellationToken,Task<IReadOnlyList<SnapshotItem>>> readPage)
+        :this(checked((int)handle.Count),(page,token)=>catalog.ReadPage(handle.Id,page*256,256,token),
+            (page,token)=>catalog.ReadPage(handle.Id,page*256,256,token,foreground:true)){collectionView=handle.CollectionId is not null;}
+    internal VirtualResults(int count,Func<int,CancellationToken,Task<IReadOnlyList<SnapshotItem>>> readPage,
+        Func<int,CancellationToken,Task<IReadOnlyList<SnapshotItem>>>? readForeground=null)
     {
         Count=count;
-        data=new(async(page,token)=>
+        async Task<IReadOnlyList<SnapshotItem>> Read(int page,CancellationToken token,bool foreground)
         {
-            var items=await readPage(page,token).ConfigureAwait(false);
+            var items=await (foreground?readForeground??readPage:readPage)(page,token).ConfigureAwait(false);
             if(items.Count!=Math.Min(256,Count-page*256)||items.Where((item,index)=>item.Ordinal!=page*256L+index).Any())
                 throw new InvalidDataException("结果页已不完整，请重新应用筛选。");
             return items;
-        });
+        }
+        data=new((page,token)=>Read(page,token,false));
+        foregroundRead=(page,token)=>Read(page,token,true);
     }
     public object? this[int index]
     {
@@ -176,7 +201,7 @@ public sealed partial class VirtualResults : IList,IDisposable
         }
         set=>throw new NotSupportedException("Read-only results.");
     }
-    public async Task EnsureLoaded(FileRow row,CancellationToken cancellation)
+    public async Task EnsureLoaded(FileRow row,CancellationToken cancellation,bool foreground=false)
     {
         using var request=CancellationTokenSource.CreateLinkedTokenSource(stop.Token,cancellation);
         request.Token.ThrowIfCancellationRequested();
@@ -184,7 +209,9 @@ public sealed partial class VirtualResults : IList,IDisposable
         try
         {
             int position=IndexOf(row);if(position<0)throw new InvalidOperationException("文件行不属于此结果源。");
-            var page=await data.Read(position/256,request.Token);
+            // The selected file must not wait for the thumbnail page cache's
+            // admission slots. This is one bounded page on the priority DB lane.
+            var page=await (foreground?foregroundRead(position/256,request.Token):data.Read(position/256,request.Token));
             request.Token.ThrowIfCancellationRequested();
             row.SetPresentation(cardWidth,showPaths);
             row.Fill(page[position%256]);

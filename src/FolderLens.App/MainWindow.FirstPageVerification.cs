@@ -14,8 +14,10 @@ public sealed partial class MainWindow
         object? binding=null;FileRow[] rows=[];object?[] images=[],containers=[];int publications=0;
         verifyFirstPageBarrier=async token=>
         {
-            publications++;binding=FilesGrid.ItemsSource;rows=FilesGrid.Items.Cast<FileRow>().ToArray();
-            Shell.UpdateLayout();var timer=Stopwatch.StartNew();
+            publications++;binding=FilesGrid.ItemsSource;
+            Shell.UpdateLayout();rows=FilesGrid.Items.Cast<FileRow>().Where(row=>IsThumbnailInViewport(FilesGrid,row)).ToArray();
+            if(rows.Length<3)throw new InvalidOperationException("首屏不足三个可见文件，无法检查首批导航。");
+            var timer=Stopwatch.StartNew();
             await WaitUntil(()=>rows.All(row=>row.Thumbnail is not null),TimeSpan.FromSeconds(10));
             images=rows.Select(row=>(object?)row.Thumbnail).ToArray();containers=rows.Select(row=>FilesGrid.ContainerFromItem(row)).ToArray();
             report["firstThumbnailMs"]=timer.Elapsed.TotalMilliseconds;

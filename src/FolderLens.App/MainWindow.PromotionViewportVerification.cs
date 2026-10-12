@@ -11,6 +11,10 @@ public sealed partial class MainWindow
         verifyFirstPageBarrier=async _=>
         {
             Shell.UpdateLayout();FindScrollViewer(FilesGrid)?.ChangeView(null,0,null,true);await Task.Delay(50);
+            if(keepBrowserStart&&CapturePublicationViewport(FilesGrid) is not null)throw new InvalidOperationException("初次打开不应保留任意文件锚点。");
+            // This half checks preservation after actual browsing intent. The
+            // unopened/top-pinned state is covered separately by viewport-loading.
+            AcceptBrowserInteraction();
             before=CapturePublicationViewport(FilesGrid);
             if(before is null)throw new InvalidOperationException("No first-page viewport anchor.");
         };

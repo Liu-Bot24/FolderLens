@@ -48,7 +48,7 @@ public sealed record FileProperties
 
 public sealed partial class CatalogStore
 {
-    public Task<FileProperties?> ReadFileProperties(string rootId,string entryId,long version,CancellationToken cancellation=default)=>interactiveReader.Execute<FileProperties?>(c=>
+    public Task<FileProperties?> ReadFileProperties(string rootId,string entryId,long version,CancellationToken cancellation=default,bool foreground=false)=>interactiveReader.Execute<FileProperties?>(c=>
     {
         using var transaction=c.BeginTransaction(deferred:true);using var cmd=c.CreateCommand();cmd.Transaction=transaction;
         cmd.CommandText="SELECT f.*,d.detail_json,EXISTS(SELECT 1 FROM CollectionMembers m WHERE m.location_key=f.location_key AND m.directory_location_id=(SELECT location_id FROM DirectoryLocationBindings WHERE directory_id=f.directory_id)) AS is_collected FROM Files f LEFT JOIN FileDetails d ON d.entry_id=f.entry_id AND d.source_version=f.file_version WHERE f.root_id=$root AND f.entry_id=$entry AND f.file_version=$version";
@@ -67,7 +67,7 @@ public sealed partial class CatalogStore
         using var groups=c.CreateCommand();groups.Transaction=transaction;groups.CommandText="SELECT field_group,state,error_code,provider_version,attempt_count FROM FieldStates WHERE entry_id=$entry AND source_version=$version";groups.Parameters.AddWithValue("$entry",entryId);groups.Parameters.AddWithValue("$version",version);
         var states=new Dictionary<string,MetadataFieldState>();using(var rows=groups.ExecuteReader())while(rows.Read())states.Add(rows.GetString(0),new(rows.GetString(1),rows.IsDBNull(2)?null:rows.GetString(2),rows.IsDBNull(3)?null:rows.GetString(3),rows.GetInt64(4)));
         transaction.Commit();return file with{FieldStates=states};
-    },cancellation);
+    },cancellation,foreground);
 
     public Task<bool> ApplyFileDetails(string entryId,long expectedVersion,string rootId,long expectedEpoch,ContentMetadataDetails details,string provider,CancellationToken cancellation=default)=>writer.Execute(c=>
     {

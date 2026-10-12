@@ -37,7 +37,7 @@ public sealed partial class MainWindow
         if(row is null||row.Kind is not ("image" or "video"))return;
         RecordWebView("Image device resources rebuilding");
         // SelectPreview retires the previous selection token before starting a replacement decode.
-        var restore=SelectPreview(row);long current=selection;
+        var restore=SelectPreview(row,preserveViewportIntent:true);long current=selection;
         try
         {
             await restore;

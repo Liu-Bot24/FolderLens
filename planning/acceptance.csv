@@ -131,3 +131,7 @@
 "A065b","R065","反例","Unit/Integration","相似名称和嵌套目录夹具","精确匹配与保留例外；非法正则；10000文件1目录","不误排预览副本；拒绝非法规则；只按目录求值","YES","PASS","artifacts/tests/phase1-final/phase1-final.trx"
 "A066a","R066","正常路径","Native/Integration","无媒体元数据的文档夹具","切换PDF与表格分类并恢复视图选择","无需解码即可分类；文档默认详情且尊重手动选择","YES","PASS","artifacts/phase1-current-regression/directory-filter/native-refresh.json"
 "A066b","R066","反例","Native","全部文件大目录","验证通用类型图标与适用列组合","未知文件仍可辨认；无关尺寸和时长可隐藏","YES","NOT_RUN","docs/FILE_BROWSER_PHASE_ONE.md"
+"A010c","R010","正常路径与反例","Native","隔离目录；用户授权后执行","新目录扫描时新增前序文件；主动滚动后继续发布","未操作时保持开头；已浏览时保持当前文件；不终止滚出视区的正在解码任务","YES","NOT_RUN","docs/adr/2026-10-12-viewport-first-browsing.md"
+"A017c","R017","正常路径与反例","Unit+Native","隔离数据库；用户授权后执行","暂停结果比较并读取当前页；结果源替换和用户取消交错","当前页不等待比较；同一有效行可接续；用户取消或文件离开结果时不接续","YES","NOT_RUN","tests/FolderLens.UnitTests/ForegroundDatabaseTests.cs;src/FolderLens.App/MainWindow.ViewportLoadingVerification.cs"
+"A018c","R018","正常路径与反例","Native","隔离目录；用户授权后执行","历史锚点未到达时选择或翻页；再打开新目录","新操作撤销旧定位；新目录归顶；显式历史恢复仍有效","YES","NOT_RUN","src/FolderLens.App/MainWindow.ViewportLoadingVerification.cs"
+"A019c","R019","正常路径与反例","Native","隔离图片与在线占位夹具；用户授权后执行","暂停元数据补全；查看缓存命中和新视区；重复布局通知","元数据不占缩略图名额；缓存显示不等待decoder；失败和未授权在线项不无限重试","YES","NOT_RUN","src/FolderLens.App/MainWindow.AuditVerification.cs;docs/adr/2026-10-12-viewport-first-browsing.md"

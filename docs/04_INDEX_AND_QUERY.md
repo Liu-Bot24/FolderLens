@@ -63,6 +63,8 @@ FileSystemWatcher 仅作变更提示，缓冲溢出会丢事件。[S06] 每活�
 
 **交互首屏查询**：给定 filter/sort/catalog revision，在 DB 线程查询最多 256 项。具备索引的常见排序走有界 keyset，避免深 OFFSET。[S07] 包含式名称搜索可能全扫描；必须可取消、标明计算中，不承诺所有任意组合都是 200 ms。
 
+分组浏览也提供首批文件：先保留同一文件筛选与组内排序，暂缓目录容量聚合，并明确提示正在整理分组与顺序。正式分组发布迁移不变行和有效预览；首批不能冒充最终容量排名。当前页与选择读取使用会话交互连接，整批差异比较、分组读取及历史路径定位使用独立会话比较连接；两条 catalog 读连接加两条 session 读连接，总量固定。选择读取绕过缩略图页缓存的并发门槛，以有界前台队列优先执行。
+
 **正式固定结果会话**：在后台持有一个有限时长 catalog 读事务，流式读取排序好的匹配结果，写入独立 sessions.sqlite 的 ResultItem(sessionId, ordinal, entryId, observedVersion, snapshotInfo)。主库只读、会话库单写，每 512 条提交会话页。最大内存仅一批；SQL 临时排序在磁盘。已写入页可预览，但会话标 Building，未构建区间不显示假数据。
 
 会话 Ready 后，任意位置直接按(sessionId,ordinal) 范围读取；页大小 256，默认内存最多 16 页。左右导航、Home/End、Ctrl+A、播放列表和当前结果容量都以同一 sessionId 为准。仅有 keyset 不能解决滚动条直接跳第 80 万项的问题，不能遗漏结果 ordinal 层。

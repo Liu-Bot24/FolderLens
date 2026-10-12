@@ -55,7 +55,11 @@ public sealed partial class MainWindow
             if(firstImage<0&&viewport.Any(item=>item.Row.Thumbnail is not null))firstImage=watch.Elapsed.TotalMilliseconds;
             if(phase=="scanning")
             {
-                if(stationaryAnchor is {} anchor&&results?.Contains(anchor.Row)==true)
+                if(keepBrowserStart)
+                {
+                    if((FindScrollViewer(FilesGrid)?.VerticalOffset??0)>1)stationaryMoved++;
+                }
+                else if(stationaryAnchor is {} anchor&&results?.Contains(anchor.Row)==true)
                 {
                     var entry=viewport.FirstOrDefault(item=>ReferenceEquals(item.Row,anchor.Row));
                     if(entry.Container is not FrameworkElement element)stationaryMissing++;

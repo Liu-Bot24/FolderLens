@@ -201,9 +201,10 @@ public sealed partial class MainWindow
         verifyMetadataBarrier=async token=>{active++;peak=Math.Max(peak,active);try{await Task.Delay(Timeout.Infinite,token);}finally{active--;}};
         try
         {
-            await OpenRoot(directory);await WaitUntil(()=>active==capacity,TimeSpan.FromSeconds(5));
-            if(peak>capacity||thumbnailSlots.CurrentCount!=WorkerResources.Shared.ThumbnailConcurrency||thumbnailPool.Count!=WorkerResources.Shared.ThumbnailConcurrency)throw new InvalidOperationException("元数据阻塞时解码器未归还或在途队列越界。");
-            CancelThumbnails();await WaitUntil(()=>thumbnailWorkCount==0,TimeSpan.FromSeconds(5));
+            await OpenRoot(directory);await WaitUntil(()=>active==1,TimeSpan.FromSeconds(5));
+            await WaitUntil(()=>visible.Any(HasThumbnailViewport)&&visible.Where(HasThumbnailViewport).All(row=>row.Thumbnail is not null)&&thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
+            if(peak>1||pendingThumbnailMetadata.Count>256||thumbnailSlots.CurrentCount!=WorkerResources.Shared.ThumbnailConcurrency||thumbnailPool.Count!=WorkerResources.Shared.ThumbnailConcurrency)throw new InvalidOperationException("元数据阻塞时解码器未归还或在途队列越界。");
+            CancelThumbnails();await WaitUntil(()=>thumbnailWorkCount==0&&active==0&&!thumbnailMetadataRunning,TimeSpan.FromSeconds(5));
             if(active!=0||thumbnailPipelines.CurrentCount!=capacity||thumbnailSlots.CurrentCount!=WorkerResources.Shared.ThumbnailConcurrency)throw new InvalidOperationException("取消后在途名额未归还。");
             report["peakMetadataTails"]=peak;report["status"]="PASS";
         }
@@ -213,7 +214,7 @@ public sealed partial class MainWindow
     {
         await thumbnailCache!.DisposeAsync();thumbnailCache=new(Path.Combine(dataDirectory,"tiny-cache"),new(){MaxEntryBytes=24});await thumbnailCache.Initialize();
         await OpenRoot(directory);if(metadataTask is not null)await metadataTask;await RefreshQuery();
-        await WaitUntil(()=>visible.Count>0&&visible.All(row=>row.Thumbnail is not null)&&thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
+        await WaitUntil(()=>visible.Any(HasThumbnailViewport)&&visible.Where(HasThumbnailViewport).All(row=>row.Thumbnail is not null)&&thumbnailWorkCount==0,TimeSpan.FromSeconds(10));
         var errors=visible.Where(row=>row.ThumbnailError.Length>0).Select(row=>row.ThumbnailError).ToArray();report["errors"]=errors;
         if(errors.Length>0||thumbnailSlots.CurrentCount!=WorkerResources.Shared.ThumbnailConcurrency||thumbnailPipelines.CurrentCount!=WorkerResources.Shared.ThumbnailConcurrency*2)throw new InvalidOperationException("缓存不可用时图片报错或名额未归还。");
         report["status"]="PASS";

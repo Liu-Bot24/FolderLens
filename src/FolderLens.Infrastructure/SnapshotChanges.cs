@@ -24,7 +24,7 @@ public sealed partial class CatalogStore
     // Refine insertion/deletion-only histories without materializing FileRows. The
     // unique session/entry index matches identities; SQL runs on the database lane.
     // A reordered match declines refinement, leaving visible-anchor handling intact.
-    public Task<IReadOnlyDictionary<string,IReadOnlyList<RangeEdit>?>> RefineSnapshotChanges(ResultHandle previous,ResultHandle next,IReadOnlyList<SnapshotGroup> previousGroups,IReadOnlyList<SnapshotGroup> nextGroups,IReadOnlyDictionary<string,SnapshotSplice> changes,CancellationToken cancellation)=>sessionReader.Execute<IReadOnlyDictionary<string,IReadOnlyList<RangeEdit>?>>(c=>
+    public Task<IReadOnlyDictionary<string,IReadOnlyList<RangeEdit>?>> RefineSnapshotChanges(ResultHandle previous,ResultHandle next,IReadOnlyList<SnapshotGroup> previousGroups,IReadOnlyList<SnapshotGroup> nextGroups,IReadOnlyDictionary<string,SnapshotSplice> changes,CancellationToken cancellation)=>sessionComparisonReader.Execute<IReadOnlyDictionary<string,IReadOnlyList<RangeEdit>?>>(c=>
     {
         if(previous.RootId!=next.RootId||previous.Epoch!=next.Epoch)throw new ArgumentException("仅能比较同一根目录的结果。");
         var oldStarts=previousGroups.ToDictionary(g=>g.Id,g=>g.Start);var newStarts=nextGroups.ToDictionary(g=>g.Id,g=>g.Start);
@@ -65,7 +65,7 @@ public sealed partial class CatalogStore
         return result;
     },cancellation);
 
-    public Task<IReadOnlyDictionary<string,SnapshotSplice>> CompareSnapshots(ResultHandle previous,ResultHandle next,IReadOnlyList<SnapshotGroup> previousGroups,IReadOnlyList<SnapshotGroup> nextGroups,CancellationToken cancellation)=>sessionReader.Execute<IReadOnlyDictionary<string,SnapshotSplice>>(c=>
+    public Task<IReadOnlyDictionary<string,SnapshotSplice>> CompareSnapshots(ResultHandle previous,ResultHandle next,IReadOnlyList<SnapshotGroup> previousGroups,IReadOnlyList<SnapshotGroup> nextGroups,CancellationToken cancellation)=>sessionComparisonReader.Execute<IReadOnlyDictionary<string,SnapshotSplice>>(c=>
     {
         if(previous.RootId!=next.RootId||previous.Epoch!=next.Epoch)throw new ArgumentException("仅能增量更新同一个根目录。");
         var oldGroups=previousGroups.ToDictionary(group=>group.Id);
