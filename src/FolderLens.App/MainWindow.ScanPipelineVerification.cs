@@ -116,8 +116,9 @@ public sealed partial class MainWindow
             await OpenRoot(rejectedRoot);await RefreshQuery();
             // A watcher may reconcile the retained directory while the component
             // is unavailable. Finish that real failed scan before pressing F5.
+            await WaitUntil(()=>scanTask is not {IsCompleted:false},TimeSpan.FromSeconds(5));
             reconcilePending=true;await Reconcile(force:true);
-            if(scanTask?.IsFaulted!=true)throw new InvalidOperationException("Recovery fixture did not retain a failed scan task.");
+            await WaitUntil(()=>scanTask?.IsFaulted==true,TimeSpan.FromSeconds(5));
             bool visible=Shell.FindName("BrowserScanErrorBar") is Microsoft.UI.Xaml.Controls.InfoBar bar&&bar.IsOpen;
             if(browserScanError is null||replacingRoot||rootId!=acceptedRoot||FilesGrid.Items.Count!=12||!visible)
                 throw new InvalidOperationException("Rejected root admission lost the accepted results or hid the scan error.");

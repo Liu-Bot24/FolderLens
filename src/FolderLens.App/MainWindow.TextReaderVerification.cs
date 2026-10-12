@@ -12,6 +12,7 @@ public sealed partial class MainWindow
         const string text="文本阅读测试：中文与 English\r\n第二行完整显示。";
         await File.WriteAllTextAsync(Path.Combine(source,"reader.txt"),text);
         await File.WriteAllTextAsync(Path.Combine(source,"reader.md"),"# 阅读标题\n\n正文中文 **加粗**。\n\n![本地图片](A/image-00.png)\n\n![禁止越界](../outside.png)\n");
+        File.Copy(Path.Combine(source,"A","image-00.png"),Path.Combine(dataDirectory,"outside.png"));
         suppressFilters=true;SelectTag(Category,"text");suppressFilters=false;
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;await RefreshQuery();
         var failures=new List<string>();
@@ -39,9 +40,20 @@ public sealed partial class MainWindow
                 // Exercise the same demand as a reader scrolling to that image.
                 await markdown.CoreWebView2.ExecuteScriptAsync("document.images[0]?.scrollIntoView({block:'start'})");
                 await WaitUntil(()=>markdownImages.Count==1,TimeSpan.FromSeconds(10));
-                string imageReady=await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).some(image=>image.naturalWidth>0)");
-                if(imageReady!="true")failures.Add("允许的本地图片没有在 Markdown 阅读区显示");
-                report["isolatedMarkdownImageDisplayed"]=imageReady=="true";
+                const string localImageReady="Array.from(document.images).some(image=>image.getAttribute('aria-label')==='本地图片'&&image.naturalWidth>0)";
+                var imageWait=System.Diagnostics.Stopwatch.StartNew();
+                while(await markdown.CoreWebView2.ExecuteScriptAsync(localImageReady)!="true")
+                {
+                    if(imageWait.Elapsed>TimeSpan.FromSeconds(10))throw new InvalidOperationException("允许的本地图片没有在 Markdown 阅读区显示");
+                    await Task.Delay(50);
+                }
+                report["isolatedMarkdownImageDisplayed"]=true;
+                var denied=markdownResources.Single(pair=>pair.Value.RelativeUrl=="../outside.png");
+                await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).find(image=>image.getAttribute('aria-label')==='禁止越界')?.scrollIntoView({block:'start'})");
+                await WaitUntil(()=>denied.Value.PermanentFailure,TimeSpan.FromSeconds(10));
+                string blocked=await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).every(image=>image.getAttribute('aria-label')!=='禁止越界'||image.naturalWidth===0)");
+                if(denied.Value.Failures!=1||markdownImages.ContainsKey(denied.Key)||blocked!="true")throw new InvalidOperationException("真实存在的根目录外图片没有被明确拒绝。");
+                report["existingOutOfRootImageBlocked"]=true;
                 ((IInvokeProvider)new ButtonAutomationPeer(ReaderRenderMode).GetPattern(PatternInterface.Invoke)).Invoke();
                 if(TextScroll.Visibility!=Visibility.Visible||ReaderRenderMode.Content as string!="阅读排版")failures.Add("查看原文没有正确切换状态");
             }
