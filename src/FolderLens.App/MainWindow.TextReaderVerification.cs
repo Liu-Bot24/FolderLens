@@ -34,6 +34,10 @@ public sealed partial class MainWindow
                 string zoomValue=await markdown!.CoreWebView2.ExecuteScriptAsync("document.body.style.zoom");
                 if(zoomValue!="\"1.125\"")failures.Add("Markdown 字号没有跟随阅读按钮");
                 if(markdown.CoreWebView2.Settings.IsScriptEnabled)failures.Add("阅读字号意外允许文档脚本执行");
+                report["markdownImageBeforeScroll"]=await markdown.CoreWebView2.ExecuteScriptAsync("JSON.stringify({height:innerHeight,images:Array.from(document.images).map(image=>({top:image.getBoundingClientRect().top,bottom:image.getBoundingClientRect().bottom,width:image.naturalWidth}))})");
+                // Font scaling can place the image below a short preview pane.
+                // Exercise the same demand as a reader scrolling to that image.
+                await markdown.CoreWebView2.ExecuteScriptAsync("document.images[0]?.scrollIntoView({block:'start'})");
                 await WaitUntil(()=>markdownImages.Count==1,TimeSpan.FromSeconds(10));
                 string imageReady=await markdown.CoreWebView2.ExecuteScriptAsync("Array.from(document.images).some(image=>image.naturalWidth>0)");
                 if(imageReady!="true")failures.Add("允许的本地图片没有在 Markdown 阅读区显示");
