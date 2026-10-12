@@ -64,14 +64,14 @@ internal sealed class AnimationDecoder : IDisposable
         {
             while(apngReadIndex<=index){await process!.StandardOutput.BaseStream.ReadExactlyAsync(frameBuffer!,cancellation);apngReadIndex++;}
             using var frame=VImage.NewFromMemory(frameBuffer!,outputWidth,outputHeight,4,Enums.BandFormat.Uchar);using var rgba=frame.Copy(interpretation:Enums.Interpretation.Srgb);
-            if(output is not null)output.Write(rgba);else rgba.WriteToFile(destination);
+            if(output is not null)output.Write(rgba);else rgba.WriteToFile(ImageOutput.NativeDestination(destination));
         }
         else
         {
             using var page=image!.Crop(0,checked(index*height),image.Width,height);using var display=StaticDecoder.PrepareDisplay(page);
             double factor=Math.Min(1,Math.Min((double)targetWidth/display.Width,(double)targetHeight/display.Height));
             using var small=StaticDecoder.ResizeForDisplay(display,factor);using var srgb=small.Colourspace(Enums.Interpretation.Srgb);
-            if(output is not null)output.Write(srgb);else srgb.WriteToFile(destination);
+            if(output is not null)output.Write(srgb);else srgb.WriteToFile(ImageOutput.NativeDestination(destination));
         }
         int current=index++;bool end=index==count;if(end)CompletedLoops=checked(CompletedLoops+1);
         return(current,delays.Length>current?Math.Max(1,delays[current]):100,end);

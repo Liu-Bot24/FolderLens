@@ -83,8 +83,8 @@ try
       using var rgb16=memory.Copy(interpretation:NetVips.Enums.Interpretation.Rgb16);
       using var small=rgb16.Resize(1600.0/developed.Info.Width,kernel:NetVips.Enums.Kernel.Lanczos3);
       using var srgb=small.Colourspace(NetVips.Enums.Interpretation.Srgb);
-      srgb.WriteToFile(Path.Combine(directory,"raw-developed-fit.png"));
-      using var crop=rgb16.Crop(4000,2500,1024,1024);using var tile=crop.Colourspace(NetVips.Enums.Interpretation.Srgb);tile.WriteToFile(Path.Combine(directory,"raw-developed-tile.png"));
+      srgb.WriteToFile(ImageOutput.NativeDestination(Path.Combine(directory,"raw-developed-fit.png")));
+      using var crop=rgb16.Crop(4000,2500,1024,1024);using var tile=crop.Colourspace(NetVips.Enums.Interpretation.Srgb);tile.WriteToFile(ImageOutput.NativeDestination(Path.Combine(directory,"raw-developed-tile.png")));
       var result=new{abi=RawDecoder.Abi(),provider="LibRaw 0.22.2",fixtureId="sony-a7r4a-14bit",embedded=new{quality="rawEmbedded",width=embeddedImage.Width,height=embeddedImage.Height,embedded.Info.Bytes,elapsedMs=embeddedMs},developed=new{quality="rawDeveloped",width=developed.Info.Width,height=developed.Info.Height,bits=developed.Info.Bits,developed.Info.Bytes,elapsedMs=developMs,sha256=Convert.ToHexString(SHA256.HashData(developed.Data))},peakWorkingSetBytes=Process.GetCurrentProcess().PeakWorkingSet64,sampleCount=1,performanceAcceptance="NOT_RUN: needs 30 samples and actual UI presentation",colorAcceptance="NOT_RUN: independent reference required"};
       string json=JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true});File.WriteAllText(Path.Combine(directory,"raw-result.json"),json);Console.WriteLine(json);return 0;
     }

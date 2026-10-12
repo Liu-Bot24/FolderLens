@@ -13,6 +13,15 @@ internal sealed class ImageOutput(string destination,bool pixels,bool compactThu
     public string? AssetPath {get;private set;}
     public void ReleasePixels()=>Bytes=null;
 
+    // libvips' filename savers still apply MAX_PATH without the Windows extended
+    // prefix. Keep this native spelling out of the asset protocol and cache keys.
+    internal static string NativeDestination(string path)
+    {
+        string full=Path.GetFullPath(path);
+        if(full.StartsWith(@"\\?\",StringComparison.Ordinal))return full;
+        return full.StartsWith(@"\\",StringComparison.Ordinal)?@"\\?\UNC\"+full[2..]:@"\\?\"+full;
+    }
+
     public void Write(VImage image)
     {
         if(Descriptor is not null||AssetPath is not null)throw new InvalidOperationException("Image output already written.");
@@ -34,8 +43,9 @@ internal sealed class ImageOutput(string destination,bool pixels,bool compactThu
             // Preserve transparency and line-art losslessly; compact photographic thumbnails.
             AssetFormat=compactThumbnail&&!srgb.HasAlpha()?"jpeg":"png";
             AssetPath=AssetFormat=="jpeg"?Path.ChangeExtension(destination,".jpg"):destination;
-            if(AssetFormat=="jpeg")srgb.Jpegsave(AssetPath,q:80,keep:Enums.ForeignKeep.None);
-            else srgb.WriteToFile(AssetPath);
+            string nativePath=NativeDestination(AssetPath);
+            if(AssetFormat=="jpeg")srgb.Jpegsave(nativePath,q:80,keep:Enums.ForeignKeep.None);
+            else srgb.WriteToFile(nativePath);
             if(new FileInfo(AssetPath).Length>maximumBytes)throw new InvalidDataException("Output budget exceeded.");
         }
     }

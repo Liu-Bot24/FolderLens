@@ -152,6 +152,7 @@ internal sealed class StaticDecoder : IDisposable
     public (int Width,int Height,string Quality) Render(string destination,int targetWidth,int targetHeight,bool full=false,int tileX=0,int tileY=0,bool embedded=false,bool thumbnail=false,bool fastPreview=false,ImageOutput? outputTarget=null)
     {
         if(targetWidth is <1 or >16384 || targetHeight is <1 or >16384 || tileX<0 || tileY<0)throw new ArgumentOutOfRangeException(nameof(targetWidth));
+        if(outputTarget is null)destination=ImageOutput.NativeDestination(destination);
         CheckVersion();
         if(IsRaw && embedded)
         {

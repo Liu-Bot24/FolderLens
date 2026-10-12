@@ -33,7 +33,7 @@ internal static class AnimationFrameRenderer
             using var display=StaticDecoder.PrepareDisplay(decoded);
             if(display.Width!=width||display.Height!=height)throw new InvalidDataException("Animation canvas changed.");
             using var tile=display.Crop(x,y,tileWidth,tileHeight);using var srgb=tile.Colourspace(Enums.Interpretation.Srgb);
-            if(output is not null)output.Write(srgb);else srgb.WriteToFile(destination);return;
+            if(output is not null)output.Write(srgb);else srgb.WriteToFile(ImageOutput.NativeDestination(destination));return;
         }
         if(parameters.FrameIndex>=ReadApngFrameCount(path))throw new ArgumentOutOfRangeException(nameof(parameters.FrameIndex));
         var start=new ProcessStartInfo(FfmpegExecutable()){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true,RedirectStandardOutput=output is not null,WorkingDirectory=AppContext.BaseDirectory};

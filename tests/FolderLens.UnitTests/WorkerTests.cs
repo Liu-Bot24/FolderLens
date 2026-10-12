@@ -13,6 +13,29 @@ public sealed class WorkerTests
         return directory?.FullName??throw new DirectoryNotFoundException("Source tree required for media integration tests.");
     }
     private static string WorkerExecutable(string root)=>Environment.GetEnvironmentVariable("FOLDERLENS_TEST_MEDIA_WORKER")??Path.Combine(root,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
+    [Theory]
+    [InlineData("png",false)]
+    [InlineData("jpeg",false)]
+    [InlineData("png",true)]
+    [InlineData("jpeg",true)]
+    public async Task EncodedThumbnailUsesOwnedAssetEvenBeyondLegacyPathLimit(string extension,bool longPath)
+    {
+        string root=ProjectRoot(),source=Path.Combine(root,"artifacts","m0","formats","synthetic."+extension);
+        string directory=Path.Combine(Path.GetTempPath(),"FolderLens-output-path",Guid.NewGuid().ToString("N"));
+        if(longPath)directory=Path.Combine(directory,new string('p',Math.Max(16,194-directory.Length-1)));
+        Directory.CreateDirectory(directory);
+        await using var worker=new WorkerClient(WorkerExecutable(root),directory);
+        var image=await worker.Request(source,"thumbnail",new("path-fixture",1,1,1,1,1),new(256,256,CompactThumbnail:extension=="jpeg"),CancellationToken.None);
+        try
+        {
+            Assert.Equal(longPath,image.AssetPath!.Length>260);Assert.True(File.Exists(image.AssetPath));
+            byte[] bytes=await File.ReadAllBytesAsync(image.AssetPath);Assert.True(bytes.Length>4);
+            Assert.Equal(extension=="jpeg"?"jpeg":"png",image.Message.AssetFormat);
+            Assert.Equal(extension=="jpeg"?new byte[]{255,216}:new byte[]{137,80},bytes.Take(2).ToArray());
+        }
+        finally{await worker.ReleaseAsset(image);}
+        Assert.False(File.Exists(image.AssetPath));
+    }
     [Fact] public async Task FrameRejectsOversizedAndUnknownFields()
     {
         using var oversized=new MemoryStream(new byte[]{1,0,16,0});await Assert.ThrowsAsync<InvalidDataException>(()=>WorkerProtocol.Read(oversized));
