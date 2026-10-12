@@ -28,6 +28,7 @@ Compression=zip/6
 SolidCompression=no
 WizardStyle=modern
 DisableProgramGroupPage=yes
+AllowNoIcons=yes
 UninstallDisplayName=FolderLens
 UninstallDisplayIcon={app}\versions\{#BuildId}\FolderLens.App.exe
 CloseApplications=yes
@@ -39,7 +40,7 @@ Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 [Files]
 #include SourceFileList
 [Icons]
-Name: "{autoprograms}\FolderLens"; Filename: "{app}\versions\{#BuildId}\FolderLens.App.exe"; WorkingDir: "{app}\versions\{#BuildId}"
+Name: "{autoprograms}\FolderLens"; Filename: "{app}\versions\{#BuildId}\FolderLens.App.exe"; WorkingDir: "{app}\versions\{#BuildId}"; Check: not WizardNoIcons
 Name: "{autodesktop}\FolderLens"; Filename: "{app}\versions\{#BuildId}\FolderLens.App.exe"; WorkingDir: "{app}\versions\{#BuildId}"; Tasks: desktopicon
 [Code]
 const
