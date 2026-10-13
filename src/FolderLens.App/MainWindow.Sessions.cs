@@ -128,8 +128,10 @@ public sealed partial class MainWindow
             if(interaction==browserInteractionVersion)
             {
                 pendingViewRestore=new(saved,revision,requestedRoot,interaction,navigation);
-                keepBrowserStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
-                SetBrowserOffsetOwner(null);
+                // Desktop/view restoration can have used the view-switch path.
+                // Reset that prior state before any first page is published.
+                if(saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null)ResetBrowserStart();
+                else{keepBrowserStart=false;SetBrowserOffsetOwner(null);}
             }
             // This request's normalized filter is authoritative even before the
             // same-root query updates submittedBrowserFilter. Never sample later UI.
@@ -203,12 +205,15 @@ public sealed partial class MainWindow
             // A partial first scan may not yet contain the saved file. Retry on its next snapshot.
             if((scanTask is {IsCompleted:false}||metadataTask is {IsCompleted:false})&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
             bool restoreStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
-            pendingViewRestore=null;BeginBrowserMovement(protectContent:!restoreStart);
-            keepBrowserStart=restoreStart;
+            pendingViewRestore=null;
+            // Restoring an untouched folder is not a scroll gesture. A settling
+            // timer would adopt a late native displacement as the user's offset.
+            if(restoreStart)ResetBrowserStart();else BeginBrowserMovement();
             if(selectedOrdinal is not null&&saved.Preview is {} preview&&saved.SelectedPath is {} previewPath)pendingPreviewRestore=new(preview,previewPath,requestedRoot);
             if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);RestoreBrowserSelection(list,row);}
             list.UpdateLayout();
             if((anchorOrdinal??selectedOrdinal) is {} visible)list.ScrollIntoView(sourceResults[(int)visible],ScrollIntoViewAlignment.Leading);
+            else if(restoreStart)RestorePublicationViewport(list,0);
             else FindScrollViewer(list)?.ChangeView(null,double.IsFinite(saved.ScrollOffset)?Math.Max(0,saved.ScrollOffset):0,null,true);
             Status.Text="";
     }

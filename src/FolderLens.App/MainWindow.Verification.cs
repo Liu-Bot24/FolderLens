@@ -136,6 +136,7 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-viewport-loading")){await VerifyViewportLoading(source,report);return;}
             if(arguments.Contains("--verify-scroll-offset")){await VerifyScrollOffsetAndFolderHeader(source,report);return;}
             if(arguments.Contains("--verify-browsing-anchor")){await VerifyBrowsingAnchor(source,report);return;}
+            if(arguments.Contains("--verify-untouched-startup")){await VerifyUntouchedStartupViewport(source,report);return;}
             if(arguments.Contains("--verify-menu-availability")){await VerifyMenuAvailability(source,report);return;}
             if(arguments.Contains("--verify-prefetch-adoption")){await VerifyPrefetchAdoption(source,report);return;}
             if(arguments.Contains("--verify-wheel-distance")){await VerifyWheelDistance(source,report);return;}

@@ -14,7 +14,7 @@ function Assert-DeployedComponents($Report) {
  foreach($name in $expected.Keys){if($Report.components.$name.Replace('\','/') -ne $expected[$name]){throw "Unexpected verification component: $name"}}
 }
 Assert-DeployedComponents $report
-foreach($case in @('scan-pipeline','promotion-viewport','text-reader','audit-filters','bulk-refresh','unrestored-favorites')){
+foreach($case in @('scan-pipeline','promotion-viewport','untouched-startup','text-reader','audit-filters','bulk-refresh','unrestored-favorites')){
  $caseRoot=$EvidenceRoot+'-'+$case
  $null=Invoke-LoggedProcess (Join-Path $AppRoot 'FolderLens.App.exe') @('--verify-refresh','--verify-deployed',('--verify-'+$case),'--data-dir',$caseRoot) ($caseRoot+'-run') -TimeoutSeconds $TimeoutSeconds
  $caseReport=Get-Content -LiteralPath (Join-Path $caseRoot 'native-refresh.json') -Raw | ConvertFrom-Json
