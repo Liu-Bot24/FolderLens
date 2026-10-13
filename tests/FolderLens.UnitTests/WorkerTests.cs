@@ -14,6 +14,34 @@ public sealed class WorkerTests
     }
     private static string WorkerExecutable(string root)=>Environment.GetEnvironmentVariable("FOLDERLENS_TEST_MEDIA_WORKER")??Path.Combine(root,"src","FolderLens.Media.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Media.Worker.exe");
     [Theory]
+    [InlineData(false)][InlineData(true)]
+    public async Task SourceContentReadFailureRemainsRetryableAfterMetadataSucceeds(bool cachedDecoder)
+    {
+        string root=ProjectRoot(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-source-retry",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string source=Path.Combine(directory,"image.jpeg");File.Copy(Path.Combine(root,"artifacts","m0","formats","synthetic.jpeg"),source);
+        await using var worker=new WorkerClient(WorkerExecutable(root),Path.Combine(directory,"worker"));
+        var context=new RequestContext("fixture",1,1,1,1,1);
+        if(cachedDecoder)await worker.Request(source,"probe",context,new(256,256),default);
+        // Byte-range locking denies content reads but permits the attribute and
+        // identity preflight; this is our own generated/copied fixture only.
+        using(var blocked=new FileStream(source,FileMode.Open,FileAccess.ReadWrite,FileShare.ReadWrite|FileShare.Delete))
+        {
+            blocked.Lock(0,blocked.Length);
+            try
+            {
+                Assert.True(FileReadObservation.Read(source).Length>0);
+                var error=await Assert.ThrowsAsync<IOException>(()=>worker.Request(source,"thumbnail",context,new(256,256),default));
+                Assert.True(ThumbnailRecovery.CanRetry(error));
+            }
+            finally{blocked.Unlock(0,blocked.Length);}
+        }
+        var recovered=await worker.Request(source,"thumbnail",context,new(256,256),default);
+        Assert.NotNull(recovered.AssetPath);Assert.True(File.Exists(recovered.AssetPath));await worker.ReleaseAsset(recovered);
+        string damaged=Path.Combine(directory,"damaged.png");await File.WriteAllBytesAsync(damaged,[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82]);
+        var invalid=await Assert.ThrowsAsync<InvalidDataException>(()=>worker.Request(damaged,"thumbnail",context,new(256,256),default));
+        Assert.False(ThumbnailRecovery.CanRetry(invalid));
+    }
+    [Theory]
     [InlineData("png",false)]
     [InlineData("jpeg",false)]
     [InlineData("png",true)]

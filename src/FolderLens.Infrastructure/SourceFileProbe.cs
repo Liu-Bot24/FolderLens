@@ -41,7 +41,7 @@ public sealed class SourceFileProbe(string? executable=null,TimeSpan? timeout=nu
             {
                 "missing"=>new FileNotFoundException("原文件已不存在。",path),
                 "inaccessible"=>new UnauthorizedAccessException("无法访问原文件。"),
-                "excluded"=>new IOException("原文件为在线占位文件或不支持的链接。"),
+                "excluded"=>new IOException(result.ErrorCode??"SourceExcluded"),
                 _=>new IOException("原文件离线或不是普通文件。")
             };
         }

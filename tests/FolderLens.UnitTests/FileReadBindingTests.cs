@@ -6,6 +6,30 @@ namespace FolderLens.UnitTests;
 
 public sealed class FileReadBindingTests
 {
+    [Theory]
+    [InlineData(1,"offline","IoUnavailable",true)]
+    [InlineData(2,"missing","PathNotFound",true)]
+    [InlineData(3,"offline","IoUnavailable",true)]
+    [InlineData(4,"offline","IoUnavailable",true)]
+    [InlineData(1,"inaccessible","AccessDenied",false)]
+    public async Task TemporaryUnavailableObservationsRemainRetryableWithoutBinding(int failedProbe,string state,string code,bool retryable)
+    {
+        string root=Path.Combine(Path.GetTempPath(),"FolderLens-read-recovery",Guid.NewGuid().ToString("N")),source=Path.Combine(root,"source");
+        Directory.CreateDirectory(source);File.WriteAllText(Path.Combine(source,"first.jpg"),"stable source");
+        await using var catalog=new CatalogStore(Path.Combine(root,"index"));await catalog.Initialize();
+        long epoch=await catalog.OpenRoot("root",source);var scanner=new DirectoryIndexer(catalog);
+        scanner.PacketReceived=(_,packet)=>{for(int i=0;i<packet.Entries.Length;i++)packet.Entries[i]=packet.Entries[i] with{PhysicalIdentity=null};};
+        await scanner.Scan("root",source,epoch,true,[],null,default);
+        var row=Assert.Single((await catalog.ReadFirstPage(new(){RootId="root"})).Items);
+        int reads=0;catalog.ReadBindingProbeOverride=(target,allowed,prepare,token)=>Task.FromResult(++reads==failedProbe
+            ?new ScanDirectoryPacket(state,[],code):ScanPathProbe.Read(target,allowed));
+        await using var probe=new SourceFileProbe();
+        var failure=await Assert.ThrowsAnyAsync<IOException>(()=>catalog.ResolveFileRead("root",row.EntryId,row.Version,probe,false,default));
+        Assert.Equal(code,failure.Message);Assert.Equal(retryable,ThumbnailRecovery.CanRetry(failure));
+        Assert.False((await catalog.ReadFileProperties("root",row.EntryId,row.Version))!.ReadObservationBound);
+        catalog.ReadBindingProbeOverride=(target,allowed,prepare,token)=>Task.FromResult(ScanPathProbe.Read(target,allowed));
+        Assert.True((await catalog.ResolveFileRead("root",row.EntryId,row.Version,probe,false,default)).ReadObservationBound);
+    }
     [Fact]
     public async Task DirectoryWithoutFileIdsBindsFullObservationBeforeDecode()
     {

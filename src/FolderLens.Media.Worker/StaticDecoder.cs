@@ -8,7 +8,10 @@ namespace FolderLens.Media.Worker;
 
 internal sealed class StaticDecoder : IDisposable
 {
-    private readonly FileStream source;
+    private readonly SourceReadStream source;
+    private IOException? sourceFailure;
+    public IOException? SourceFailure=>Volatile.Read(ref sourceFailure);
+    private void RecordSourceFailure(IOException error)=>Interlocked.CompareExchange(ref sourceFailure,error,null);
     private VImage? image;
     private RawDecoder.Handle? raw;
     private byte[]? rawPixels;
@@ -49,7 +52,7 @@ internal sealed class StaticDecoder : IDisposable
 
     public StaticDecoder(string file)
     {
-        path=file;source=new(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete,64*1024,FileOptions.RandomAccess);
+        path=file;source=SourceReadStream.Open(file,RecordSourceFailure);
         string ext=Path.GetExtension(file).ToLowerInvariant();
         IsRaw=new[]{".arw",".dng",".cr2",".cr3",".nef",".raf",".rw2",".orf",".pef"}.Contains(ext);
         try
@@ -57,7 +60,7 @@ internal sealed class StaticDecoder : IDisposable
             observation=FileReadObservation.Read(source.SafeFileHandle);
             if(IsRaw)
             {
-                int result=RawDecoder.Open(file,2048,out raw,out var info);if(result!=0)throw new InvalidDataException($"LibRaw open error {result}");
+                int result=RawDecoder.Open(file,2048,out raw,out var info);RawDecoder.ThrowIfError(result,"open");
                 rawFlip=info.Flip;rawWidth=rawEncodedWidth=(int)info.Width;rawHeight=rawEncodedHeight=(int)info.Height;if(info.Flip is 5 or 6)(rawWidth,rawHeight)=(rawHeight,rawWidth);
                 Format=ext[1..];Provider="LibRaw 0.22.2";return;
             }
@@ -83,7 +86,13 @@ internal sealed class StaticDecoder : IDisposable
             var display=PrepareDisplay(image);image.Dispose();image=display;
             CheckVersion();
         }
-        catch{Dispose();throw;}
+        catch(Exception error)
+        {
+            Dispose();
+            if(SourceFailure is not null&&error is not (UnauthorizedAccessException or IOException {Message:"FileChanged" or "CloudReadNotApproved"}))
+                throw new IOException("SourceIoError",error);
+            throw;
+        }
     }
     private static bool IsApng(FileStream input)
     {
@@ -183,7 +192,7 @@ internal sealed class StaticDecoder : IDisposable
         {
             // Load and resize together so libvips can use JPEG shrink-on-load.
             // Keep a separate stream: the full-resolution decoder may be used later.
-            using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+            using var input=SourceReadStream.Open(path,RecordSourceFailure,4096);
             using var small=VImage.ThumbnailStream(input,targetWidth,height:targetHeight,size:Enums.Size.Down,outputProfile:"srgb",failOn:Enums.FailOn.Error);
             using var output=small.Colourspace(Enums.Interpretation.Srgb);
             if(outputTarget is not null)outputTarget.Write(output);
@@ -219,6 +228,12 @@ internal sealed class StaticDecoder : IDisposable
         using var straight=resized.Unpremultiply();
         return straight.Cast(input.Format);
     }
-    public void CheckVersion(){if(FileReadObservation.Read(source.SafeFileHandle)!=observation||FileReadObservation.Read(path)!=observation)throw new IOException("FileChanged");}
+    public void CheckVersion()
+    {
+        if(FileReadObservation.Read(source.SafeFileHandle)!=observation||FileReadObservation.Read(path)!=observation)throw new IOException("FileChanged");
+        // A metadata provider may return partial data after swallowing its own
+        // callback error. Never send success or retain that failed source graph.
+        if(SourceFailure is {} error)throw new IOException("SourceIoError",error);
+    }
     public void Dispose(){image?.Dispose();image=null;raw?.Dispose();raw=null;rawPixels=null;source.Dispose();}
 }

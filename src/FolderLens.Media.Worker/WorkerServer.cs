@@ -67,7 +67,7 @@ internal static class WorkerServer
                         animation?.Dispose();animation=null;decoder?.Dispose();decoder=null;currentSource=null;
                         decoder=new StaticDecoder(input.Path);input.Observe(decoder.Observation);currentToken=request.FileRef.InputToken;currentSource=input;
                     }
-                    void CheckSource(){ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);decoder!.CheckVersion();inspectingSource=true;input.Observe(FileReadObservation.Read(input.Path));inspectingSource=false;}
+                    void CheckSource(){inspectingSource=true;ApprovedInput.CheckAccess(File.GetAttributes(input.Path),input.AllowCloud);decoder!.CheckVersion();input.Observe(FileReadObservation.Read(input.Path));inspectingSource=false;}
                     NetVips.NetVips.Concurrency=(int)budget.CpuThreads;
                     string token=request.RequestId;
                     string outputPath=Path.Combine(taskDirectory,token+".png");
@@ -102,10 +102,17 @@ internal static class WorkerServer
                 {
                     string error=ex switch
                     {
-                        TimeoutException=>"Timeout",NotSupportedException=>"UnsupportedCodec",UnauthorizedAccessException=>"AccessDenied",
-                        FileNotFoundException or DirectoryNotFoundException when inspectingSource=>"SourceMissing",IOException {Message:"FileChanged"}=>"FileChanged",
-                        IOException {Message:"CloudReadNotApproved"}=>"CloudReadNotApproved",IOException when inspectingSource=>"SourceIoError",_=>"DecodeFailed"
+                        UnauthorizedAccessException=>"AccessDenied",IOException {Message:"FileChanged"}=>"FileChanged",
+                        IOException {Message:"CloudReadNotApproved"}=>"CloudReadNotApproved",
+                        _ when decoder?.SourceFailure is not null=>"SourceIoError",
+                        TimeoutException=>"Timeout",NotSupportedException=>"UnsupportedCodec",
+                        FileNotFoundException or DirectoryNotFoundException when inspectingSource=>"SourceMissing",
+                        IOException {Message:"SourceIoError"}=>"SourceIoError",IOException when inspectingSource=>"SourceIoError",_=>"DecodeFailed"
                     };
+                    // A native lazy decoder can retain a failed input state.
+                    // A retry must reopen that source, not reuse the failed graph.
+                    if(error is "SourceIoError" or "SourceMissing")
+                    {animation?.Dispose();animation=null;decoder?.Dispose();decoder=null;currentSource=null;currentToken=null;}
                     response=response with{Status=ex is TimeoutException?"timeout":ex is NotSupportedException?"unsupported":error=="FileChanged"?"stale":"failed",ErrorCode=error,AssetToken=null,AssetFormat=null,Pixels=null,Metadata=JsonSerializer.SerializeToElement(new{isFinal=true,sequence=0,errorType=ex.GetType().FullName,detail=ex.Message[..Math.Min(ex.Message.Length,1024)]})};
                 }
                 await SendResponse();

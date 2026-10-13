@@ -47,10 +47,18 @@ public sealed partial class CatalogStore
             ?test(target,allowCloud,prepare,cancellation):probe.ReadPacket(target,cancellation,allowCloud,prepare,prepare is null?null:new(owner.ParentIdentity!,owner.ParentAnchor!));
         bool ParentMatches(ScanDirectoryPacket packet)=>packet.State=="present"&&packet.FileStamp is null&&owner.ParentIdentity is not null&&owner.ParentAnchor is not null
             &&owner.ParentIdentity==packet.PhysicalIdentity&&owner.ParentAnchor==packet.ResolvedLocation;
-        var parentBefore=await Read(parent).ConfigureAwait(false);if(!ParentMatches(parentBefore))throw new IOException("FileChanged");
+        static void RequirePresent(ScanDirectoryPacket packet)
+        {
+            // An offline/denied observation says nothing about identity. Keep
+            // that failure distinct from a successfully observed replacement.
+            if(packet.State!="present")throw new IOException(packet.ErrorCode??"SourceIoError");
+        }
+        var parentBefore=await Read(parent).ConfigureAwait(false);RequirePresent(parentBefore);if(!ParentMatches(parentBefore))throw new IOException("FileChanged");
         var observed=await Read(path,new(file.LogicalBytes,file.ModifiedUtcTicks,file.SourceSignature)).ConfigureAwait(false);
+        RequirePresent(observed);
         if(observed.State!="present"||observed.FileObservation is not {} full||full.SkipReason is not null)throw new IOException(observed.ErrorCode??"SourceIoError");
-        var after=await Read(path).ConfigureAwait(false);var parentAfter=await Read(parent).ConfigureAwait(false);
+        var after=await Read(path).ConfigureAwait(false);RequirePresent(after);
+        var parentAfter=await Read(parent).ConfigureAwait(false);RequirePresent(parentAfter);
         string signature=FileObservationWriter.Signature(full);
         if(string.IsNullOrEmpty(full.PhysicalIdentity))throw new IOException("IdentityUnavailable");
         if(after.State!="present"||after.FileObservation is not {} last||signature!=FileObservationWriter.Signature(last)||!ParentMatches(parentAfter)

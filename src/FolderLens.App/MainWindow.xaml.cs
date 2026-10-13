@@ -1095,6 +1095,10 @@ public sealed partial class MainWindow : Window
     {
         if(closing)return;
         if(sender==FilesList){await LoadRowProperties(row);return;}
+        if(row.Thumbnail is null&&row.ThumbnailRetryPending)
+        {
+            if(thumbnailRequests.ContainsKey(row)||!IsThumbnailInViewport(sender,row)||!row.BeginThumbnailRetry(ThumbnailRetryNow))return;
+        }
         if(row.Thumbnail is not null||row.ThumbnailError.Length>0||thumbnailRequests.ContainsKey(row)
             ||row.ThumbnailState==ThumbnailLoadState.Complete&&!(row.IsTextCard&&row.NeedsTextExcerpt)
             ||row.ThumbnailState==ThumbnailLoadState.Deferred&&(row.Item is null||!approvedCloud.Contains(CloudKey(row))))return;
@@ -1190,8 +1194,17 @@ public sealed partial class MainWindow : Window
             ReturnDecoder();ReturnPipeline();
             if(OwnsRow()){row.SetThumbnailState(ThumbnailLoadState.Complete);QueueThumbnailMetadata(row,metadataReply,mediaMetadata);}
         }
-        catch(OperationCanceledException){}
-        catch(Exception ex){if(OwnsRow()||(requestedItem is null&&OwnsRequest()))row.FailThumbnail(ex);}
+        catch(OperationCanceledException) when(token.IsCancellationRequested){}
+        catch(Exception ex)
+        {
+            if(OwnsRow()||(requestedItem is null&&OwnsRequest()))
+            {
+                // An inner source-read deadline is a failure, not a navigation
+                // cancellation. It must back off rather than immediately requeue.
+                var failure=ex is OperationCanceledException?new TimeoutException("文件读取超时。",ex):ex;
+                row.FailThumbnail(failure,row.Thumbnail is null&&ThumbnailRecovery.CanRetry(failure),ThumbnailRetryNow);
+            }
+        }
         finally
         {
             try
@@ -1215,8 +1228,10 @@ public sealed partial class MainWindow : Window
                         row.SetThumbnailState(settled?ThumbnailLoadState.Complete:ThumbnailLoadState.None);
                     }
                     request.Dispose();
+                    if(row.ThumbnailError.Length==0&&row.ThumbnailState==ThumbnailLoadState.Complete)row.CompleteThumbnailRecovery();
                     if(row.ThumbnailState==ThumbnailLoadState.None&&HasThumbnailViewport(row))QueueThumbnailViewport();
                 }
+                ScheduleThumbnailRecovery();
                 if(--thumbnailWorkCount==0&&closing)thumbnailsIdle.TrySetResult();
                 if(excerptRequestedBytes>0&&!closing&&!token.IsCancellationRequested&&visible.Contains(row)&&row.NeedsTextExcerpt&&row.ThumbnailError.Length==0)_=LoadThumbnail(sender,row);
             }
@@ -1276,6 +1291,7 @@ public sealed partial class MainWindow : Window
     }
     private void CancelThumbnails()
     {
+        thumbnailRetryTimer?.Stop();
         CancelThumbnailMetadata();
         ClearTextExcerpts();
         firstPageRows.Clear();

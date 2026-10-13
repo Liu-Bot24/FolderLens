@@ -10,6 +10,7 @@
   <Compile Include="../../src/FolderLens.App/AppPaths.cs" Link="AppPaths.cs"/>
   <Compile Include="../../src/FolderLens.App/UserMessages.cs" Link="UserMessages.cs"/>
   <Compile Include="../../src/FolderLens.Media.Worker/BmffImageFormat.cs" Link="BmffImageFormat.cs"/>
+  <Compile Include="../../src/FolderLens.Media.Worker/RawDecoder.cs" Link="RawDecoder.cs"/>
  </ItemGroup>
  <Target Name="StageScanWorkerForIntegration" AfterTargets="Build">
   <ItemGroup><ScanWorkerFiles Include="../../src/FolderLens.Scan.Worker/bin/$(Configuration)/$(TargetFramework)/win-x64/**/*" Exclude="**/*.pdb"/></ItemGroup>

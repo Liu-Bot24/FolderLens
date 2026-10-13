@@ -64,10 +64,12 @@ public sealed partial class MainWindow
                 if(thumbnailRequests.Count+propertyRequests.Count>=1024)break;
                 _=LoadThumbnail(pair.Key.View,pair.Value);
             }
+            ScheduleThumbnailRecovery();
         }))thumbnailDispatchQueued=false;
     }
     private void DetachThumbnailViewports()
     {
+        thumbnailRetryTimer?.Stop();
         foreach(var view in thumbnailViews)
         {
             view.LayoutUpdated-=ThumbnailLayoutUpdated;

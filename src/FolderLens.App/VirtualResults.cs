@@ -8,7 +8,7 @@ using Microsoft.UI.Xaml;
 
 namespace FolderLens.App;
 
-public enum ThumbnailLoadState { None,Queued,Loading,Deferred,Complete }
+public enum ThumbnailLoadState { None,Queued,Loading,Deferred,Complete,RetryWaiting }
 
 public sealed class FileRow : ObservableObject
 {
@@ -24,6 +24,7 @@ public sealed class FileRow : ObservableObject
         ThumbnailLoadState.Queued=>"等待加载",
         ThumbnailLoadState.Loading=>"正在加载…",
         ThumbnailLoadState.Deferred=>"在线文件 · 打开后读取",
+        ThumbnailLoadState.RetryWaiting=>"等待重试…",
         _=>""
     };
     public Visibility ThumbnailStatusVisibility=>Thumbnail is null&&ThumbnailError.Length==0&&ThumbnailStatus.Length>0?Visibility.Visible:Visibility.Collapsed;
@@ -58,14 +59,34 @@ public sealed class FileRow : ObservableObject
     public Visibility AudioOnlyVisibility=>IsAudioOnly&&Thumbnail is null&&ThumbnailError.Length==0?Visibility.Visible:Visibility.Collapsed;
     private string thumbnailError="";
     public string ThumbnailError {get=>thumbnailError;private set{if(SetProperty(ref thumbnailError,value)){OnPropertyChanged(nameof(AudioOnlyVisibility));OnPropertyChanged(nameof(TextExcerptVisibility));OnPropertyChanged(nameof(ThumbnailErrorVisibility));OnPropertyChanged(nameof(FileIconVisibility));OnPropertyChanged(nameof(VideoBadgeVisibility));}}}
-    public string ThumbnailErrorLabel=>Kind=="video"?"视频封面不可用":"缩略图不可用";
+    public string ThumbnailErrorLabel=>ThumbnailRetryPending?"等待重试…":Kind=="video"?"视频封面不可用":"缩略图不可用";
     public Visibility ThumbnailErrorVisibility=>ThumbnailError.Length==0?Visibility.Collapsed:Visibility.Visible;
-    public void FailThumbnail(Exception error)
+    private ThumbnailRecovery? thumbnailRecovery;
+    private string thumbnailFailureReason="";
+    internal bool ThumbnailRetryPending=>thumbnailRecovery?.Pending==true;
+    public void FailThumbnail(Exception error)=>FailThumbnail(error,false,TimeSpan.Zero);
+    internal void FailThumbnail(Exception error,bool retryable,TimeSpan now)
     {
-        string reason=UserMessages.Error(error);
-        ThumbnailError=reason+" 按 F5 刷新后重试，或打开文件查看详情。";
+        thumbnailFailureReason=UserMessages.Error(error);
+        if(!retryable)thumbnailRecovery=null;
+        bool retry=retryable&&(thumbnailRecovery??=new(now)).Failed(now);
+        ThumbnailError=thumbnailFailureReason+(retry?" 每 5 秒自动重试，最长 3 分钟。":retryable?" 自动重试已停止。可按 F5 重试，或打开文件查看详情。":" 按 F5 刷新后重试，或打开文件查看详情。");
+        SetThumbnailState(retry?ThumbnailLoadState.RetryWaiting:ThumbnailLoadState.Complete);
+        OnPropertyChanged(nameof(ThumbnailErrorLabel));
         OnPropertyChanged(nameof(ThumbnailStatusVisibility));
     }
+    internal bool BeginThumbnailRetry(TimeSpan now)
+    {
+        if(thumbnailRecovery is not {} recovery||!recovery.Pending)return false;
+        if(recovery.Expired(now))
+        {
+            recovery.Failed(now);ThumbnailError=thumbnailFailureReason+" 自动重试已停止。可按 F5 重试，或打开文件查看详情。";
+            SetThumbnailState(ThumbnailLoadState.Complete);OnPropertyChanged(nameof(ThumbnailErrorLabel));return false;
+        }
+        if(!recovery.TryBegin(now))return false;
+        ThumbnailError="";SetThumbnailState(ThumbnailLoadState.None);OnPropertyChanged(nameof(ThumbnailErrorLabel));return true;
+    }
+    internal void CompleteThumbnailRecovery(){thumbnailRecovery=null;thumbnailFailureReason="";ThumbnailError="";OnPropertyChanged(nameof(ThumbnailErrorLabel));}
     private string resolution="未知",allocation="未知",modified="",duration="",format="";
     public string Resolution {get=>resolution;private set=>SetProperty(ref resolution,value);}
     public string AllocatedText {get=>allocation;private set=>SetProperty(ref allocation,value);}
