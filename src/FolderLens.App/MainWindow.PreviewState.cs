@@ -28,10 +28,30 @@ public sealed partial class MainWindow
     }
     private async Task RefreshFitAfterResize()
     {
-        if(selected is null||previewLoading||animationRunning||zoom>0||closing)return;
+        if(selected is not {Kind:"image"} row||fitBitmap is null||previewLoading||closing||sourceWidth<=0||sourceHeight<=0||ImageCanvas.ActualWidth<=0||ImageCanvas.ActualHeight<=0)return;
         long current=selection,layout=previewLayoutRevision;var token=selectionStop.Token;
-        try{await EnsureFitResolution(selected,current,token);}
+        try
+        {
+            if(viewerScaleIntent is ViewerScaleIntent.Width or ViewerScaleIntent.Height)
+            {
+                double before=EffectiveScale();ApplyViewerScaleIntent();
+                // Keep the image point at the viewport center while changing the
+                // target axis. Clamping only moves it when an edge is reached.
+                if(before>0)pan*= (float)(EffectiveScale()/before);
+                ClampPan();
+            }
+            ImageCanvas.Invalidate();UpdateViewerCursor();UpdateViewerInformation();
+            if(animationRunning||offlinePreview)return;
+            if(zoom>0)await LoadVisibleTiles();else await EnsureFitResolution(row,current,token);
+        }
         catch(OperationCanceledException){}catch(Exception ex){if(!closing&&current==selection&&layout==previewLayoutRevision&&!token.IsCancellationRequested)ShowPreviewError(ex);}
+    }
+    private Task CompleteStaticPreviewPixels(FileRow row,long current,CancellationToken token)
+    {
+        if(closing||current!=selection||!ReferenceEquals(selected,row)||token.IsCancellationRequested||previewReadySelection!=current
+            ||previewLoading||previewFailure is not null||offlinePreview||fitBitmap is null||row.Kind!="image"||zoom<=0
+            ||AnimationButton.Visibility==Visibility.Visible||rawPreviewOnly||FileKinds.Raw.Contains(Path.GetExtension(SourcePath(row))))return Task.CompletedTask;
+        return LoadVisibleTiles();
     }
     private void PreparePreview()
     {

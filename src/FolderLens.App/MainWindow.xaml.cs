@@ -569,6 +569,16 @@ public sealed partial class MainWindow : Window
             // Restore the pre-drag selection while the old ordinals still refer
             // to the old files. Incremental publication may reuse ItemsSource.
             CancelMarquee();previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
+            var capturedSelection=CapturePublicationSelection(ActiveBrowser);
+            SnapshotSelection? mappedSelection=null;
+            if(capturedSelection is not null)
+            {
+                mappedSelection=previousHandle is not null
+                    ?await catalog.MapSnapshotSelection(previousHandle,handle,capturedSelection.Ranges,capturedSelection.PreviewOrdinal,queryToken)
+                    :MapFirstPageSelection(capturedSelection,matching);
+                if(!IsCurrent()||closing||PreviewInterrupted())return;
+                if(!OwnsPublicationSelection(capturedSelection)){automaticQueryPending=true;return;}
+            }
             var nextResults=new VirtualResults(catalog,handle,DispatcherQueue);nextResults.SetPresentation(GridCardWidth,gridShowPaths);
             bool adopted=false,selectionRestored=false;
             activeList=ActiveBrowser;
@@ -635,7 +645,12 @@ public sealed partial class MainWindow : Window
                 // A native reset may clear the highlight even when the selected
                 // row survived. Restore it before yielding for old-source cleanup;
                 // a later database lookup must not leave a visible selection gap.
-                if((incremental||promoting)&&selected is {} retainedSelection&&nextResults.Contains(retainedSelection)&&ActiveBrowser.Items.IndexOf(retainedSelection)>=0)
+                if(mappedSelection is not null)
+                {
+                    RestorePublicationSelection(ActiveBrowser,mappedSelection.Ranges);
+                    selectionRestored=true;
+                }
+                else if((incremental||promoting)&&selected is {} retainedSelection&&nextResults.Contains(retainedSelection)&&ActiveBrowser.Items.IndexOf(retainedSelection)>=0)
                 {
                     RestoreBrowserSelection(ActiveBrowser,retainedSelection);selectionRestored=true;
                 }
@@ -681,7 +696,18 @@ public sealed partial class MainWindow : Window
             UpdateDirectoryScopeBanner(filter);
             ResultSummary.Text=UserMessages.Results(handle.Count,handle.Pending,handle.Unresolvable,handle.IsPendingView)+(handle.Count==0?(scanTask is {IsCompleted:false}?" · 正在查找更多文件":" · 当前没有可显示的文件"):"");
             if(verifySelectionRestoreBarrier is not null)await verifySelectionRestoreBarrier();
-            if(previousPath is not null&&!selectionRestored)
+            if(mappedSelection is not null&&IsCurrent()&&!closing&&ReferenceEquals(results,nextResults)
+                &&restoreSelectionRequest==browserSelectionRequest&&publicationInteraction==browserInteractionVersion)
+            {
+                long? ordinal=mappedSelection.PreviewOrdinal??(mappedSelection.Ranges.Count>0?mappedSelection.Ranges[0].Start:null);
+                if(ordinal is {} position)
+                {
+                    var row=(FileRow)nextResults[checked((int)position)]!;
+                    if(!ReferenceEquals(selected,row))_=SelectPreview(row,preserveViewportIntent:true);
+                }
+                else if(selected is not null)ClearResultSelection();
+            }
+            else if(previousPath is not null&&!selectionRestored)
             {
                 var ordinal=await catalog.FindOrdinal(handle.Id,previousPath,queryToken);
                 if(IsCurrent()&&!closing&&restoreSelectionRequest==browserSelectionRequest&&publicationInteraction==browserInteractionVersion)
@@ -726,7 +752,7 @@ public sealed partial class MainWindow : Window
         if(!CanAdoptPrefetch(row))prefetchStop.Cancel();slideTimer?.Stop();animationTimer?.Stop();animationRunning=false;StopVideo();StopAudio();AudioState.Text="";AudioTools.Visibility=Visibility.Collapsed;FrameTools.Visibility=Visibility.Collapsed;imagePage=0;imagePageCount=1;
         MarkdownHost.Visibility=Visibility.Collapsed;markdownImages.Clear();
         selected=row;requestedImagePage=null;selectionStop.Cancel();selectionStop.Dispose();selectionStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var token=selectionStop.Token;long current=++selection;PreparePreview();FileTitle.Text=row.Name;QualityLabel.Text="正在读取…";
-        UpdateViewerInformation();BeginPreviewDiagnostics(current);
+        UpdateViewerInformation();BeginPreviewDiagnostics(current);bool rendered=false;
         try
         {
             if(verifyPreviewBarrier is not null)await verifyPreviewBarrier(token);
@@ -739,12 +765,14 @@ public sealed partial class MainWindow : Window
             bool cloud=selectedProperties.HydrationState=="placeholder"&&!approvedCloud.Contains(CloudKey(row));cloudPreviewButton!.Visibility=cloud?Visibility.Visible:Visibility.Collapsed;
             if(cloud){QualityLabel.Text="此文件仅在线，读取前需要确认。";ClearImage();return;}
             await RenderSelectedContent(row,current,token);
+            rendered=current==selection&&!token.IsCancellationRequested&&previewReadySelection==current;
             UpdateViewerInformation();
             if(slideShow&&current==selection&&row.Kind=="image")slideTimer?.Start();
         }
         catch(OperationCanceledException){RecordPreviewStage(current,"cancelled");if(current==selection&&!token.IsCancellationRequested&&!closing)ShowPreviewError(new IOException("文件列表已变化，请重新选择此文件。"));}
         catch(Exception ex){if(current==selection&&!closing){ClearImage();ShowPreviewError(ex);}}
         finally{if(current==selection&&!closing){FinishPreview();if(previewStage is not ("failed" or "cancelled"))RecordPreviewStage(current,"finished");verifyPreviewStage?.Invoke("finished");}}
+        if(rendered)await CompleteStaticPreviewPixels(row,current,token);
         if(current==selection&&!closing&&!offlinePreview&&row.Kind=="image")await LoadSelectedExif(row,current,token);
     }
     private async Task RenderSelectedContent(FileRow row,long current,CancellationToken token)
@@ -1020,6 +1048,7 @@ public sealed partial class MainWindow : Window
         &&bitmap.SizeInPixels.Width>=sourceWidth&&bitmap.SizeInPixels.Height>=sourceHeight;
     private async Task LoadVisibleTiles()
     {
+        using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(selected?.Item is null || selected.Kind!="image"||sourceWidth<=0 || zoom<=0||previewLoading||offlinePreview)return;long current=selection;var token=selectionStop.Token;
         bool animated=AnimationButton.Visibility==Visibility.Visible;if(animated)PauseAnimationForDetail();int frameIndex=animationFrameIndex;
         if(!await tileGate.WaitAsync(0)){tileReloadPending=true;return;}tileReloadPending=false;
@@ -1045,6 +1074,7 @@ public sealed partial class MainWindow : Window
             for(int y=firstY;y<=lastY;y++)for(int x=firstX;x<=lastX;x++)
             {
                 token.ThrowIfCancellationRequested();if(tiles.ContainsKey((x,y)))continue;
+                verifyFullTileRequested?.Invoke(current,SourcePath(selected));
                 var reply=await previewWorker!.RequestPixels(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?frameIndex:0,TileX:x,TileY:y,PageIndex:imagePage),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
                 var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || token.IsCancellationRequested||tileReloadPending||animated&&(animationRunning||frameIndex!=animationFrameIndex)){bitmap.Dispose();return;}tiles[(x,y)]=bitmap;ImageCanvas.Invalidate();
             }

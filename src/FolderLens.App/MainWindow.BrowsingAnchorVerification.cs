@@ -36,8 +36,8 @@ public sealed partial class MainWindow
             ?element.TransformToVisual(ActiveBrowser).TransformPoint(new(0,0)).Y:double.NaN;
         async Task Check(FileRow row,double top,string label,bool chosen=true)
         {
-            try{await WaitUntil(()=>IsThumbnailInViewport(ActiveBrowser,row)&&Math.Abs(Top(row)-top)<=1&&(!chosen||ReferenceEquals(ActiveBrowser.SelectedItem,row)),TimeSpan.FromSeconds(5));}
-            finally{double actual=Top(row);report[label]=new{expectedTop=top,actualTop=double.IsFinite(actual)?actual:(double?)null,visible=IsThumbnailInViewport(ActiveBrowser,row),selected=ReferenceEquals(ActiveBrowser.SelectedItem,row)};}
+            try{await WaitUntil(()=>IsThumbnailInViewport(ActiveBrowser,row)&&Math.Abs(Top(row)-top)<=1&&(!chosen||ReferenceEquals(ActiveBrowser.SelectedItem,row)&&SelectedOrdinals(ActiveBrowser).Any(range=>row.Ordinal>=range.Start&&row.Ordinal<range.End)),TimeSpan.FromSeconds(5));}
+            finally{double actual=Top(row);report[label]=new{expectedTop=top,actualTop=double.IsFinite(actual)?actual:(double?)null,visible=IsThumbnailInViewport(ActiveBrowser,row),selected=ReferenceEquals(ActiveBrowser.SelectedItem,row),expectedOrdinal=row.Ordinal,selectedIndex=ActiveBrowser.SelectedIndex,ranges=SelectedOrdinals(ActiveBrowser).ToArray()};}
         }
         async Task Scan()
         {
