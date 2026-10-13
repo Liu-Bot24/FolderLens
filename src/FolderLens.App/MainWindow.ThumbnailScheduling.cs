@@ -78,7 +78,7 @@ public sealed partial class MainWindow
             view.RemoveHandler(UIElement.KeyDownEvent,new KeyEventHandler(BrowserKeyIntent));
         }
         foreach(var scroll in thumbnailScrollers.Values)scroll.ViewChanged-=ThumbnailViewChanged;
-        thumbnailViews.Clear();thumbnailScrollers.Clear();realizedFolderHeaders.Clear();browserMovementTimer?.Stop();browserOffsetOwner=null;
+        thumbnailViews.Clear();thumbnailScrollers.Clear();realizedFolderHeaders.Clear();browserMovementTimer?.Stop();SetBrowserOffsetOwner(null);
     }
 
     private async Task EnsureCurrentRowLoaded(FileRow row,CancellationToken token,bool foreground=false)

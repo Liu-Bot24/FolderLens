@@ -6,10 +6,13 @@ public sealed partial class MainWindow
 {
     private async Task VerifyViewportLoading(string source,Dictionary<string,object> report)
     {
+        byte[] sample=await File.ReadAllBytesAsync(Path.Combine(source,"A","image-00.png"));
+        for(int i=12;i<96;i++)await File.WriteAllBytesAsync(Path.Combine(source,"A",$"image-{i:D2}.png"),sample);
         await OpenRoot(source);await ResetFirstPageFixture();
         await VerifyRetiredViewportRead();
         folderGrouping=new(true,"first","logicalBytes","desc","all");ResetBrowserStart();
         FileRow? chosen=null;
+        double chosenTop=0;
         verifyFirstPageBarrier=async token=>
         {
             if(resultHandle is not null||firstPageSequence.Length==0||browserGroups is not null)
@@ -18,7 +21,10 @@ public sealed partial class MainWindow
             if(!keepBrowserStart||Math.Abs(CapturePublicationViewport(FilesGrid))>1||(FindScrollViewer(FilesGrid)?.VerticalOffset??0)>1)
                 throw new InvalidOperationException("未操作的新目录没有保持开头。");
             chosen=firstPageSequence.First(row=>row.Kind=="image");
-            await SelectPreview(chosen);
+            FilesGrid.SelectedItem=chosen;
+            await WaitUntil(()=>ReferenceEquals(selected,chosen)&&fitBitmap is not null,TimeSpan.FromSeconds(8));
+            if(FilesGrid.ContainerFromItem(chosen) is not Microsoft.UI.Xaml.FrameworkElement element)throw new InvalidOperationException("首批选择没有可见容器。");
+            chosenTop=element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y;
             if(fitBitmap is null||!ReferenceEquals(selected,chosen))throw new InvalidOperationException("分组首批不能直接预览。");
         };
         try
@@ -30,6 +36,10 @@ public sealed partial class MainWindow
                 selectionRetained=chosen is not null&&ReferenceEquals(selected,chosen),rowRetained=chosen is not null&&results?.Contains(chosen)==true,hasBitmap=fitBitmap is not null};
             if(browserGroups is null||chosen is null||!ReferenceEquals(selected,chosen)||results?.Contains(chosen)!=true||fitBitmap is null)
                 throw new InvalidOperationException("正式分组发布丢失了首批选择或预览。");
+            await WaitUntil(()=>FilesGrid.ContainerFromItem(chosen) is Microsoft.UI.Xaml.FrameworkElement element
+                &&Math.Abs(element.TransformToVisual(FilesGrid).TransformPoint(new(0,0)).Y-chosenTop)<=1
+                &&IsThumbnailInViewport(FilesGrid,chosen),TimeSpan.FromSeconds(4));
+            report["firstPageSelectionStaysAtVisiblePosition"]=true;
             report["groupedFirstPagePreviewSurvivesPromotion"]=true;
             var saved=CaptureView() with{ScrollOffset=99999,ScrollAnchorPath="not-scanned-yet.png"};
             pendingViewRestore=new(saved,viewRestoreRevision,rootChangeVersion,browserInteractionVersion,directoryNavigationRequest);

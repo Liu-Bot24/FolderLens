@@ -129,7 +129,7 @@ public sealed partial class MainWindow
             {
                 pendingViewRestore=new(saved,revision,requestedRoot,interaction,navigation);
                 keepBrowserStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
-                browserOffsetOwner=null;
+                SetBrowserOffsetOwner(null);
             }
             // This request's normalized filter is authoritative even before the
             // same-root query updates submittedBrowserFilter. Never sample later UI.
@@ -202,8 +202,9 @@ public sealed partial class MainWindow
             if(!ReferenceEquals(pendingViewRestore,pending)||pending.InteractionVersion!=browserInteractionVersion||pending.NavigationVersion!=directoryNavigationRequest||revision!=viewRestoreRevision||requestedRoot!=rootChangeVersion||query!=generation||sourceResults!=results)return;
             // A partial first scan may not yet contain the saved file. Retry on its next snapshot.
             if((scanTask is {IsCompleted:false}||metadataTask is {IsCompleted:false})&&((saved.SelectedPath is not null&&selectedOrdinal is null)||(saved.ScrollAnchorPath is not null&&anchorOrdinal is null)))return;
-            pendingViewRestore=null;BeginBrowserMovement();
-            keepBrowserStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
+            bool restoreStart=saved.ScrollOffset<=0&&saved.ScrollAnchorPath is null&&saved.SelectedPath is null;
+            pendingViewRestore=null;BeginBrowserMovement(protectContent:!restoreStart);
+            keepBrowserStart=restoreStart;
             if(selectedOrdinal is not null&&saved.Preview is {} preview&&saved.SelectedPath is {} previewPath)pendingPreviewRestore=new(preview,previewPath,requestedRoot);
             if(selectedOrdinal is {} ordinal){var row=(FileRow)sourceResults[(int)ordinal]!;RevealBrowserRow(row);RestoreBrowserSelection(list,row);}
             list.UpdateLayout();

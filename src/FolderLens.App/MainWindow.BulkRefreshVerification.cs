@@ -9,12 +9,28 @@ public sealed partial class MainWindow
     {
         folderGrouping=new();sortDescending=false;SelectTag(SortField,"name");
         await OpenRoot(source);if(metadataTask is not null)await metadataTask;monitor?.Dispose();monitor=null;
-        await RefreshQuery();await SelectBrowserOrdinal(results!,0,lifetime.Token);
-        var anchor=selected??throw new InvalidOperationException("Missing fixture selection.");
+        await RefreshQuery();
+        var anchor=(FileRow)results![0]!;
+        // Native list selection is the user's single click, before opening the viewer.
+        ActiveBrowser.SelectedItem=anchor;
+        await WaitUntil(()=>ReferenceEquals(selected,anchor),TimeSpan.FromSeconds(5));
+        if(immersive||fullScreen)throw new InvalidOperationException("Fixture opened the viewer instead of selecting a browser item.");
         await WaitUntil(()=>anchor.Thumbnail is not null,TimeSpan.FromSeconds(10));
         await WaitUntil(()=>!browserMovementPending&&!queryBusy,TimeSpan.FromSeconds(5));
         long original=resultHandle!.Count;var sequence=flatBrowserItems!;
         Shell.UpdateLayout();var viewport=CapturePublicationViewport(ActiveBrowser);
+        double? AnchorTop()=>ActiveBrowser.ContainerFromItem(anchor) is Microsoft.UI.Xaml.FrameworkElement element
+            ?element.TransformToVisual(ActiveBrowser).TransformPoint(new(0,0)).Y:null;
+        double originalTop=AnchorTop()??throw new InvalidOperationException("Selected fixture row is not visible.");
+        int renderedFrames=0,missingAnchorBitmapFrames=0,displacedFrames=0,missingSelectionFrames=0;
+        void ObserveFrame(object? sender,object args)
+        {
+            renderedFrames++;
+            if(anchor.Thumbnail is null)missingAnchorBitmapFrames++;
+            if(!IsThumbnailInViewport(ActiveBrowser,anchor)||AnchorTop() is not {} top||Math.Abs(top-originalTop)>1)displacedFrames++;
+            if(!ReferenceEquals(ActiveBrowser.SelectedItem,anchor))missingSelectionFrames++;
+        }
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering+=ObserveFrame;
         int notifications=0;sequence.CollectionChanged+=Observe;
         void Observe(object? sender,NotifyCollectionChangedEventArgs e){notifications++;if(e.Action!=NotifyCollectionChangedAction.Reset)throw new InvalidOperationException("Bulk refresh emitted per-row notifications.");}
         try
@@ -34,19 +50,24 @@ public sealed partial class MainWindow
             await catalog.Write(c=>{using var q=c.CreateCommand();q.CommandText="DELETE FROM Files WHERE entry_id GLOB 'audit-bulk-*'; UPDATE SchemaInfo SET catalog_revision=catalog_revision+1;";return q.ExecuteNonQuery();});
             await RefreshQuery(preserveViewport:true,scanPreview:true);await Check(original);
             if(notifications!=2)throw new InvalidOperationException("Expected one reset per large publication.");
-            report["bulkPrependAndRemove100000"]=true;report["retainedSelectionAndOffset"]=true;report["notifications"]=notifications;report["status"]="PASS";
+            if(renderedFrames==0||missingAnchorBitmapFrames!=0)throw new InvalidOperationException($"Selected thumbnail disappeared during publication: {missingAnchorBitmapFrames}/{renderedFrames} frames.");
+            if(displacedFrames!=0||missingSelectionFrames!=0)throw new InvalidOperationException($"Selected image moved or lost its highlight during publication: position={displacedFrames}, selection={missingSelectionFrames}, frames={renderedFrames}.");
+            report["bulkPrependAndRemove100000"]=true;report["retainedSelectionAndVisiblePosition"]=true;report["notifications"]=notifications;report["status"]="PASS";
         }
-        finally{sequence.CollectionChanged-=Observe;}
+        finally
+        {
+            sequence.CollectionChanged-=Observe;Microsoft.UI.Xaml.Media.CompositionTarget.Rendering-=ObserveFrame;
+            report["renderedFrames"]=renderedFrames;report["missingAnchorBitmapFrames"]=missingAnchorBitmapFrames;
+            report["displacedFrames"]=displacedFrames;report["missingSelectionFrames"]=missingSelectionFrames;
+        }
         async Task Check(long count)
         {
             Shell.UpdateLayout();
-            // Prepending moves the selected file offscreen; releasing that
-            // bitmap is valid. Its row identity and numeric position must survive.
             if(resultHandle!.Count!=count||results!.Count!=count||!ReferenceEquals(flatBrowserItems,sequence)||!ReferenceEquals(selected,anchor))throw new InvalidOperationException("Bulk refresh lost count or selection.");
             if(results.CachedRows().Count()>4096)throw new InvalidOperationException("Bulk refresh materialized offscreen rows.");
             ApplyBrowserOffset();
-            double expected=Math.Min(viewport,FindScrollViewer(ActiveBrowser)?.ScrollableHeight??0);
-            await WaitUntil(()=>Math.Abs((FindScrollViewer(ActiveBrowser)?.VerticalOffset??0)-expected)<=1,TimeSpan.FromSeconds(3));
+            try{await WaitUntil(()=>AnchorTop() is {} top&&Math.Abs(top-originalTop)<=1&&IsThumbnailInViewport(ActiveBrowser,anchor),TimeSpan.FromSeconds(3));}
+            finally{report["selectedVisibilityCheckpoint"]=new{count,originalTop,currentTop=AnchorTop(),visible=IsThumbnailInViewport(ActiveBrowser,anchor),originalOffset=viewport,currentOffset=FindScrollViewer(ActiveBrowser)?.VerticalOffset,ordinal=anchor.Ordinal};}
         }
     }
 }

@@ -498,9 +498,13 @@ public sealed partial class MainWindow : Window
         string previousSummary=ResultSummary.Text;bool published=false,failed=false;string? candidateLease=null;string queryPhase="firstPage";
         if(scanPreview&&queryBusy){automaticQueryPending=true;await queryCompletion;return;}
         if(!scanPreview)automaticQueryPending=false;
+        long queryInteraction=browserInteractionVersion;
         bool PreviewInterrupted()
         {
-            if(!scanPreview)return false;
+            // The original explicit query can still be promoting a first page
+            // the user has already started browsing. Its late promotion is now
+            // background work too, and must yield while that gesture is moving.
+            if(!scanPreview&&!(resultHandle is null&&FirstPageMatches(filter)&&browserInteractionVersion!=queryInteraction))return false;
             if(BrowserSequenceLocked)return true;
             if(!browserMovementPending)return false;
             viewportPublicationPending=true;return true;
@@ -566,10 +570,11 @@ public sealed partial class MainWindow : Window
             // to the old files. Incremental publication may reuse ItemsSource.
             CancelMarquee();previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             var nextResults=new VirtualResults(catalog,handle,DispatcherQueue);nextResults.SetPresentation(GridCardWidth,gridShowPaths);
-            bool adopted=false;
+            bool adopted=false,selectionRestored=false;
             activeList=ActiveBrowser;
             long publicationInteraction=browserInteractionVersion;
             double publicationOffset=preserveViewport||scanPreview?CapturePublicationViewport(activeList):0;
+            var publicationAnchor=scanPreview||promoting&&browserInteractionVersion!=queryInteraction?CapturePublicationAnchor(activeList):null;
             if(incremental||promoting)publicationRows=visible.ToHashSet();
             queryPhase="publish";updatingBrowser=true;
             long publicationStart=Stopwatch.GetTimestamp();
@@ -604,7 +609,7 @@ public sealed partial class MainWindow : Window
                     long notificationAllocated=publicationStages is null?0:GC.GetAllocatedBytesForCurrentThread();
                     int notificationGc0=publicationStages is null?0:GC.CollectionCount(0),notificationGc1=publicationStages is null?0:GC.CollectionCount(1),notificationGc2=publicationStages is null?0:GC.CollectionCount(2);
                     UpdateBrowserResults(nextResults,groups,stableChanges,publicationStages);
-                    RestorePublicationViewport(activeList,publicationOffset);
+                    RestorePublicationViewport(activeList,publicationOffset,RebindPublicationAnchor(publicationAnchor,nextResults,matching));
                     Stage("notifications");
                     if(publicationStages is not null)
                     {
@@ -623,10 +628,17 @@ public sealed partial class MainWindow : Window
                     var changes=PromoteFirstPage(nextResults,matching);
                     CancelObsoleteThumbnails(nextResults);resultHandle=handle;results=nextResults;candidateLease=null;adopted=true;
                     if(groups.Count==0)UpdatePromotedFirstPage(nextResults,changes);else BindPromotedFirstPage(nextResults,groups);
-                    RestorePublicationViewport(activeList,publicationOffset);
+                    RestorePublicationViewport(activeList,publicationOffset,RebindPublicationAnchor(publicationAnchor,nextResults,matching));
                     foreach(var item in visibleContainers.ToArray())if(nextResults.IndexOf(item.Value)>=0)_=LoadThumbnail(item.Key.View,item.Value);
                 }
                 else{ClearResultSelection();CancelThumbnails();resultHandle=handle;results=nextResults;candidateLease=null;adopted=true;BindBrowserResults(results,groups);RestorePublicationViewport(ActiveBrowser,publicationOffset);}
+                // A native reset may clear the highlight even when the selected
+                // row survived. Restore it before yielding for old-source cleanup;
+                // a later database lookup must not leave a visible selection gap.
+                if((incremental||promoting)&&selected is {} retainedSelection&&nextResults.Contains(retainedSelection)&&ActiveBrowser.Items.IndexOf(retainedSelection)>=0)
+                {
+                    RestoreBrowserSelection(ActiveBrowser,retainedSelection);selectionRestored=true;
+                }
                 if(viewerStrip is not null)viewerStrip.ItemsSource=results;
                 verifyPublishFault?.Invoke();
                 lastAppliedFilter=filter;
@@ -648,10 +660,20 @@ public sealed partial class MainWindow : Window
                 verifyPublicationDuration?.Invoke(Stopwatch.GetElapsedTime(publicationStart).TotalMilliseconds);
                 if(publicationStages is not null)verifyPublicationStages?.Invoke(publicationStages);
                 updatingBrowser=false;
-                ReleasePublicationRows();
-                UpdateBrowserEmptyState();
-                if(adopted){previousResults?.Dispose();if(previousHandle is not null)await catalog.ReleaseSnapshot(previousHandle.Id);}
-                else nextResults.Dispose();
+                try{ApplyBrowserOffset();}
+                finally
+                {
+                    try{ReleasePublicationRows();UpdateBrowserEmptyState();}
+                    finally
+                    {
+                        if(adopted)
+                        {
+                            try{previousResults?.Dispose();}
+                            finally{if(previousHandle is not null)await catalog.ReleaseSnapshot(previousHandle.Id);}
+                        }
+                        else nextResults.Dispose();
+                    }
+                }
                 if(verifyRetirementBarrier is not null)await verifyRetirementBarrier();
             }
             published=true;
@@ -659,7 +681,7 @@ public sealed partial class MainWindow : Window
             UpdateDirectoryScopeBanner(filter);
             ResultSummary.Text=UserMessages.Results(handle.Count,handle.Pending,handle.Unresolvable,handle.IsPendingView)+(handle.Count==0?(scanTask is {IsCompleted:false}?" · 正在查找更多文件":" · 当前没有可显示的文件"):"");
             if(verifySelectionRestoreBarrier is not null)await verifySelectionRestoreBarrier();
-            if(previousPath is not null)
+            if(previousPath is not null&&!selectionRestored)
             {
                 var ordinal=await catalog.FindOrdinal(handle.Id,previousPath,queryToken);
                 if(IsCurrent()&&!closing&&restoreSelectionRequest==browserSelectionRequest&&publicationInteraction==browserInteractionVersion)
@@ -1058,7 +1080,7 @@ public sealed partial class MainWindow : Window
                 visibleConsumerCounts.Remove(old);visible.Remove(old);TrimTextExcerpts();
                 // A group move temporarily recycles containers before the same
                 // visible rows are realized at their restored scroll position.
-                if(publicationRows?.Contains(old)!=true)
+                if(publicationRows?.Contains(old)!=true&&!IsProtectedPublicationRow(old))
                 {
                     if(!IsDecodingThumbnail(old)&&thumbnailRequests.Remove(old,out var request)){request.Cancel();request.Dispose();}
                     if(propertyCancellations.TryGetValue(old,out var propertyCancellation))propertyCancellation.Cancel();
