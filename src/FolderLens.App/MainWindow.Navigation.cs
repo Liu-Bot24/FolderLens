@@ -17,12 +17,13 @@ public sealed partial class MainWindow
         if(!forward&&(immersive||fullScreen)){await ReturnToBrowser();UpdateNavigationButtons();return;}
         if(forward?!navigationHistory.CanGoForward:!navigationHistory.CanGoBack)return;
         await ReturnToBrowser();
-        long historyRevision=navigationHistory.Revision;var current=CaptureAcceptedView();if(current is null)return;
+        long historyRevision=navigationHistory.Revision;var current=CaptureAcceptedView();
         var target=forward?navigationHistory.PeekForward():navigationHistory.PeekBack();
         await RestoreSavedView(target,false,recheckDirectory:true,onAccepted:()=>
         {
             if(historyRevision!=navigationHistory.Revision)return;
-            if(forward)navigationHistory.GoForward(current);else navigationHistory.GoBack(current);
+            if(current is null){if(forward)navigationHistory.GoForwardFromEmpty();else navigationHistory.GoBackFromEmpty();}
+            else if(forward)navigationHistory.GoForward(current);else navigationHistory.GoBack(current);
             UpdateNavigationButtons();
         });
     }

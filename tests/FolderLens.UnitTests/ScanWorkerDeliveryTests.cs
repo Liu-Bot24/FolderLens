@@ -226,5 +226,38 @@ public sealed class ScanWorkerDeliveryTests:IDisposable
         }
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));Assert.True(process.HasExited);
     }
-    public void Dispose(){if(Directory.Exists(directory))Directory.Delete(directory,true);}
+    [Fact] public async Task FixtureCleanupWaitsForAShortLivedFileLock()
+    {
+        string executable=CreateEntry("",false);
+        using var held=new FileStream(executable,FileMode.Open,FileAccess.Read,FileShare.None);
+        var cleanup=Task.Run(Dispose);
+        try
+        {
+            await Task.Delay(100);Assert.False(cleanup.IsCompleted);
+            held.Dispose();await cleanup.WaitAsync(TimeSpan.FromSeconds(5));Assert.False(Directory.Exists(directory));
+        }
+        finally{held.Dispose();await cleanup;}
+    }
+    [Fact] public async Task FixtureCleanupStillReportsALockThatDoesNotClear()
+    {
+        string executable=CreateEntry("",false);
+        using var held=new FileStream(executable,FileMode.Open,FileAccess.Read,FileShare.None);
+        var error=await Record.ExceptionAsync(()=>Task.Run(Dispose));
+        Assert.True(error is IOException or UnauthorizedAccessException,$"Persistent file lock was not reported: {error}");
+        Assert.True(Directory.Exists(directory));
+    }
+    public void Dispose()
+    {
+        // Exit assertions above remain strict. Windows can briefly retain the
+        // generated EXE after exit; only retry sharing/access-denied cleanup
+        // errors, with a deadline. A persistent failure must still fail the test.
+        var deadline=Stopwatch.StartNew();
+        while(Directory.Exists(directory))
+        {
+            try{Directory.Delete(directory,true);return;}
+            catch(Exception error) when((error is IOException or UnauthorizedAccessException)
+                &&(error.HResult&0xffff) is 5 or 32 or 33&&deadline.Elapsed<TimeSpan.FromSeconds(2))
+            {Thread.Sleep(25);}
+        }
+    }
 }

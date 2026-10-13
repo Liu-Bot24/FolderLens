@@ -61,7 +61,12 @@ public sealed partial class MainWindow
                 long request=queryRequest;coalesced=RefreshQuery(scanPreview:true);await Task.Yield();
                 if(queryRequest!=request||token.IsCancellationRequested)throw new InvalidOperationException("自动查询取消了同一候选快照。");
             };
-            await RefreshQuery(scanPreview:true);if(coalesced is not null)await coalesced;AssertRetained("快照升级");
+            await RefreshQuery(scanPreview:true);if(coalesced is not null)await coalesced;
+            report["promotionBeforeMovementSettled"]=new{published=resultHandle is not null,browserMovementPending,viewportPublicationPending};
+            // Navigate is a real viewport movement. Publication intentionally
+            // waits until its native scrolling settles, even after query tasks finish.
+            await WaitUntil(()=>resultHandle is not null&&!queryBusy&&!browserMovementPending,TimeSpan.FromSeconds(5));
+            AssertRetained("快照升级");
             if(resultHandle is null||results is null||!ReferenceEquals(selected,chosen)||results.IndexOf(chosen)<0)throw new InvalidOperationException("首批选择阻断升级或未保留选择。");
             Navigate(1);await WaitUntil(()=>ReferenceEquals(selected,rows[2]),TimeSpan.FromSeconds(3));
             report["retryRetainsRowsContainersAndThumbnails"]=true;report["promotionRetainsSelection"]=true;report["firstPageNavigation"]=true;report["automaticQueryCoalesced"]=true;report["status"]="PASS";

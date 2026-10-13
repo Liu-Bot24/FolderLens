@@ -118,7 +118,12 @@ public sealed partial class MainWindow
         }
         if(viewerExternalPlayer is not null)viewerExternalPlayer.Visibility=video?Visibility.Visible:Visibility.Collapsed;
         if(viewerWheelSelector is not null)viewerWheelSelector.Visibility=video?Visibility.Collapsed:Visibility.Visible;
-        if(selected is null){if(viewerCaption is not null)viewerCaption.Text="未选择文件";if(viewerPosition is not null)viewerPosition.Text="";if(viewerInformation is not null)viewerInformation.Text="请选择当前结果中的文件。";return;}string position=$"{selected.Ordinal+1:N0} / {resultHandle?.Count??0:N0}";
+        if(selected is null){if(viewerCaption is not null)viewerCaption.Text="未选择文件";if(viewerPosition is not null)viewerPosition.Text="";if(viewerInformation is not null)viewerInformation.Text="请选择当前结果中的文件。";return;}
+        string position=resultHandle is {Count:>0} handle&&results?.Contains(selected)==true
+            ?$"{selected.Ordinal+1:N0} / {handle.Count:N0}"
+            :firstPageRows.Contains(selected)
+                ?$"第 {selected.Ordinal+1:N0} 项 · 已加载 {firstPageSequence.Length:N0} 项，完整列表{(queryBusy?"整理中":"尚未就绪")}"
+                :"完整列表尚未就绪";
         string groupCaption=selected.Item?.Group is {} group?$"    文件夹：{(group.RelativePath.Length==0?"本目录文件":group.RelativePath)}    {FileRow.FormatBytes(group.Bytes)}{(group.ScanState=="ready"?"":" · 部分统计")}":"";
         if(viewerCaption is not null)viewerCaption.Text=$"{position}    {selected.Name}    {selected.Detail}{groupCaption}";
         if(viewerPosition is not null)viewerPosition.Text=position;

@@ -49,15 +49,75 @@ public sealed partial class MainWindow
     private async Task RefreshCollectionsTree()
     {
         if(catalog is null)return;
-        fileCollections=await catalog.ReadCollections(lifetime.Token);if(closing)return;
+        var collections=await catalog.ReadCollections(lifetime.Token);if(closing)return;
+        ApplyCollectionsTree(collections);
+    }
+    private void ApplyCollectionsTree(IReadOnlyList<FileCollection> collections)
+    {
+        fileCollections=collections;
         EnsureCollectionsTreeRoot();
-        collectionsTreeRoot!.Children.Clear();
-        foreach(var collection in fileCollections)
+        var children=collectionsTreeRoot!.Children;
+        var wanted=collections.Select(collection=>collection.Id).ToHashSet(StringComparer.Ordinal);
+        for(int index=children.Count-1;index>=0;index--)
         {
-            var node=new TreeViewNode{Content=new CollectionNode(collection.Id,collection.Name,collection.Count)};collectionsTreeRoot.Children.Add(node);
-            if(collection.Id==activeCollectionId)FolderTree.SelectedNode=node;
+            if(children[index].Content is CollectionNode previous&&wanted.Contains(previous.Id))continue;
+            if(ReferenceEquals(FolderTree.SelectedNode,children[index]))FolderTree.SelectedNode=collectionsTreeRoot;
+            children.RemoveAt(index);
         }
+        var retained=children.Where(node=>node.Content is CollectionNode).ToDictionary(node=>((CollectionNode)node.Content).Id,StringComparer.Ordinal);
+        for(int index=0;index<collections.Count;index++)
+        {
+            var collection=collections[index];var content=new CollectionNode(collection.Id,collection.Name,collection.Count);
+            if(!retained.TryGetValue(collection.Id,out var node)){node=new(){Content=content};children.Insert(index,node);}
+            else
+            {
+                if(!Equals(node.Content,content))node.Content=content;
+                int previous=children.IndexOf(node);
+                if(previous!=index)
+                {
+                    if(ReferenceEquals(FolderTree.SelectedNode,node))FolderTree.SelectedNode=collectionsTreeRoot;
+                    children.RemoveAt(previous);children.Insert(index,node);
+                }
+            }
+        }
+        var current=activeCollectionId is {} selectedId?children.FirstOrDefault(node=>node.Content is CollectionNode c&&c.Id==selectedId):null;
+        if(current is not null&&!ReferenceEquals(FolderTree.SelectedNode,current))FolderTree.SelectedNode=current;
         UpdateCollectionFilterLabel();
+        if(activeCollectionId is {} id&&root=="collection:"+id)RootPath.Text="收藏夹："+CollectionLabel(id);
+        if(TrySubmittedBrowserFilter(out var filter))ShowActiveFilters(filter);
+    }
+    private CancellationTokenSource? collectionLocationStop;
+    private void SyncCollectionTreeSelection()
+    {
+        collectionLocationStop?.Cancel();collectionLocationStop=null;
+        if(activeCollectionId is not {} id)return;
+        if(SelectCollectionTreeNode(id))return;
+        var stop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);collectionLocationStop=stop;
+        _=RefreshMissingCollectionSelection(id,rootChangeVersion,directoryNavigationRequest,stop);
+    }
+    private bool SelectCollectionTreeNode(string id)
+    {
+        var node=collectionsTreeRoot?.Children.FirstOrDefault(node=>node.Content is CollectionNode collection&&collection.Id==id);
+        if(node is null)return false;collectionsTreeRoot!.IsExpanded=true;FolderTree.SelectedNode=node;return true;
+    }
+    private async Task RefreshMissingCollectionSelection(string id,long rootVersion,long navigation,CancellationTokenSource stop)
+    {
+        using(stop)
+        using(var work=browserWork.Enter())
+        {
+            bool Current()=>!closing&&!stop.IsCancellationRequested&&rootVersion==rootChangeVersion&&navigation==directoryNavigationRequest&&activeCollectionId==id;
+            try
+            {
+                if(work is null||closing||catalog is null)return;
+                var collections=await catalog.ReadCollections(stop.Token);
+                if(verifyCollectionLocationBarrier is {} barrier)await barrier(stop.Token);
+                if(!Current())return;
+                ApplyCollectionsTree(collections);SelectCollectionTreeNode(id);
+            }
+            catch(OperationCanceledException) when(stop.IsCancellationRequested){}
+            catch(Exception error){if(Current())ShowError(error);}
+            finally{if(ReferenceEquals(collectionLocationStop,stop))collectionLocationStop=null;}
+        }
     }
     private string CollectionLabel(string id)=>fileCollections.FirstOrDefault(c=>c.Id==id)?.Name??"已删除的收藏夹";
     private static StackPanel CollectionSelectionPanel(ListView choices,TextBox name,TextBlock error,long count)
@@ -102,6 +162,7 @@ public sealed partial class MainWindow
             }
         }
         catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
+        finally{verifyCollectionManagerClosed?.Invoke();}
     }
     private async void CollectSelected(object sender,RoutedEventArgs args)=>await CollectFiles();
     private async Task CollectFiles(FileRow? quickRow=null)
@@ -173,6 +234,7 @@ public sealed partial class MainWindow
     {
         using var work=browserWork.Enter();if(work is null||closing||catalog is null)return;
         await catalog.DeleteCollection(id,lifetime.Token);
+        navigationHistory.RemoveWhere(view=>view.Filter.CollectionId==id);UpdateNavigationButtons();
         bool affected=activeCollectionId==id||includedCollectionIds.Contains(id)||excludedCollectionIds.Contains(id);
         includedCollectionIds=includedCollectionIds.Where(value=>value!=id).ToArray();
         excludedCollectionIds=excludedCollectionIds.Where(value=>value!=id).ToArray();
@@ -210,7 +272,7 @@ public sealed partial class MainWindow
         lifetime.Token.ThrowIfCancellationRequested();
         // Async database work must not bring a dialog into another application's
         // active input session. Present it when our window next gains foreground.
-        if(!WindowFocus.IsForeground(this))
+        if(verifyCollectionDialogDriver is null&&!WindowFocus.IsForeground(this))
         {
             var foreground=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void ActivatedAgain(object sender,WindowActivatedEventArgs args){if(WindowFocus.IsForeground(this))foreground.TrySetResult();}
@@ -220,6 +282,15 @@ public sealed partial class MainWindow
         }
         lifetime.Token.ThrowIfCancellationRequested();
         using var cancel=lifetime.Token.Register(()=>DispatcherQueue.TryEnqueue(()=>dialog.Hide()));
+        if(verifyCollectionDialogDriver is {} driver)
+        {
+            var opened=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnOpened(ContentDialog sender,ContentDialogOpenedEventArgs args)=>opened.TrySetResult();
+            dialog.Opened+=OnOpened;var showing=dialog.ShowAsync().AsTask();
+            try{await opened.Task.WaitAsync(lifetime.Token);await driver(dialog);return await showing;}
+            catch{dialog.Hide();await showing;throw;}
+            finally{dialog.Opened-=OnOpened;}
+        }
         return await dialog.ShowAsync();
     }
 }

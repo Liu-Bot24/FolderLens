@@ -133,8 +133,22 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-navigation-roots")){await VerifyNavigationRoots(source,report);return;}
             if(arguments.Contains("--verify-drive-labels")){await VerifyDriveLabels(report);return;}
             if(arguments.Contains("--verify-functional-pixels")){await VerifyFunctionalPixels(source,report);return;}
+            if(arguments.Contains("--verify-functional-jpeg")){await VerifyFunctionalPixels(source,report,true);return;}
+            if(arguments.Contains("--verify-functional-pixel-boundaries")){await VerifyFunctionalPixelBoundaries(source,report);return;}
+            if(arguments.Contains("--verify-functional-reading")){await VerifyFunctionalReading(source,report);return;}
             if(arguments.Contains("--verify-functional-size")){await VerifyFunctionalSize(source,report);return;}
             if(arguments.Contains("--verify-functional-selection")){await VerifyFunctionalSelection(source,report);return;}
+            if(arguments.Contains("--verify-functional-selection-boundaries")){await VerifyFunctionalSelectionBoundaries(source,report);return;}
+            if(arguments.Contains("--verify-functional-physical")){await VerifyFunctionalPhysical(source,report);return;}
+            if(arguments.Contains("--verify-functional-native-input")){await VerifyFunctionalNativeInput(source,report);return;}
+            if(arguments.Contains("--verify-functional-history-back")){await VerifyFunctionalHistory(source,report,false);return;}
+            if(arguments.Contains("--verify-functional-history-forward")){await VerifyFunctionalHistory(source,report,true);return;}
+            if(arguments.Contains("--verify-functional-history-boundaries")){await VerifyFunctionalHistoryBoundaries(source,report);return;}
+            if(arguments.Contains("--verify-functional-collection-names")){await VerifyFunctionalCollectionNames(source,report);return;}
+            if(arguments.Contains("--verify-functional-collection-navigation")){await VerifyFunctionalCollectionNavigation(source,report);return;}
+            if(arguments.Contains("--verify-functional-collection-location-boundaries")){await VerifyFunctionalCollectionLocationBoundaries(source,report);return;}
+            if(arguments.Contains("--verify-functional-count")){await VerifyFunctionalCount(source,report,false);return;}
+            if(arguments.Contains("--verify-functional-count-failure")){await VerifyFunctionalCount(source,report,true);return;}
             if(arguments.Contains("--verify-filter-panel")){await VerifyFilterPanelLayout(report);return;}
             if(arguments.Contains("--verify-thumbnail-priority")){await VerifyThumbnailPriority(source,report);return;}
             if(arguments.Contains("--verify-viewport-loading")){await VerifyViewportLoading(source,report);return;}

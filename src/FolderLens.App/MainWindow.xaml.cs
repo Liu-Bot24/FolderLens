@@ -315,7 +315,7 @@ public sealed partial class MainWindow : Window
             DirectoryScopePanel.Visibility=Visibility.Collapsed;
             activeCollectionId=collectionScope?path[11..]:null;GroupingButton.IsEnabled=BrowseDepthButton.IsEnabled=!collectionScope;RootPath.IsReadOnly=collectionScope;
             if(!collectionScope&&advanced is not null)advanced=advanced with{CollectionId=null};
-            RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):Path.Combine(path,advanced?.DirectoryScope??"");if(!collectionScope)ShowTreeRoot(path);else{ResetTreeWork();activeTreeRoot=null;}UpdateNavigationButtons();
+            RootPath.Text=collectionScope?"收藏夹："+CollectionLabel(activeCollectionId!):Path.Combine(path,advanced?.DirectoryScope??"");if(!collectionScope)ShowTreeRoot(path);else{ResetTreeWork();activeTreeRoot=null;}SyncCollectionTreeSelection();UpdateNavigationButtons();
             browserScanError=null;browserEmptyError=null;generation++;queryBusy=false;ClearResultSelection();CancelThumbnails();results?.Dispose();results=null;
             firstPageSequence=[];firstPageFilter=null;firstPageRows.Clear();FilesGrid.ItemsSource=null;FilesList.ItemsSource=null;if(viewerStrip is not null)viewerStrip.ItemsSource=null;ResultSummary.Text="正在读取文件夹当前内容…";
             browserRootReady=true;
@@ -514,7 +514,7 @@ public sealed partial class MainWindow : Window
         queryStop.Cancel();queryStop.Dispose();queryStop=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);var queryToken=queryStop.Token;long gen=scanPreview?generation:++generation,request=++queryRequest;queryBusy=true;
         var attempt=new QueryAttempt(request,gen,epoch,rootId,scanPreview);
         bool IsCurrent()=>gen==generation&&request==queryRequest;
-        browserEmptyError=null;
+        browserEmptyError=null;UpdateViewerInformation();
         try
         {
             string? retired=RetireMismatchedResults(filter);UpdateBrowserEmptyState();
@@ -576,6 +576,7 @@ public sealed partial class MainWindow : Window
                 mappedSelection=previousHandle is not null
                     ?await catalog.MapSnapshotSelection(previousHandle,handle,capturedSelection.Ranges,capturedSelection.PreviewOrdinal,queryToken)
                     :MapFirstPageSelection(capturedSelection,matching);
+                if(verifySelectionMapBarrier is {} mappingBarrier)await mappingBarrier(queryToken);
                 if(!IsCurrent()||closing||PreviewInterrupted())return;
                 if(!OwnsPublicationSelection(capturedSelection)){automaticQueryPending=true;return;}
             }
@@ -693,6 +694,7 @@ public sealed partial class MainWindow : Window
             }
             published=true;
             if(!IsCurrent()||closing||!ReferenceEquals(results,nextResults)||!ReferenceEquals(resultHandle,handle))return;
+            UpdateViewerInformation();
             UpdateDirectoryScopeBanner(filter);
             ResultSummary.Text=UserMessages.Results(handle.Count,handle.Pending,handle.Unresolvable,handle.IsPendingView)+(handle.Count==0?(scanTask is {IsCompleted:false}?" · 正在查找更多文件":" · 当前没有可显示的文件"):"");
             if(verifySelectionRestoreBarrier is not null)await verifySelectionRestoreBarrier();
@@ -725,7 +727,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 if(candidateLease is not null)await catalog.ReleaseSnapshot(candidateLease);
-                if(IsCurrent()){queryBusy=false;if(scanPreview){scanPreviewRefresh.Complete(Stopwatch.GetElapsedTime(0));if(!published&&!failed&&resultHandle is not null)ResultSummary.Text=previousSummary;}UpdateBrowserEmptyState();
+                if(IsCurrent()){queryBusy=false;if(!closing)UpdateViewerInformation();if(scanPreview){scanPreviewRefresh.Complete(Stopwatch.GetElapsedTime(0));if(!published&&!failed&&resultHandle is not null)ResultSummary.Text=previousSummary;}UpdateBrowserEmptyState();
                     if(automaticQueryPending&&!closing){automaticQueryPending=false;await RefreshQuery(scanPreview:true);}}
             }
             finally{completion.TrySetResult();}
@@ -1076,6 +1078,8 @@ public sealed partial class MainWindow : Window
                 token.ThrowIfCancellationRequested();if(tiles.ContainsKey((x,y)))continue;
                 verifyFullTileRequested?.Invoke(current,SourcePath(selected));
                 var reply=await previewWorker!.RequestPixels(SourcePath(selected),"fullTile",Context(selected,current),new(1024,1024,FrameIndex:animated?frameIndex:0,TileX:x,TileY:y,PageIndex:imagePage),token,Stamp(selected),approvedCloud.Contains(CloudKey(selected)));
+                try{if(verifyTileReplyBarrier is {} barrier)await barrier(current,token);}
+                catch{await previewWorker.ReleaseAsset(reply);throw;}
                 var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || token.IsCancellationRequested||tileReloadPending||animated&&(animationRunning||frameIndex!=animationFrameIndex)){bitmap.Dispose();return;}tiles[(x,y)]=bitmap;ImageCanvas.Invalidate();
             }
             QualityLabel.Text=$"原始分辨率 · {zoom*Shell.XamlRoot.RasterizationScale:P0} · {sourceWidth:N0} × {sourceHeight:N0}";

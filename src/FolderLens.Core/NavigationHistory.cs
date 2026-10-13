@@ -12,6 +12,16 @@ public sealed class NavigationHistory<T>
     public void VisitFrom(T current){Push(back,current);forward.Clear();Revision++;}
     public T GoBack(T current)=>Move(back,forward,current);
     public T GoForward(T current)=>Move(forward,back,current);
+    public T GoBackFromEmpty()=>Take(back);
+    public T GoForwardFromEmpty()=>Take(forward);
+    public void RemoveWhere(Predicate<T> invalid)
+    {
+        int removed=back.RemoveAll(invalid)+forward.RemoveAll(invalid);if(removed>0)Revision++;
+    }
+    private T Take(List<T> source)
+    {
+        T target=Peek(source);source.RemoveAt(source.Count-1);Revision++;return target;
+    }
     private static void Push(List<T> list,T value){if(list.Count==100)list.RemoveAt(0);list.Add(value);}
     private static T Peek(List<T> source)=>source.Count>0?source[^1]:throw new InvalidOperationException("没有可用的浏览历史。");
     private T Move(List<T> source,List<T> destination,T current)

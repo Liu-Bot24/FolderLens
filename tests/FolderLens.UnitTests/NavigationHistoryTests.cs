@@ -3,6 +3,15 @@ using Xunit;
 namespace FolderLens.UnitTests;
 public sealed class NavigationHistoryTests
 {
+    [Fact]public void EmptyOriginConsumesOnlyTheAcceptedTargetAndPrunesDeletedTargets()
+    {
+        var history=new NavigationHistory<string>();history.VisitFrom("D");history.VisitFrom("A");
+        Assert.Equal("A",history.GoBack("B"));history.RemoveWhere(value=>value=="A");
+        long revision=history.Revision;Assert.Equal("B",history.PeekForward());Assert.Equal(revision,history.Revision);
+        Assert.Equal("B",history.GoForwardFromEmpty());Assert.Equal("D",history.PeekBack());Assert.False(history.CanGoForward);
+        Assert.Equal("D",history.GoBackFromEmpty());Assert.False(history.CanGoBack);Assert.False(history.CanGoForward);
+        Assert.Throws<InvalidOperationException>(()=>history.GoBackFromEmpty());
+    }
     [Fact]public void BackAndForwardKeepLatestScrollStateAndNewVisitClearsForward()
     {
         var history=new NavigationHistory<(string Path,int Scroll)>();

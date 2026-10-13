@@ -7,7 +7,7 @@ namespace FolderLens.App;
 internal static class WindowFocus
 {
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
-    private static readonly bool verification=Environment.GetCommandLineArgs().Contains("--verify-refresh");
+    private static readonly bool verification=Environment.GetCommandLineArgs().Contains("--verify-refresh")&&!Environment.GetCommandLineArgs().Contains("--verify-functional-physical");
     internal static long Foreground=>GetForegroundWindow().ToInt64();
     internal static bool IsForeground(Window window)=>Foreground==WinRT.Interop.WindowNative.GetWindowHandle(window).ToInt64();
     internal static bool MayActivate(Window window,long requestedForeground)=>!verification&&WindowActivationPolicy.CanActivate(requestedForeground,Foreground,WinRT.Interop.WindowNative.GetWindowHandle(window).ToInt64());

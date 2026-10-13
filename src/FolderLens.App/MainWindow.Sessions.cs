@@ -165,6 +165,7 @@ public sealed partial class MainWindow
                 if(!OwnsRestore())return;
                 ApplySavedFilter(saved.Filter);RootPath.Text=activeCollectionId is null?Path.Combine(saved.Root,saved.Filter.DirectoryScope):"收藏夹："+CollectionLabel(activeCollectionId);DetailsMode.IsChecked=saved.Details;UpdatePathPresentationControl();
                 AcceptView();
+                SyncCollectionTreeSelection();
                 if(activeCollectionId is null)
                 {
                     ShowTreeRoot(BrowsedDirectory);
