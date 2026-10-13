@@ -26,6 +26,33 @@ public sealed partial class MainWindow
         foreach(string drive in locations.Drives)
             computerTreeRoot.Children.Add(new TreeViewNode{Content=new FolderNode(drive,drive.TrimEnd('\\'),Icon:"\uEDA2"),HasUnrealizedChildren=true});
         FolderTree.RootNodes.Add(computerTreeRoot);
+        // Isolated verification supplies its own names; it must not probe the
+        // user's mapped shares while running generated-image regressions.
+        if(!Environment.GetCommandLineArgs().Contains("--verify-refresh"))driveLabelsTask=RefreshDriveLabels();
+    }
+    private Task? driveLabelsTask;
+    private async Task RefreshDriveLabels(Func<string,CancellationToken,Task<string>>? read=null)
+    {
+        if(computerTreeRoot is not {} computer)return;
+        string? executable=read is null?ScanWorkerClient.FindExecutable(ScanWorkerDirectory):null;
+        if(read is null&&executable is null){RecordWebView("Drive names unavailable: scan helper missing.");return;}
+        read??=(path,token)=>NavigationDriveNames.Read(path,executable!,token);
+        using var slots=new SemaphoreSlim(2,2);
+        await Task.WhenAll(computer.Children.ToArray().Select(async node=>
+        {
+            if(node.Content is not FolderNode original)return;
+            bool entered=false;
+            try
+            {
+                await slots.WaitAsync(lifetime.Token);entered=true;
+                string label=await read(original.Path,lifetime.Token);
+                if(!closing&&node.Parent==computer&&node.Content is FolderNode current&&current.Path==original.Path)
+                    node.Content=current with{Label=label};
+            }
+            catch(OperationCanceledException) when(lifetime.IsCancellationRequested){}
+            catch(Exception error){if(!closing)RecordWebView("Drive name unavailable: "+error.GetType().Name);}
+            finally{if(entered)slots.Release();}
+        }));
     }
     private Task? treeRefreshTask;
     private bool treeRefreshPending;
@@ -216,7 +243,10 @@ public sealed partial class MainWindow
     {
         // An ancestor loaded from the filesystem must not keep an old catalog
         // routing tag: expanding it again would replace fresh siblings with stale rows.
-        node.Content=state.Folder;
+        // A drive name can finish loading while this directory page is being
+        // read. Keep its current presentation, but use this page's routing tags.
+        node.Content=node.Content is FolderNode current&&current.Path==state.Folder.Path
+            ?state.Folder with{Label=current.Label}:state.Folder;
         var selectedBefore=FolderTree.SelectedNode;
         // Keep the selected ancestor chain reachable even while browsing another sibling page.
         TreeViewNode? pinned=activeTreeRoot;
