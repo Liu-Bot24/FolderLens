@@ -132,6 +132,9 @@ public sealed partial class MainWindow
             if(arguments.Contains("--verify-format-choices")||arguments.Contains("--verify-format-background-race")){await VerifyFormatChoices(source,report);return;}
             if(arguments.Contains("--verify-navigation-roots")){await VerifyNavigationRoots(source,report);return;}
             if(arguments.Contains("--verify-drive-labels")){await VerifyDriveLabels(report);return;}
+            if(arguments.Contains("--verify-path-initialization")){await VerifyPathInitialization(source,report);return;}
+            if(arguments.Contains("--verify-direct-path-thumbnails")){await VerifyDirectPathThumbnails(source,report);return;}
+            if(arguments.Contains("--verify-image-transition")){await VerifyImageTransition(source,report);return;}
             if(arguments.Contains("--verify-functional-pixels")){await VerifyFunctionalPixels(source,report);return;}
             if(arguments.Contains("--verify-functional-jpeg")){await VerifyFunctionalPixels(source,report,true);return;}
             if(arguments.Contains("--verify-functional-pixel-boundaries")){await VerifyFunctionalPixelBoundaries(source,report);return;}

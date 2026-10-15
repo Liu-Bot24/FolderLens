@@ -106,6 +106,8 @@ public sealed partial class MainWindow : Window
         WorkerResources.Shared.MemoryPressure+=OnPrefetchMemoryPressure;
         StartupStage("constructWindow");
     }
+    private TaskCompletionSource<bool> browserRuntimeReady=new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private long directoryEntryRequest;
     private async Task Initialize()
     {
         if(startupClock is not null)startupShellLoadedAt=startupClock.Elapsed.TotalMilliseconds;
@@ -151,13 +153,31 @@ public sealed partial class MainWindow : Window
             verificationComponents["scan"]=Path.GetRelativePath(AppContext.BaseDirectory,ScanWorkerClient.FindExecutable()??Path.Combine(AppContext.BaseDirectory,"scan-worker","FolderLens.Scan.Worker.exe"));
             string native=Path.Combine(AppContext.BaseDirectory,"native","ffmpeg");var project=new DirectoryInfo(AppContext.BaseDirectory);while(project is not null&&!File.Exists(Path.Combine(project.FullName,"FolderLens.slnx")))project=project.Parent;if(!deployedVerification&&!Directory.Exists(native)&&project is not null)native=Path.Combine(project.FullName,"native","ffmpeg");media=new(Path.Combine(native,"ffprobe.exe"),Path.Combine(native,"ffmpeg.exe"));
             verificationComponents["ffprobe"]=Path.GetRelativePath(AppContext.BaseDirectory,Path.Combine(native,"ffprobe.exe"));
+            browserRuntimeReady.TrySetResult(true);
             if(InstanceBroker is not null)_=ReceiveActivations();
             StartupStage("runtimeSetup");
             if(args.Contains("--verify-refresh")){initialization.Dispose();await VerifyRefresh();return;}
-            int openIndex=Array.IndexOf(args,"--open"),rootIndex=Array.IndexOf(args,"--root");if(openIndex>=0&&openIndex+1<args.Length)await OpenPath(args[openIndex+1]);else if(rootIndex>=0 && rootIndex+1<args.Length){RootPath.Text=args[rootIndex+1];await OpenRoot(RootPath.Text);}else if(await settings.Load<SavedView>("last-session.json") is {} session)await RestoreSavedView(session with{SelectedPath=null,ScrollAnchorPath=null,ScrollOffset=0,Preview=null});else if(await settings.Load<string>("last-root.json") is {} last){RootPath.Text=last;await OpenRoot(last);}
+            // An address/tree request made during initialization owns startup.
+            // Restoring the last session must not replace that newer user intent.
+            if(directoryEntryRequest>0)return;
+            int openIndex=Array.IndexOf(args,"--open"),rootIndex=Array.IndexOf(args,"--root");
+            if(openIndex>=0&&openIndex+1<args.Length)await OpenPath(args[openIndex+1]);
+            else if(rootIndex>=0&&rootIndex+1<args.Length)await OpenRoot(args[rootIndex+1]);
+            else
+            {
+                var session=await settings.Load<SavedView>("last-session.json");
+                if(directoryEntryRequest>0||closing)return;
+                if(session is not null)await RestoreSavedView(session with{SelectedPath=null,ScrollAnchorPath=null,ScrollOffset=0,Preview=null});
+                else
+                {
+                    var last=await settings.Load<string>("last-root.json");
+                    if(directoryEntryRequest==0&&!closing&&last is not null)await OpenRoot(last);
+                }
+            }
         }
         catch(Exception ex)
         {
+            browserRuntimeReady.TrySetResult(false);
             if(Environment.GetCommandLineArgs().Contains("--verify-refresh"))
             {
                 initialization.Dispose();
@@ -196,7 +216,12 @@ public sealed partial class MainWindow : Window
         try{var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var folder=await picker.PickSingleFolderAsync();if(folder is not null){RootPath.Text=folder.Path;await OpenRoot(folder.Path);}}
         catch(Exception ex){ShowError(ex);}
     }
-    private async void RootPathKeyDown(object sender,KeyRoutedEventArgs e){if(e.Key==VirtualKey.Enter){e.Handled=true;await OpenRoot(RootPath.Text);}}
+    private async void RootPathKeyDown(object sender,KeyRoutedEventArgs e)
+    {
+        if(e.Key!=VirtualKey.Enter)return;e.Handled=true;
+        try{await NavigateFolderPath(RootPath.Text);}
+        catch(OperationCanceledException){}catch(Exception error){ShowError(error);}
+    }
     private async void RefreshRoot(object sender,RoutedEventArgs e)
     {
         await RefreshCurrentRoot();
@@ -232,7 +257,11 @@ public sealed partial class MainWindow : Window
     private async Task OpenRoot(string path,bool forceRefresh=false,bool recordHistory=true,SavedView? previousView=null,bool preserveDirectoryScope=false,SavedView? restoredView=null,Action? onAccepted=null,Func<bool>? canAccept=null,PendingFileOpen? fileOpen=null)
     {
         if(!ReferenceEquals(pendingFileOpen,fileOpen))CancelPendingFileOpen();
-        using var operation=browserWork.Enter();if(operation is null||closing||catalog is null)return;
+        using var operation=browserWork.Enter();if(operation is null||closing)return;
+        long entryRequest=++directoryEntryRequest;
+        try{if(!await browserRuntimeReady.Task.WaitAsync(lifetime.Token))return;}
+        catch(OperationCanceledException) when(lifetime.IsCancellationRequested){return;}
+        if(closing||catalog is null||entryRequest!=directoryEntryRequest)return;
         // Validate the draft before retiring work or recording navigation history.
         FilterSpec requestedFilter;
         if(restoredView is not null){requestedFilter=restoredView.Filter;requestedFilter.Validate();}
@@ -745,7 +774,6 @@ public sealed partial class MainWindow : Window
         using var operation=browserWork.Enter();if(operation is null||closing)return;
         if(!preserveViewportIntent)AcceptBrowserInteraction();
         browserSelectionRequest++;
-        RetainDisplayedFit();
         ResetViewerGesture();
         rawPreviewOnly=false;
         AnimationButton.Visibility=ReplayAnimationButton.Visibility=Visibility.Collapsed;
@@ -771,7 +799,7 @@ public sealed partial class MainWindow : Window
             UpdateViewerInformation();
             if(slideShow&&current==selection&&row.Kind=="image")slideTimer?.Start();
         }
-        catch(OperationCanceledException){RecordPreviewStage(current,"cancelled");if(current==selection&&!token.IsCancellationRequested&&!closing)ShowPreviewError(new IOException("文件列表已变化，请重新选择此文件。"));}
+        catch(OperationCanceledException){RecordPreviewStage(current,"cancelled");if(current==selection&&!token.IsCancellationRequested&&!closing){ClearImage();ShowPreviewError(new IOException("文件列表已变化，请重新选择此文件。"));}}
         catch(Exception ex){if(current==selection&&!closing){ClearImage();ShowPreviewError(ex);}}
         finally{if(current==selection&&!closing){FinishPreview();if(previewStage is not ("failed" or "cancelled"))RecordPreviewStage(current,"finished");verifyPreviewStage?.Invoke("finished");}}
         if(rendered)await CompleteStaticPreviewPixels(row,current,token);
@@ -1026,7 +1054,7 @@ public sealed partial class MainWindow : Window
         if(current!=selection||cancellation.IsCancellationRequested||canPresent?.Invoke()==false){await previewWorker!.ReleaseAsset(reply);cancellation.ThrowIfCancellationRequested();return;}
         RecordPreviewStage(current,"bitmap");
         var bitmap=await LoadRenderedBitmap(reply);if(current!=selection || cancellation.IsCancellationRequested||canPresent?.Invoke()==false){bitmap.Dispose();return;}
-        fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";TrackDisplayedFit(reply.Message);ImageCanvas.Opacity=1;ApplyViewerSizing();
+        ReplaceDisplayedBitmap(bitmap);verifyBitmapSelection=current;sourceWidth=reply.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=reply.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=reply.Message.Quality=="rawEmbedded";TrackDisplayedFit(reply.Message);ImageCanvas.Opacity=1;ApplyViewerSizing();
         RecordPreviewStage(current,"presented");
     }
     private void DrawImage(CanvasControl sender,CanvasDrawEventArgs args)

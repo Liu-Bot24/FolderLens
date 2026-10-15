@@ -299,7 +299,13 @@ public sealed partial class MainWindow
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}
     }
     private async Task NavigateFolder(FolderNode folder)
-    {if(folder.PageOffset is not null||string.Equals(folder.Path,BrowsedDirectory,StringComparison.Ordinal))return;await OpenRoot(folder.Path);}
+    {if(folder.PageOffset is not null)return;await NavigateFolderPath(folder.Path);}
+    private async Task NavigateFolderPath(string path)
+    {
+        path=Path.TrimEndingDirectorySeparator(PathRules.ValidateSource(path));
+        if(!replacingRoot&&browserRootReady&&string.Equals(path,Path.TrimEndingDirectorySeparator(BrowsedDirectory),StringComparison.Ordinal))return;
+        await OpenRoot(path);
+    }
     private async void CopyFileReference(object sender,RoutedEventArgs e)
     {
         await SetFileClipboard(false);

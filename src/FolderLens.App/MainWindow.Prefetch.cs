@@ -78,8 +78,9 @@ public sealed partial class MainWindow
     private void RetainDisplayedFit()
     {
         var cached=displayedFit;displayedFit=null;
-        if(verifyColdSwitch||verifyEncodedPrefetch||cached is null||fitBitmap is null||previewLoading||previewReadySelection!=selection||offlinePreview
+        if(verifyColdSwitch||verifyEncodedPrefetch||cached is null||fitBitmap is null||offlinePreview
             ||cached.DeviceRevision!=imageResourceRevision||WorkerResources.Shared.Snapshot.UnderPressure)return;
+        if(cached.Root==rootId&&cached.Epoch==epoch&&selected?.Item is {} item&&cached.Path==SourcePath(selected)&&cached.Version==item.Version)return;
         long cost=checked((long)fitBitmap.SizeInPixels.Width*fitBitmap.SizeInPixels.Height*4);
         if(cost>PreparedPrefetchLimit)return;
         foreach(var old in prefetched.Where(item=>item.Root==cached.Root&&item.Path==cached.Path).ToArray())RemovePrefetchedImage(old);
@@ -185,7 +186,7 @@ public sealed partial class MainWindow
         }
         RemovePrefetchedImage(cached);cached.Payload=[];
         if(current!=selection||token.IsCancellationRequested){bitmap.Dispose();return false;}
-        fitBitmap?.Dispose();fitBitmap=bitmap;verifyBitmapSelection=current;sourceWidth=cached.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=cached.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=cached.Message.Quality=="rawEmbedded";ApplyViewerSizing();
+        ReplaceDisplayedBitmap(bitmap);verifyBitmapSelection=current;sourceWidth=cached.Message.Metadata!.Value.GetProperty("width").GetInt32();sourceHeight=cached.Message.Metadata.Value.GetProperty("height").GetInt32();rawPreviewOnly=cached.Message.Quality=="rawEmbedded";ApplyViewerSizing();
         displayedFit=cached;cached.DeviceRevision=imageResourceRevision;
         return true;
     }

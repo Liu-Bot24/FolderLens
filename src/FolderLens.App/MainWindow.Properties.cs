@@ -91,7 +91,7 @@ public sealed partial class MainWindow
         {
             using var lease=await thumbnailCache.TryGet(new(row.Item.EntryId,row.Item.Version,modified,row.Item.Bytes,edge,providerIdentity,representation,SourceSignature:row.SourceSignature),token);if(lease is null)continue;
             using var source=lease.OpenRead();using var random=source.AsRandomAccessStream();var bitmap=await CanvasBitmap.LoadAsync(ImageCanvas,random);if(current!=selection){bitmap.Dispose();return false;}
-            fitBitmap?.Dispose();fitBitmap=bitmap;sourceWidth=selectedProperties?.Width??bitmap.SizeInPixels.Width;sourceHeight=selectedProperties?.Height??bitmap.SizeInPixels.Height;zoom=0;pan=System.Numerics.Vector2.Zero;ImageCanvas.Opacity=1;ImageCanvas.Invalidate();offlinePreview=true;QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return true;
+            ReplaceDisplayedBitmap(bitmap);sourceWidth=selectedProperties?.Width??bitmap.SizeInPixels.Width;sourceHeight=selectedProperties?.Height??bitmap.SizeInPixels.Height;zoom=0;pan=System.Numerics.Vector2.Zero;rotation=0;ImageCanvas.Opacity=1;ImageCanvas.Invalidate();offlinePreview=true;QualityLabel.Text="离线缓存缩略图 · 原文件暂不可用";return true;
         }
         return false;
     }

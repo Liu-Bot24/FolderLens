@@ -56,9 +56,20 @@ public sealed partial class MainWindow
     private void PreparePreview()
     {
         previewFailure=null;
-        foreach(var bitmap in tiles.Values)bitmap.Dispose();tiles.Clear();previewLoading=true;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=fitBitmap is null?1:.4;
+        // Keep the current frame (including its detail tiles and transform) until
+        // an owned replacement is ready. Non-image content must not inherit it.
+        if(selected?.Kind!="image")ClearImage();
+        previewLoading=true;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;
         if(loadingBadge is not null){loadingText!.Text="正在打开 "+selected?.Name;loadingText.MaxWidth=Math.Max(120,PreviewSurface.ActualWidth-48);loadingBadge.Visibility=Visibility.Visible;}
         ImageCanvas.Invalidate();
+    }
+    private void ReplaceDisplayedBitmap(Microsoft.Graphics.Canvas.CanvasBitmap bitmap)
+    {
+        // Transfer the old fit to history only at the synchronous presentation
+        // boundary. Cache eviction can no longer blank a pending transition.
+        RetainDisplayedFit();
+        fitBitmap?.Dispose();fitBitmap=bitmap;
+        foreach(var tile in tiles.Values)tile.Dispose();tiles.Clear();
     }
     private void FinishPreview(){previewLoading=false;UpdateViewerLockToggle();UpdateCommandAvailability();ImageCanvas.Opacity=1;if(loadingBadge is not null)loadingBadge.Visibility=previewFailure is null?Visibility.Collapsed:Visibility.Visible;}
     private void ClearResultSelection()
