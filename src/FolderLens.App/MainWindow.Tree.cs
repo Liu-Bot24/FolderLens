@@ -59,13 +59,12 @@ public sealed partial class MainWindow
     private long nextTreeRefresh;
     private CancellationTokenSource physicalTreeStop=new();
     private Task? physicalTreeTask;
-    private sealed record TreeListing(DirectoryListing Listing,long Start,FolderNode Folder);
-    private readonly Dictionary<TreeViewNode,TreeListing> treeListings=[];
     private readonly SemaphoreSlim treeListingSlots=new(2,2);
     private readonly Dictionary<TreeViewNode,long> treeListingRequests=[];
-    private sealed record TreePageIntent(long Version,long Start);
-    private readonly Dictionary<TreeViewNode,TreePageIntent> treePageIntents=[];
-    private long treePageVersion;
+    // Children are merged in slices so a folder with tens of thousands of
+    // subfolders expands completely without holding the UI thread.
+    private const int TreeMergeSlice=256;
+    private readonly HashSet<TreeViewNode> fillingTreeNodes=[];
     private string TreeListingDirectory=>Path.Combine(RuntimeDataDirectory,"temp","tree-listings");
 
     private void ResetTreeWork()
@@ -81,13 +80,13 @@ public sealed partial class MainWindow
         {
             // A node's own case mode says nothing about its name in the parent
             // directory. Without proof of an alias, preserve exact path spelling.
-            if(candidate.Content is FolderNode {PageOffset:null} folder&&string.Equals(folder.Path,path,StringComparison.Ordinal))
+            if(candidate.Content is FolderNode folder&&string.Equals(folder.Path,path,StringComparison.Ordinal))
             {
                 activeTreeRoot=candidate;
                 for(var ancestor=candidate;ancestor is not null;ancestor=ancestor.Parent)ancestor.IsExpanded=true;
                 FolderTree.SelectedNode=candidate;nextTreeRefresh=0;physicalTreeTask=RefreshAncestors(candidate,rootChangeVersion,physicalTreeStop.Token);return;
             }
-            if(candidate.Content is FolderNode {PageOffset:null} ancestorFolder&&ancestorFolder.Path.Length>closestLength&&
+            if(candidate.Content is FolderNode ancestorFolder&&ancestorFolder.Path.Length>closestLength&&
                 path.StartsWith(ancestorFolder.Path.TrimEnd('\\')+"\\",StringComparison.Ordinal))
             {closest=candidate;closestLength=ancestorFolder.Path.Length;}
             foreach(var child in candidate.Children)existing.Enqueue(child);
@@ -140,22 +139,6 @@ public sealed partial class MainWindow
         if(node.Content is not FolderNode folder)return;
         await LoadTreeListing(node,folder,revision,false,cancellation);
     }
-    private static void MergePhysicalChildren(TreeViewNode node,IReadOnlyList<string> paths)
-    {
-        var wanted=paths.ToHashSet(StringComparer.Ordinal);
-        for(int index=node.Children.Count-1;index>=0;index--)
-            if(node.Children[index].Content is not FolderNode child||!wanted.Contains(child.Path))node.Children.RemoveAt(index);
-        var retained=node.Children.Where(child=>child.Content is FolderNode).ToDictionary(child=>((FolderNode)child.Content).Path,StringComparer.Ordinal);
-        for(int index=0;index<paths.Count;index++)
-        {
-            if(index<node.Children.Count&&node.Children[index].Content is FolderNode current&&current.Path==paths[index])continue;
-            retained.TryGetValue(paths[index],out var existing);
-            var child=existing??new TreeViewNode{Content=new FolderNode(paths[index],FolderLabel(paths[index])),HasUnrealizedChildren=true};
-            if(existing is not null)node.Children.Remove(existing);
-            node.Children.Insert(index,child);
-        }
-        node.HasUnrealizedChildren=false;
-    }
     private static string FolderLabel(string path)=>Path.GetFileName(path.TrimEnd('\\')) is {Length:>0} name?name:path;
     private static TreeViewNode CreateFolderNode(string root,string id,string relative)=>new(){Content=new FolderNode(Path.Combine(root,relative),FolderLabel(relative),id,relative,root),HasUnrealizedChildren=true};
 
@@ -186,17 +169,20 @@ public sealed partial class MainWindow
             if(closing||revision!=rootChangeVersion||activeTreeRoot!=treeRoot||token.IsCancellationRequested)return;
             foreach(var child in node.Children)if(child.IsExpanded)pending.Enqueue(child);
         }
-        await PruneTreeListings();
+        PruneTreeRequests();
     }
     private async void ExpandFolder(TreeView sender,TreeViewExpandingEventArgs e)
-    {try{await ExpandFolderNode(e.Node);}catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}}
+    {
+        // Re-expanding a node that was just filled while collapsed is not a new request.
+        if(fillingTreeNodes.Contains(e.Node))return;
+        try{await ExpandFolderNode(e.Node);}catch(OperationCanceledException){}catch(Exception ex){ShowError(ex);}
+    }
     private async Task ExpandFolderNode(TreeViewNode node)
     {
         using var operation=browserWork.Enter();if(operation is null||closing||replacingRoot||catalog is null||node.Content is not FolderNode folder)return;
         long revision=rootChangeVersion;var token=physicalTreeStop.Token;
         try
         {
-            if(folder.PageOffset is not null)return;
             if(folder.CatalogRoot!=rootId||!string.Equals(folder.BasePath,root,StringComparison.Ordinal))
             {await ReadPhysicalChildren(node,revision,token);return;}
             await LoadTreeListing(node,folder,revision,true,token);
@@ -206,101 +192,109 @@ public sealed partial class MainWindow
     }
     private async Task LoadTreeListing(TreeViewNode node,FolderNode folder,long revision,bool indexed,CancellationToken cancellation)
     {
-        using var operation=browserWork.Enter();if(operation is null||closing||folder.PageOffset is not null)return;
+        using var operation=browserWork.Enter();if(operation is null||closing)return;
         long request=treeListingRequests.GetValueOrDefault(node)+1;treeListingRequests[node]=request;
-        await treeListingSlots.WaitAsync(cancellation);DirectoryListing? candidate=null;
+        bool Stale()=>closing||revision!=rootChangeVersion||cancellation.IsCancellationRequested||treeListingRequests.GetValueOrDefault(node)!=request;
+        await treeListingSlots.WaitAsync(cancellation);DirectoryListing? candidate=null;List<string> paths;
         try
         {
-            if(closing||revision!=rootChangeVersion||cancellation.IsCancellationRequested||treeListingRequests.GetValueOrDefault(node)!=request)return;
+            if(Stale())return;
             if(verifyTreeListingReadBarrier is {} readBarrier)await readBarrier(folder,indexed,cancellation);
             candidate=indexed?await catalog!.ReadChildDirectories(folder.CatalogRoot!,folder.Relative,folder.BasePath,TreeListingDirectory,cancellation)
                 :await FolderChildren.Read(folder.Path,TreeListingDirectory,cancellation);
             if(verifyTreeListingLoadedBarrier is {} loadedBarrier)await loadedBarrier(folder,indexed,cancellation);
-            bool Stale()=>closing||revision!=rootChangeVersion||cancellation.IsCancellationRequested||treeListingRequests.GetValueOrDefault(node)!=request;
             if(Stale())return;
-            while(!Stale())
+            // The listing is disk-backed: read it page by page off the UI thread and
+            // keep only the names. Every child is shown; there is no tree paging.
+            paths=new List<string>((int)Math.Min(candidate.Count,4096));
+            for(long start=0;start<candidate.Count;start+=DirectoryListing.PageSize)
             {
-                treeListings.TryGetValue(node,out var previous);treePageIntents.TryGetValue(node,out var intent);
-                long wanted=intent?.Start??previous?.Start??0,start=0;
-                if(previous is not null&&wanted>0)
-                {
-                    var oldPage=await previous.Listing.ReadPage(Math.Min(wanted,previous.Listing.Count),cancellation);
-                    start=Math.Min(wanted,Math.Max(0,(candidate.Count-1)/DirectoryListing.PageSize*DirectoryListing.PageSize));
-                    if(oldPage.Count>0&&await candidate.Find(oldPage[0],cancellation) is {} anchor)start=anchor/DirectoryListing.PageSize*DirectoryListing.PageSize;
-                }
-                var paths=await candidate.ReadPage(start,cancellation);if(Stale())return;
-                if(treePageIntents.GetValueOrDefault(node)!=intent)continue;
-                var state=new TreeListing(candidate,start,indexed?folder:folder with{CatalogRoot=null});
-                ApplyTreePage(node,state,paths);treeListings[node]=state;candidate=null;
-                if(intent is not null)treePageIntents[node]=intent with{Start=start};
-                if(previous is not null)await previous.Listing.DisposeAsync();
-                break;
+                paths.AddRange(await candidate.ReadPage(start,cancellation));
+                if(Stale())return;
             }
         }
         finally{if(candidate is not null)await candidate.DisposeAsync();treeListingSlots.Release();}
+        await ApplyTreeChildren(node,indexed?folder:folder with{CatalogRoot=null},paths,Stale);
     }
-    private void ApplyTreePage(TreeViewNode node,TreeListing state,IReadOnlyList<string> paths)
+    private async Task<bool> ApplyTreeChildren(TreeViewNode node,FolderNode source,List<string> paths,Func<bool> stale)
     {
         // An ancestor loaded from the filesystem must not keep an old catalog
         // routing tag: expanding it again would replace fresh siblings with stale rows.
-        // A drive name can finish loading while this directory page is being
-        // read. Keep its current presentation, but use this page's routing tags.
-        node.Content=node.Content is FolderNode current&&current.Path==state.Folder.Path
-            ?state.Folder with{Label=current.Label}:state.Folder;
+        // A drive name can finish loading while this directory is being read.
+        // Keep its current presentation, but use this listing's routing tags.
+        node.Content=node.Content is FolderNode current&&current.Path==source.Path
+            ?source with{Label=current.Label}:source;
         var selectedBefore=FolderTree.SelectedNode;
-        // Keep the selected ancestor chain reachable even while browsing another sibling page.
+        // Keep the selected ancestor chain reachable even if the listing missed it.
         TreeViewNode? pinned=activeTreeRoot;
         while(pinned?.Parent is {} parent&&!ReferenceEquals(parent,node))pinned=parent;
         if(!ReferenceEquals(pinned?.Parent,node))pinned=null;
-        var page=paths.ToList();if(pinned?.Content is FolderNode active&&!page.Contains(active.Path,StringComparer.Ordinal))page.Add(active.Path);
-        for(int index=node.Children.Count-1;index>=0;index--)if(node.Children[index].Content is FolderNode {PageOffset:not null})node.Children.RemoveAt(index);
-        MergePhysicalChildren(node,page);
-        if(state.Folder.CatalogRoot is {} catalogId)
-            foreach(var child in node.Children)
-                if(child.Content is FolderNode folder)
+        var wanted=paths.ToHashSet(StringComparer.Ordinal);
+        if(pinned?.Content is FolderNode active&&wanted.Add(active.Path))paths.Add(active.Path);
+        for(int index=node.Children.Count-1;index>=0;index--)
+            if(node.Children[index].Content is not FolderNode child||!wanted.Contains(child.Path))node.Children.RemoveAt(index);
+        var retained=node.Children.Where(child=>child.Content is FolderNode).ToDictionary(child=>((FolderNode)child.Content).Path,StringComparer.Ordinal);
+        // Each child added under an expanded WinUI tree node costs time proportional
+        // to the visible tree, so a first expansion of a wide folder fills the node
+        // while it is collapsed and then expands it once.
+        bool bulk=node.IsExpanded&&retained.Count==0&&paths.Count>TreeMergeSlice;
+        if(bulk){fillingTreeNodes.Add(node);node.IsExpanded=false;}
+        try
+        {
+            for(int index=0;index<paths.Count;index++)
+            {
+                if(!bulk&&index>0&&index%TreeMergeSlice==0)
                 {
-                    var updated=folder with{CatalogRoot=catalogId,BasePath=state.Folder.BasePath,Relative=Path.GetRelativePath(state.Folder.BasePath,folder.Path)};
+                    RestoreTreeSelection(selectedBefore);
+                    if(verifyTreeMergeSlice is {} slice)await slice(node,index);
+                    await YieldToInput();
+                    // A newer listing for this node, or navigation, owns the merge now.
+                    if(stale())return false;
+                }
+                TreeViewNode child;
+                if(index<node.Children.Count&&node.Children[index].Content is FolderNode existingAt&&existingAt.Path==paths[index])child=node.Children[index];
+                else
+                {
+                    retained.TryGetValue(paths[index],out var existing);
+                    child=existing??new TreeViewNode{Content=new FolderNode(paths[index],FolderLabel(paths[index])),HasUnrealizedChildren=true};
+                    if(existing is not null)node.Children.Remove(existing);
+                    node.Children.Insert(index,child);
+                }
+                if(source.CatalogRoot is {} catalogId&&child.Content is FolderNode folder)
+                {
+                    var updated=folder with{CatalogRoot=catalogId,BasePath=source.BasePath,Relative=Path.GetRelativePath(source.BasePath,folder.Path)};
                     if(updated!=folder)child.Content=updated;
                 }
-        long count=state.Listing.Count,start=state.Start;
-        void Button(string label,long target)=>node.Children.Add(new TreeViewNode{Content=new FolderNode(state.Folder.Path,label,PageOffset:target),HasUnrealizedChildren=false});
-        if(start>0){Button("⏮ 第一页",0);Button("← 上一页",Math.Max(0,start-DirectoryListing.PageSize));}
-        if(start+DirectoryListing.PageSize<count)
-        {
-            Button($"下一页 →（当前 {start+1:N0}–{Math.Min(start+DirectoryListing.PageSize,count):N0} / {count:N0}）",start+DirectoryListing.PageSize);
-            Button("最后一页 ⏭",(count-1)/DirectoryListing.PageSize*DirectoryListing.PageSize);
+            }
         }
-        // Updating children can clear WinUI's single selection, even if the selected
-        // parent itself was retained. Preserve selection across this synchronous edit;
-        // do not select a removed node or move the user's viewport during scan refresh.
-        if(selectedBefore is not null&&FolderTree.SelectedNode!=selectedBefore)
+        finally
         {
-            var top=selectedBefore;while(!FolderTree.RootNodes.Contains(top)&&top.Parent is {} ancestor)top=ancestor;
-            if(FolderTree.RootNodes.Contains(top))FolderTree.SelectedNode=selectedBefore;
+            if(bulk){node.IsExpanded=true;fillingTreeNodes.Remove(node);}
         }
+        node.HasUnrealizedChildren=false;
+        RestoreTreeSelection(selectedBefore);
+        return true;
     }
-    private async Task ChangeTreePage(TreeViewNode node,long start)
+    // Updating children can clear WinUI's single selection, even if the selected
+    // node itself was retained. Restore it, but never select a removed node or
+    // move the user's viewport during a scan refresh.
+    private void RestoreTreeSelection(TreeViewNode? selectedBefore)
     {
-        using var operation=browserWork.Enter();if(operation is null||closing||replacingRoot||!treeListings.ContainsKey(node))return;
-        long revision=rootChangeVersion,version=++treePageVersion;var token=physicalTreeStop.Token;treePageIntents[node]=new(version,start);
-        while(!closing&&!token.IsCancellationRequested&&revision==rootChangeVersion&&treePageIntents.TryGetValue(node,out var intent)&&intent.Version==version&&treeListings.TryGetValue(node,out var previous))
-        {
-            start=Math.Min(intent.Start,Math.Max(0,(previous.Listing.Count-1)/DirectoryListing.PageSize*DirectoryListing.PageSize));
-            IReadOnlyList<string> paths;
-            try{paths=await previous.Listing.ReadPage(start,token);}
-            catch(ObjectDisposedException) when(treeListings.TryGetValue(node,out var replaced)&&!ReferenceEquals(replaced.Listing,previous.Listing)){continue;}
-            if(verifyTreePageReadBarrier is not null)await verifyTreePageReadBarrier(start);
-            if(closing||token.IsCancellationRequested||revision!=rootChangeVersion||treePageIntents.GetValueOrDefault(node)?.Version!=version||!treeListings.TryGetValue(node,out var current))return;
-            if(!ReferenceEquals(previous.Listing,current.Listing))continue;
-            var next=current with{Start=start};ApplyTreePage(node,next,paths);treeListings[node]=next;await PruneTreeListings();return;
-        }
+        if(selectedBefore is null||FolderTree.SelectedNode==selectedBefore)return;
+        var top=selectedBefore;while(!FolderTree.RootNodes.Contains(top)&&top.Parent is {} ancestor)top=ancestor;
+        if(FolderTree.RootNodes.Contains(top))FolderTree.SelectedNode=selectedBefore;
     }
-    private async Task PruneTreeListings(bool all=false)
+    // Let input and rendering run between slices of a large tree edit.
+    private Task YieldToInput()
+    {
+        var done=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if(!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,()=>done.TrySetResult()))done.TrySetResult();
+        return done.Task;
+    }
+    private void PruneTreeRequests(bool all=false)
     {
         var reachable=new HashSet<TreeViewNode>();var pending=new Queue<TreeViewNode>(FolderTree.RootNodes);
         if(!all)while(pending.TryDequeue(out var node)){reachable.Add(node);foreach(var child in node.Children)pending.Enqueue(child);}
-        foreach(var node in treeListings.Keys.Where(node=>!reachable.Contains(node)).ToArray())
-        {var state=treeListings[node];treeListings.Remove(node);treeListingRequests.Remove(node);treePageIntents.Remove(node);await state.Listing.DisposeAsync();}
         foreach(var node in treeListingRequests.Keys.Where(node=>!reachable.Contains(node)).ToArray())treeListingRequests.Remove(node);
     }
 }

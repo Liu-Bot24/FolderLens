@@ -57,7 +57,7 @@ public sealed partial class MainWindow
             verifyTreeListingReadBarrier=null;release.TrySetResult();
             await Task.WhenAll(pending).WaitAsync(TimeSpan.FromSeconds(10));
             foreach(var node in nodes)FolderTree.RootNodes.Remove(node);
-            await PruneTreeListings();await SettleTree();
+            PruneTreeRequests();await SettleTree();
         }
         report["treeSlotsReturnedAfterCleanup"]=treeListingSlots.CurrentCount==2;
 
@@ -65,7 +65,7 @@ public sealed partial class MainWindow
         // materialized old listing until the new directory has been published.
         await OpenRoot(source);await SettleTree();
         var lateNode=AddProbeNode("verify-tree-late");
-        var originalChild=lateNode.Children.Single();
+        var originalChild=lateNode.Children.Single();var originalContent=lateNode.Content;
         var lateEntered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var lateRelease=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken lateToken=default;Task? lateRead=null;
@@ -82,7 +82,7 @@ public sealed partial class MainWindow
             var acceptedTree=activeTreeRoot;string acceptedRoot=root;long acceptedVersion=rootChangeVersion;
             lateRelease.TrySetResult();await lateRead.WaitAsync(TimeSpan.FromSeconds(5));
             bool unchanged=lateNode.Children.Count==1&&ReferenceEquals(lateNode.Children[0],originalChild)&&
-                !treeListings.ContainsKey(lateNode)&&root==acceptedRoot&&rootChangeVersion==acceptedVersion&&
+                ReferenceEquals(lateNode.Content,originalContent)&&root==acceptedRoot&&rootChangeVersion==acceptedVersion&&
                 ReferenceEquals(activeTreeRoot,acceptedTree)&&RootPath.Text==target;
             report["lateTreeTokenCancelled"]=lateToken.IsCancellationRequested;
             report["lateTreeCandidateCannotPublishIntoNewNavigation"]=unchanged;
@@ -93,7 +93,7 @@ public sealed partial class MainWindow
         {
             verifyTreeListingLoadedBarrier=null;lateRelease.TrySetResult();
             if(lateRead is not null)await lateRead.WaitAsync(TimeSpan.FromSeconds(10));
-            FolderTree.RootNodes.Remove(lateNode);await PruneTreeListings();await SettleTree();
+            FolderTree.RootNodes.Remove(lateNode);PruneTreeRequests();await SettleTree();
         }
         if(failures.Count>0)throw new InvalidOperationException(string.Join(" ",failures));
         report["status"]="PASS";

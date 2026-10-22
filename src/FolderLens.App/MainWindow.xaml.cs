@@ -1576,7 +1576,7 @@ public sealed partial class MainWindow : Window
             await Cleanup(DisposeMarkdownView);await Cleanup(DisposeTextSession);
             foreach(var task in new[]{scanTask,metadataTask,prefetchTask,capabilityTask,treeRefreshTask,physicalTreeTask,driveLabelsTask})if(task is not null)await Cleanup(()=>task);
             if(thumbnailWorkCount>0)await Cleanup(()=>thumbnailsIdle.Task);
-            await Cleanup(()=>PruneTreeListings(all:true));
+            PruneTreeRequests(all:true);
             await Cleanup(()=>{results?.Dispose();results=null;ClearPrefetchedImages();ClearImage();ImageCanvas.RemoveFromVisualTree();return Task.CompletedTask;});
             if(catalog is not null&&resultHandle is {} displayed){resultHandle=null;await Cleanup(()=>catalog.ReleaseSnapshot(displayed.Id));}
             if(verifyClosingState is not null)await Cleanup(verifyClosingState);

@@ -36,7 +36,7 @@ public sealed partial class MainWindow
     private Func<CancellationToken,Task>? verifyCollectionRefreshBarrier;
     private Func<CancellationToken,Task>? verifyCandidateBarrier,verifyScanBarrier,verifyPageBarrier,verifyPreviewBarrier,verifyFirstPageBarrier;
     private Func<Task>? verifyClosingState;
-    private Func<long,Task>? verifyTreePageReadBarrier;
+    private Func<TreeViewNode,int,Task>? verifyTreeMergeSlice;
     private Action<FileRow,string>? verifyRowRecycling;
     private Action<Exception>? verifyPublicationFailure;
     private Action<double>? verifyPublicationDuration;
@@ -70,7 +70,7 @@ public sealed partial class MainWindow
                 await VerifyDirectorySource(arguments[directorySource+1],arguments[directorySource+2],arguments[directorySource+3],report);return;
             }
             if(gallery>=0){if(gallery+1>=arguments.Length)throw new ArgumentException("缺少只读源目录。");await VerifyGallery(arguments[gallery+1],report);return;}
-            if(Environment.GetCommandLineArgs().Contains("--verify-tree-scale")){VerifyTreeScale(report);return;}
+            if(Environment.GetCommandLineArgs().Contains("--verify-tree-scale")){await VerifyTreeScale(report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-group-order")){VerifyGroupOrder(report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-native-ranges")){await VerifyNativeRanges(report);return;}
             if(arguments.Contains("--verify-toolbar-widths")){await VerifyToolbarWidths(report);return;}
@@ -223,7 +223,7 @@ public sealed partial class MainWindow
             if(Environment.GetCommandLineArgs().Contains("--verify-retired-row")){await VerifyRetiredRow(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-thumbnail-upgrade")){await VerifyThumbnailUpgrade(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-page-mode")||Environment.GetCommandLineArgs().Contains("--verify-page-pending-close")){await VerifyPageMode(pixels,report);return;}
-            if(Environment.GetCommandLineArgs().Contains("--verify-tree-page-order")){await VerifyTreePageOrder(source,report);return;}
+            if(Environment.GetCommandLineArgs().Contains("--verify-tree-expansion-order")){await VerifyTreeExpansionOrder(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-tree-abrupt-exit")||Environment.GetCommandLineArgs().Contains("--verify-tree-recovery")){await VerifyTreeRecovery(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-r2-close-query")||Environment.GetCommandLineArgs().Contains("--verify-r2-close-root")){await VerifyClosingWork(source,report);return;}
             if(Environment.GetCommandLineArgs().Contains("--verify-r2-flow")){await VerifyAuditFlow(source,png,report);return;}
@@ -612,35 +612,55 @@ public sealed partial class MainWindow
         report["coldPreviewAlsoRoutesAsFile"]=true;
         report["status"]="PASS";
     }
-    private async Task VerifyTreePageOrder(string source,Dictionary<string,object> report)
+    // The tree shows every child. An older listing that finishes late, or a merge
+    // interrupted by a newer listing, must leave exactly the newest children.
+    private async Task VerifyTreeExpansionOrder(string source,Dictionary<string,object> report)
     {
-        for(int index=0;index<300;index++)Directory.CreateDirectory(Path.Combine(source,$"folder-{index:D3}"));
-        var listing=await FolderChildren.Read(source,TreeListingDirectory,lifetime.Token);
-        var folder=new FolderNode(source,"pages");var node=new TreeViewNode{Content=folder};FolderTree.RootNodes.Add(node);treeListings[node]=new(listing,0,folder);
-        var next=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var last=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        verifyTreePageReadBarrier=start=>start==128?next.Task:last.Task;
+        string parent=Path.Combine(source,"expansion");
+        await Task.Run(()=>{for(int index=0;index<300;index++)Directory.CreateDirectory(Path.Combine(parent,$"folder-{index:D4}"));});
+        var folder=new FolderNode(parent,"expansion");var node=new TreeViewNode{Content=folder,HasUnrealizedChildren=true};
+        string[] Expected()=>Directory.GetDirectories(parent).OrderBy(path=>path,StringComparer.Ordinal).ToArray();
+        string[] Shown()=>node.Children.Select(child=>((FolderNode)child.Content).Path).ToArray();
+        var errors=new List<string>();
+        var older=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var newer=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int loads=0;
+        // Other tree loads (startup places, the opened root) pass straight through.
+        verifyTreeListingLoadedBarrier=(loaded,_,_)=>loaded.Path!=parent?Task.CompletedTask:++loads==1?older.Task:newer.Task;
         try
         {
-            var first=ChangeTreePage(node,128);var second=ChangeTreePage(node,256);
-            next.SetResult();await first;last.SetResult();await second;
-            report["lastRequestedPage"]=treeListings[node].Start;
-            if(treeListings[node].Start!=256)throw new InvalidOperationException("先点下一页再点末页，末页请求被先完成的下一页覆盖。");
+            // Expanding the node in the tree starts the older load, as a click would.
+            FolderTree.RootNodes.Add(node);node.IsExpanded=true;
+            await WaitUntil(()=>loads==1,TimeSpan.FromSeconds(5));
+            await Task.Run(()=>{for(int index=300;index<310;index++)Directory.CreateDirectory(Path.Combine(parent,$"folder-{index:D4}"));});
+            var second=LoadTreeListing(node,folder,rootChangeVersion,false,lifetime.Token);
+            await WaitUntil(()=>loads==2,TimeSpan.FromSeconds(5));
+            newer.SetResult();await second;older.SetResult();
+            // Both reads hand back their slot once finished; the older one must not merge.
+            await WaitUntil(()=>treeListingSlots.CurrentCount==2,TimeSpan.FromSeconds(5));await YieldToInput();
+            report["lateOlderListing"]=new{shown=Shown().Length,expected=Expected().Length};
+            if(!Shown().SequenceEqual(Expected())||node.HasUnrealizedChildren)errors.Add("较早读取的目录清单晚完成后覆盖了最新子目录");
         }
-        finally{next.TrySetResult();last.TrySetResult();verifyTreePageReadBarrier=null;}
-        foreach(bool refresh in new[]{false,true})
+        finally{older.TrySetResult();newer.TrySetResult();verifyTreeListingLoadedBarrier=null;}
+        report["lateOlderListingIgnored"]=errors.Count==0;
+        // Interrupt a merge after its first slice, change the folder, and load again.
+        await Task.Run(()=>{for(int index=310;index<2000;index++)Directory.CreateDirectory(Path.Combine(parent,$"folder-{index:D4}"));});
+        var paused=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var resume=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool once=false;
+        verifyTreeMergeSlice=(target,index)=>{if(!ReferenceEquals(target,node)||once)return Task.CompletedTask;once=true;paused.TrySetResult();return resume.Task;};
+        try
         {
-            next=new(TaskCreationOptions.RunContinuationsAsynchronously);last=new(TaskCreationOptions.RunContinuationsAsynchronously);
-            verifyTreePageReadBarrier=start=>start==128?next.Task:last.Task;
-            try
-            {
-                var first=ChangeTreePage(node,128);var second=ChangeTreePage(node,256);
-                if(refresh)await LoadTreeListing(node,folder,rootChangeVersion,false,lifetime.Token);
-                last.SetResult();await second;next.SetResult();await first;
-                if(treeListings[node].Start!=256)throw new InvalidOperationException("倒序完成或替换目录清单使最新翻页请求丢失。");
-            }
-            finally{next.TrySetResult();last.TrySetResult();verifyTreePageReadBarrier=null;}
+            var interrupted=LoadTreeListing(node,folder,rootChangeVersion,false,lifetime.Token);
+            await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.Run(()=>{for(int index=0;index<100;index++)Directory.Delete(Path.Combine(parent,$"folder-{index:D4}"));});
+            var replacement=LoadTreeListing(node,folder,rootChangeVersion,false,lifetime.Token);
+            resume.SetResult();await interrupted;await replacement;
+            var shown=Shown();
+            report["interruptedMerge"]=new{shown=shown.Length,expected=Expected().Length,distinct=shown.Distinct(StringComparer.Ordinal).Count()};
+            if(!shown.SequenceEqual(Expected()))errors.Add("中断的合并与新清单交错后，子目录缺失、重复或顺序错误");
         }
-        report["reverseCompletionAndListingReplacement"]=true;
+        finally{resume.TrySetResult();verifyTreeMergeSlice=null;}
+        FolderTree.RootNodes.Remove(node);PruneTreeRequests();
+        report["errors"]=errors;if(errors.Count>0)throw new InvalidOperationException(string.Join("; ",errors));
         report["status"]="PASS";
     }
     private async Task VerifyThumbnailUpgrade(string source,Dictionary<string,object> report)
@@ -807,47 +827,63 @@ public sealed partial class MainWindow
     });
     private async Task VerifyTreeLimit(Dictionary<string,object> report)
     {
+        // A very wide folder expands completely (no tree paging), from both the
+        // filesystem and the index, without long stalls on the UI thread.
+        const int count=12001;
         string source=Path.Combine(dataDirectory,"siblings");
-        await Task.Run(()=>{Directory.CreateDirectory(source);for(int index=0;index<2001;index++)Directory.CreateDirectory(Path.Combine(source,$"folder-{index:D5}"));});
-        var errors=new List<string>();
-        async Task CheckListing(DirectoryListing listing)
+        await Task.Run(()=>{Directory.CreateDirectory(source);for(int index=0;index<count;index++)Directory.CreateDirectory(Path.Combine(source,$"folder-{index:D5}"));});
+        var errors=new List<string>();var samples=new List<object>();report["samples"]=samples;
+        async Task CheckExpansion(string name,FolderNode folder,bool indexed)
         {
-            await using(listing)
-            {
-                if(listing.Count!=2001)errors.Add("目录清单不完整");
-                var last=await listing.ReadPage(1920,lifetime.Token);if(last.Count!=81||Path.GetFileName(last[^1])!="folder-02000")errors.Add("末页不可达");
-                var first=await listing.ReadPage(0,lifetime.Token);if(first.Count!=128)errors.Add("首页没有受控分页");
-                var node=new TreeViewNode{Content=new FolderNode(source,"siblings")};FolderTree.RootNodes.Add(node);
-                var state=new TreeListing(listing,0,(FolderNode)node.Content);treeListings[node]=state;ApplyTreePage(node,state,first);
-                await ChangeTreePage(node,1920);
-                if(node.Children.Count>132||!node.Children.Any(child=>child.Content is FolderNode folder&&Path.GetFileName(folder.Path)=="folder-02000"))errors.Add("原生树末页未显示或节点无界");
-                await ChangeTreePage(node,0);if(node.Children.Count>132)errors.Add("返回首页仍保留全部旧节点");
-                treeListings.Remove(node);FolderTree.RootNodes.Remove(node);
-            }
+            var node=new TreeViewNode{Content=folder,HasUnrealizedChildren=true};FolderTree.RootNodes.Add(node);node.IsExpanded=true;
+            double longest=0;var clock=System.Diagnostics.Stopwatch.StartNew();double last=0;
+            var probe=DispatcherQueue.CreateTimer();probe.Interval=TimeSpan.FromMilliseconds(15);probe.IsRepeating=true;
+            probe.Tick+=(_,_)=>{double now=clock.Elapsed.TotalMilliseconds;longest=Math.Max(longest,now-last);last=now;};
+            probe.Start();last=clock.Elapsed.TotalMilliseconds;
+            try{await LoadTreeListing(node,folder,rootChangeVersion,indexed,lifetime.Token);}
+            finally{probe.Stop();}
+            double elapsed=clock.Elapsed.TotalMilliseconds;
+            var names=node.Children.Select(child=>child.Content is FolderNode child2?Path.GetFileName(child2.Path):"").ToArray();
+            bool complete=names.Length==count&&names[0]=="folder-00000"&&names[^1]==$"folder-{count-1:D5}"&&names.SequenceEqual(names.Order(StringComparer.Ordinal))&&!node.HasUnrealizedChildren;
+            samples.Add(new{name,children=names.Length,complete,elapsedMs=elapsed,longestUiStallMs=longest});
+            if(!complete)errors.Add(name+": 展开后子目录不完整或顺序错误");
+            if(longest>250)errors.Add($"{name}: 展开期间界面最长停顿 {longest:F0} ms");
+            FolderTree.RootNodes.Remove(node);
         }
-        try{await CheckListing(await FolderChildren.Read(source,TreeListingDirectory,lifetime.Token));}catch(Exception error){errors.Add("物理: "+error.Message);}
+        try{await CheckExpansion("物理",new FolderNode(source,"siblings"),false);}catch(Exception error){errors.Add("物理: "+error.Message);}
         await catalog!.OpenRoot("tree-limit",source);
         await new DirectoryIndexer(catalog).Scan("tree-limit",source,1,true,[],null,lifetime.Token);
-        try{await CheckListing(await catalog.ReadChildDirectories("tree-limit","",source,TreeListingDirectory,lifetime.Token));}catch(Exception error){errors.Add("索引: "+error.Message);}
+        try{await CheckExpansion("索引",new FolderNode(source,"siblings","tree-limit","",source),true);}catch(Exception error){errors.Add("索引: "+error.Message);}
+        PruneTreeRequests();
         report["errors"]=errors;if(errors.Count>0)throw new InvalidOperationException(string.Join("; ",errors));report["status"]="PASS";
     }
-    private static void VerifyTreeScale(Dictionary<string,object> report)
+    private async Task VerifyTreeScale(Dictionary<string,object> report)
     {
+        string parent=Path.Combine(Path.GetTempPath(),"FolderLens-tree-scale");var source=new FolderNode(parent,"tree-scale");
         var root=new TreeViewNode();
-        var paths=Enumerable.Range(0,5000).Select(index=>Path.Combine(Path.GetTempPath(),"FolderLens-tree-scale",$"folder-{index:D5}")).ToArray();
-        MergePhysicalChildren(root,paths);var retained=root.Children.ToArray();
-        var timer=Stopwatch.StartNew();MergePhysicalChildren(root,paths);timer.Stop();
-        report["unchanged5000Ms"]=timer.Elapsed.TotalMilliseconds;
+        var paths=Enumerable.Range(0,5000).Select(index=>Path.Combine(parent,$"folder-{index:D5}")).ToArray();
+        // Merges yield between slices; what matters is the longest uninterrupted UI stall.
+        async Task<double> Merge(TreeViewNode node,IEnumerable<string> children)
+        {
+            double longest=0;var clock=Stopwatch.StartNew();double last=0;
+            var probe=DispatcherQueue.CreateTimer();probe.Interval=TimeSpan.FromMilliseconds(10);probe.IsRepeating=true;
+            probe.Tick+=(_,_)=>{double now=clock.Elapsed.TotalMilliseconds;longest=Math.Max(longest,now-last);last=now;};
+            probe.Start();
+            try{await ApplyTreeChildren(node,source,children.ToList(),()=>false);}finally{probe.Stop();}
+            return Math.Max(longest,clock.Elapsed.TotalMilliseconds-last);
+        }
+        report["initial5000StallMs"]=await Merge(root,paths);var retained=root.Children.ToArray();
+        report["unchanged5000StallMs"]=await Merge(root,paths);
         if(!root.Children.SequenceEqual(retained))throw new InvalidOperationException("未变化的目录树替换了节点。");
-        var expanded=paths.Concat([Path.Combine(Path.GetTempPath(),"FolderLens-tree-scale","folder-05000")]).ToArray();
-        timer.Restart();MergePhysicalChildren(root,expanded);timer.Stop();report["append5000Ms"]=timer.Elapsed.TotalMilliseconds;
+        var expanded=paths.Concat([Path.Combine(parent,"folder-05000")]).ToArray();
+        report["append5000StallMs"]=await Merge(root,expanded);
         if(root.Children.Count!=5001||!root.Children.Take(5000).SequenceEqual(retained))throw new InvalidOperationException("新增兄弟目录未保留原节点。");
-        var remaining=expanded.Where((_,index)=>index!=17).ToArray();MergePhysicalChildren(root,remaining);
+        var remaining=expanded.Where((_,index)=>index!=17).ToArray();await Merge(root,remaining);
         if(root.Children.Count!=5000||root.Children.Contains(retained[17])||!root.Children.Take(17).SequenceEqual(retained.Take(17)))throw new InvalidOperationException("删除一个兄弟目录错误影响其他节点。");
-        var caseNode=new TreeViewNode();MergePhysicalChildren(caseNode,["sample\\A","sample\\a"]);var distinct=caseNode.Children.ToArray();MergePhysicalChildren(caseNode,["sample\\A","sample\\a"]);
+        var caseNode=new TreeViewNode();await Merge(caseNode,["sample\\A","sample\\a"]);var distinct=caseNode.Children.ToArray();await Merge(caseNode,["sample\\A","sample\\a"]);
         if(caseNode.Children.Count!=2||!caseNode.Children.SequenceEqual(distinct))throw new InvalidOperationException("大小写不同的真实目录名称被合并。");
         report["removeRetainsSiblings"]=true;report["distinctCaseNamesRetained"]=true;
-        if((double)report["unchanged5000Ms"]>100||(double)report["append5000Ms"]>100)throw new InvalidOperationException("5000 个兄弟目录的无变化/单项追加阻塞 UI 超过 100ms。");
+        if(new[]{"initial5000StallMs","unchanged5000StallMs","append5000StallMs"}.Any(key=>(double)report[key]>100))throw new InvalidOperationException("5000 个兄弟目录的合并使 UI 连续停顿超过 100ms。");
         report["status"]="PASS";
     }
 }

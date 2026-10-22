@@ -36,10 +36,10 @@ public sealed partial class MainWindow
     private readonly List<FolderLens.Infrastructure.WorkerClient> extraThumbnailWorkers=[];
     private int thumbnailWorkCount;
     private readonly TaskCompletionSource thumbnailsIdle=new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private sealed record FolderNode(string Path,string Label,string? CatalogRoot=null,string Relative="",string BasePath="",long? PageOffset=null,string? Icon=null):INavigationNodePresentation
+    private sealed record FolderNode(string Path,string Label,string? CatalogRoot=null,string Relative="",string BasePath="",string? Icon=null):INavigationNodePresentation
     {
         public string NavigationLabel=>Label;
-        public string NavigationGlyph=>Icon??(PageOffset is not null?"\uE8AB":"\uE8B7");
+        public string NavigationGlyph=>Icon??"\uE8B7";
         public override string ToString()=>Label;
     }
     private sealed record DesktopState(double ThumbnailSize=144,bool ShowPaths=false,double SidebarWidth=300,bool Details=false,double TreeFraction=.6);
@@ -294,12 +294,10 @@ public sealed partial class MainWindow
         try{var node=e.InvokedItem as TreeViewNode;var folder=node?.Content as FolderNode??e.InvokedItem as FolderNode;
         if(node?.Content is CollectionNode collection){await OpenCollection(collection.Id);return;}
         if(node?.Content is NavigationGroup){node.IsExpanded=!node.IsExpanded;return;}
-        if(folder?.PageOffset is {} offset&&node?.Parent is {} parent){await ChangeTreePage(parent,offset);return;}
         if(folder is not null)await NavigateFolder(folder);}
         catch(OperationCanceledException){}catch(Exception error){ShowError(error);}
     }
-    private async Task NavigateFolder(FolderNode folder)
-    {if(folder.PageOffset is not null)return;await NavigateFolderPath(folder.Path);}
+    private async Task NavigateFolder(FolderNode folder)=>await NavigateFolderPath(folder.Path);
     private async Task NavigateFolderPath(string path)
     {
         path=Path.TrimEndingDirectorySeparator(PathRules.ValidateSource(path));

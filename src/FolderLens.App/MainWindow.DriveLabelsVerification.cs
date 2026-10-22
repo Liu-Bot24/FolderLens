@@ -31,14 +31,10 @@ public sealed partial class MainWindow
             var updated=(FolderNode)first.Content;
             if(updated.CatalogRoot!="fixture-catalog"||updated.BasePath!=original.Path||updated.Label!=original.Path[..2]+" Photos (旧)"||!nodes.SequenceEqual(computer.Children))
                 throw new InvalidOperationException("Drive label changed navigation identity, current metadata or root nodes.");
-            string empty=Path.Combine(dataDirectory,"drive-label-empty");Directory.CreateDirectory(empty);
-            await using(var listing=await FolderChildren.Read(empty,TreeListingDirectory,lifetime.Token))
-            {
-                var earlier=new TreeListing(listing,0,original with{CatalogRoot=null});
-                ApplyTreePage(first,earlier,[]);ApplyTreePage(first,earlier,[]);
-                if(first.Content is not FolderNode retained||retained.Label!=updated.Label||retained.CatalogRoot is not null)
-                    throw new InvalidOperationException("A late or cached directory page reverted the new drive name or retained stale routing.");
-            }
+            var earlier=original with{CatalogRoot=null};
+            await ApplyTreeChildren(first,earlier,[],()=>false);await ApplyTreeChildren(first,earlier,[],()=>false);
+            if(first.Content is not FolderNode retained||retained.Label!=updated.Label||retained.CatalogRoot is not null)
+                throw new InvalidOperationException("A late or repeated directory listing reverted the new drive name or retained stale routing.");
             IEnumerable<TextBlock> Labels(DependencyObject parent)
             {
                 for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++)

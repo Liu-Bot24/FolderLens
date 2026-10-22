@@ -201,8 +201,7 @@ public sealed partial class MainWindow
         {
             if(node is TreeViewItem item)
             {
-                var folder=FolderTree.NodeFromContainer(item)?.Content as FolderNode;
-                return folder?.PageOffset is null?folder?.Path:null;
+                return (FolderTree.NodeFromContainer(item)?.Content as FolderNode)?.Path;
             }
             if(ReferenceEquals(node,FolderTree))return null;
             if(ReferenceEquals(node,BrowserPane))return FileTransferDirectory;
