@@ -50,17 +50,65 @@ public sealed partial class MainWindow
         {
             string resource=value.Style switch{AppearancePreferences.Soft=>"Soft",AppearancePreferences.Glass=>"Glass",_=>"Native"};
             var palette=new ResourceDictionary{Source=new Uri($"ms-appx:///Themes/{resource}.xaml")};
+            appearance=value;
+            ApplyWindowMaterial(palette);
             // Slot 0 is WinUI's stock controls; slot 1 is the replaceable palette.
             // Keep the visual tree and native control templates intact.
             Application.Current.Resources.MergedDictionaries[1]=palette;
-            appearance=value;
             ApplyViewerOverlayAppearance();
             RefreshAppearanceResources(Shell);
             if(capacityWindow?.Content is FrameworkElement capacityRoot)RefreshAppearanceResources(capacityRoot);
-            ImageCanvas.Invalidate();
+            ImageCanvas.Invalidate();UpdateCaptionButtons();
             if(fullScreen)UpdateViewerInformation();
         }
         UpdateAppearanceMenu();
+    }
+
+    private void InitializeWindowChrome()
+    {
+        ExtendsContentIntoTitleBar=true;SetTitleBar(AppTitleBar);
+        Shell.ActualThemeChanged+=(_,_)=>UpdateCaptionButtons();
+        ApplyWindowMaterial(Application.Current.Resources.MergedDictionaries[1]);
+        UpdateCaptionButtons();
+    }
+
+    // Native sits on Mica and Soft on desktop acrylic, both behind a transparent
+    // shell; Glass paints its own backdrop. Where the system material is
+    // unavailable the shell falls back to the palette's solid window colour.
+    private void ApplyWindowMaterial(ResourceDictionary palette)
+    {
+        Microsoft.UI.Xaml.Media.SystemBackdrop? backdrop=appearance.Style switch
+        {
+            AppearancePreferences.Native when Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported()=>new Microsoft.UI.Xaml.Media.MicaBackdrop(),
+            AppearancePreferences.Soft when Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported()=>new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop(),
+            _=>null
+        };
+        if(backdrop is null&&appearance.Style is AppearancePreferences.Native or AppearancePreferences.Soft)
+            foreach(string theme in new[]{"Light","Dark"})
+                if(palette.ThemeDictionaries.TryGetValue(theme,out var entry)&&entry is ResourceDictionary colors&&colors.TryGetValue("BrowserChromeBrush",out var chrome)&&chrome is Microsoft.UI.Xaml.Media.SolidColorBrush solid)
+                {
+                    // A resource object cannot be stored under a second key; insert a copy.
+                    colors.Remove("ShellBackgroundBrush");colors.Add("ShellBackgroundBrush",new Microsoft.UI.Xaml.Media.SolidColorBrush(solid.Color));
+                }
+        if(SystemBackdrop?.GetType()!=backdrop?.GetType())SystemBackdrop=backdrop;
+    }
+
+    private void UpdateCaptionButtons()
+    {
+        var bar=AppWindow.TitleBar;
+        if(accessibility.HighContrast)
+        {
+            // Leave caption buttons to the system's high-contrast colours.
+            bar.ButtonBackgroundColor=bar.ButtonInactiveBackgroundColor=bar.ButtonForegroundColor=bar.ButtonInactiveForegroundColor=null;
+            bar.ButtonHoverBackgroundColor=bar.ButtonHoverForegroundColor=bar.ButtonPressedBackgroundColor=bar.ButtonPressedForegroundColor=null;
+            return;
+        }
+        var ink=Shell.ActualTheme==ElementTheme.Dark?Microsoft.UI.Colors.White:Microsoft.UI.Colors.Black;
+        Windows.UI.Color Tint(byte alpha)=>Microsoft.UI.ColorHelper.FromArgb(alpha,ink.R,ink.G,ink.B);
+        bar.ButtonBackgroundColor=bar.ButtonInactiveBackgroundColor=Microsoft.UI.Colors.Transparent;
+        bar.ButtonForegroundColor=bar.ButtonHoverForegroundColor=bar.ButtonPressedForegroundColor=ink;
+        bar.ButtonInactiveForegroundColor=Tint(0x73);
+        bar.ButtonHoverBackgroundColor=Tint(0x17);bar.ButtonPressedBackgroundColor=Tint(0x2E);
     }
 
     private static void RefreshAppearanceResources(FrameworkElement root)

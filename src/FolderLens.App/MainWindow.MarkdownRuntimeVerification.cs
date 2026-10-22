@@ -20,7 +20,7 @@ public sealed partial class MainWindow
         report["runtimeKind"]=runtimeFolder is null?"evergreen":"fixed";
         var panel=new Grid{Width=640,Height=240,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top};
         panel.ColumnDefinitions.Add(new ColumnDefinition());panel.ColumnDefinitions.Add(new ColumnDefinition());
-        Grid.SetRowSpan(panel,4);Shell.Children.Add(panel);Shell.UpdateLayout();
+        Grid.SetRowSpan(panel,5);Shell.Children.Add(panel);Shell.UpdateLayout();
         CoreWebView2Environment? sentinelEnvironment=null;MarkdownRuntimeLifetime? sentinelOwner=null;
         WebView2? sentinel=null;Task? sentinelInitialization=null;Process? sentinelProcess=null;int sentinelPid=0;
         var sentinelExits=new HashSet<int>();Exception? primaryFailure=null;var finalizationFailures=new List<Exception>();

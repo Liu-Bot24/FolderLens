@@ -70,10 +70,13 @@ public sealed partial class MainWindow
             var ink=((SolidColorBrush)text).Color;
             return papers.Min(paper=>{double a=Luminance(Over(ink,paper)),b=Luminance(paper);return (Math.Max(a,b)+.05)/(Math.Min(a,b)+.05);});
         }
-        // Behind the panes: the window colour plus, when shown, the strongest aurora tint.
+        // Behind the panes: the window colour (a system material's fallback colour when the
+        // shell is transparent over Mica or acrylic) plus, when shown, the strongest aurora tint.
         List<Color> Backdrop()
         {
-            var chrome=((SolidColorBrush)Shell.Background).Color;var colors=new List<Color>{chrome};
+            var chrome=((SolidColorBrush)Shell.Background).Color;
+            if(chrome.A==0)chrome=((SolidColorBrush)((ResourceDictionary)Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries[Shell.ActualTheme.ToString()])["BrowserChromeBrush"]).Color;
+            var colors=new List<Color>{chrome};
             var aurora=((RadialGradientBrush)((Microsoft.UI.Xaml.Shapes.Rectangle)AppearanceBackdrop.Children[0]).Fill).GradientStops[0].Color;
             if(AppearanceBackdrop.Opacity>0)colors.Add(Over(aurora,chrome));
             return colors;
@@ -94,7 +97,8 @@ public sealed partial class MainWindow
             if(pathContrast<4.5)throw new InvalidOperationException("路径文字对比度不足。");
             var palette=Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries[expected.ToString()] as ResourceDictionary;
             var accent=((SolidColorBrush)palette!["AccentFillColorDefaultBrush"]).Color;
-            foreach(string key in new[]{"ToggleButtonBackgroundChecked","SliderThumbBackground","SliderTrackValueFill","TreeViewItemSelectionIndicatorForeground","GridViewItemSelectedBorderBrush"})
+            // The Apple-style sidebar marks selection with a grey capsule, not an accent bar.
+            foreach(string key in new[]{"ToggleButtonBackgroundChecked","SliderThumbBackground","SliderTrackValueFill","TreeViewItemSelectionIndicatorForeground","GridViewItemSelectedBorderBrush"}.Where(key=>appearance.Style!="soft"||key!="TreeViewItemSelectionIndicatorForeground"))
                 if(((SolidColorBrush)palette[key]).Color!=accent)throw new InvalidOperationException("控件强调色不一致："+key);
             double accentText=Contrast((Brush)palette["TextOnAccentFillColorPrimaryBrush"],[accent]);
             if(accentText<4.5)throw new InvalidOperationException("选中按钮文字对比度不足。");
@@ -109,6 +113,15 @@ public sealed partial class MainWindow
             if(viewerBottom!.HorizontalAlignment!=(glass?HorizontalAlignment.Center:HorizontalAlignment.Stretch))throw new InvalidOperationException("底部浮层对齐方式没有随外观切换。");
             if(!ReferenceEquals(VideoPosterPlay.Style,Application.Current.Resources["VideoPosterPlayStyle"]))throw new InvalidOperationException("视频播放按钮样式没有随外观切换。");
             if(AppearanceBackdrop.Opacity!=(glass&&!highContrast?1:0))throw new InvalidOperationException("背景装饰层没有随外观切换。");
+            // Native sits on Mica, Soft on desktop acrylic, Glass paints its own backdrop.
+            Type? material=appearance.Style switch
+            {
+                "native" when Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported()=>typeof(MicaBackdrop),
+                "soft" when Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported()=>typeof(DesktopAcrylicBackdrop),
+                _=>null
+            };
+            if(SystemBackdrop?.GetType()!=material)throw new InvalidOperationException("窗口材质没有随外观切换。");
+            if(!highContrast&&(((SolidColorBrush)Shell.Background).Color.A==0)!=(material is not null))throw new InvalidOperationException("窗口背景与系统材质不一致：会遮住材质或露出空白。");
             if(!glass||highContrast)return;
             foreach(var pane in new Panel[]{TreePane,PreviewPane,BrowserPane})
                 if(pane.Background is not AcrylicBrush)throw new InvalidOperationException("琉璃面板没有使用亚克力背景。");
@@ -116,6 +129,17 @@ public sealed partial class MainWindow
             if(Math.Abs(surface.R-surface.G)>3||Math.Abs(surface.G-surface.B)>3)throw new InvalidOperationException("图片底色不是中性灰，会影响看片颜色。");
         }
         CheckOverlayAppearance();
+        // The caption row is part of the window content; the system keeps the buttons,
+        // drawn transparent with ink that follows the theme.
+        void CheckCaption(ElementTheme theme)
+        {
+            if(!ExtendsContentIntoTitleBar||AppTitleBar.Visibility!=Visibility.Visible||AppTitleBar.ActualHeight<=0)throw new InvalidOperationException("标题栏没有融入窗口内容。");
+            if(highContrast)return;
+            var bar=AppWindow.TitleBar;var ink=theme==ElementTheme.Dark?Microsoft.UI.Colors.White:Microsoft.UI.Colors.Black;
+            if(bar.ButtonBackgroundColor!=Microsoft.UI.Colors.Transparent||bar.ButtonForegroundColor!=ink)throw new InvalidOperationException("标题栏按钮颜色没有跟随主题。");
+        }
+        CheckCaption(expected);
+        report["caption"]=new{extended=ExtendsContentIntoTitleBar,height=AppTitleBar.ActualHeight,material=SystemBackdrop?.GetType().Name};
         if(GlassAppearanceActive)
         {
             SetViewerInformation("标题.jpg",["2160 × 3840 · JPG","相机：Fixture Camera\n镜头：Fixture Lens","滚轮：切换图片"]);
@@ -136,24 +160,27 @@ public sealed partial class MainWindow
         var before=Identity(BrowserPane.Background);
         Shell.RequestedTheme=other;Shell.UpdateLayout();await Task.Delay(50);
         if(Shell.ActualTheme!=other||Identity(BrowserPane.Background)==before)throw new InvalidOperationException("运行时主题资源没有更新。");
+        CheckCaption(other);
         // Glass overlays stay dark over photos in both app themes; others follow the app.
         bool overlayFollowsTheme=!GlassAppearanceActive;
         if((Identity(viewerTop.Background)!=oldPanelColor)!=overlayFollowsTheme||Contrast(viewerCaption.Foreground,Papers(viewerTop.Background,photo))<4.5||Contrast(viewerInformation.Foreground,Papers(viewerRight.Background,photo))<4.5)throw new InvalidOperationException("查看浮层没有正确切换主题。");
         Shell.RequestedTheme=ElementTheme.Default;Shell.UpdateLayout();await Task.Delay(50);
         if(Shell.ActualTheme!=expected||!ReferenceEquals(originalSource,FilesGrid.ItemsSource))throw new InvalidOperationException("恢复系统主题改变了浏览源或主题。");
+        CheckCaption(expected);
         void CheckStructuralLines()
         {
-            bool hidden=appearance.Style=="soft";
+            // Every appearance separates the list toolbar and status bar from the files.
             foreach(var panel in new[]{BrowserToolbar,BrowserStatusBar})
-                if((Alpha(panel.BorderBrush)==0)!=hidden)throw new InvalidOperationException("分区线没有随外观正确切换。");
+                if(Alpha(panel.BorderBrush)==0)throw new InvalidOperationException("分区线没有随外观正确切换。");
             if(GlassAppearanceActive&&!highContrast)
             {
                 if(PreviewPane.BorderBrush is not LinearGradientBrush||PreviewPane.BorderThickness!=new Thickness(1)||TreePane.BorderThickness!=new Thickness(1)||BrowserPane.BorderThickness!=new Thickness(1))
                     throw new InvalidOperationException("琉璃面板的高光边没有正确应用。");
             }
-            else if((Alpha(PreviewPane.BorderBrush)==0)!=hidden)throw new InvalidOperationException("分区线没有随外观正确切换。");
+            else if(!PreviewPane.BorderThickness.Equals(Application.Current.Resources["AppearancePreviewBorder"]))throw new InvalidOperationException("分区线没有随外观正确切换。");
+            // Only the Apple-style sidebar is separated by hairline splitters.
             foreach(var divider in new Microsoft.UI.Xaml.Controls.Border[]{(Microsoft.UI.Xaml.Controls.Border)PaneDivider.Children[0],(Microsoft.UI.Xaml.Controls.Border)PreviewHeightDivider.Children[0]})
-                if(divider.Opacity!=(appearance.Style=="native"||highContrast?1:0))throw new InvalidOperationException("分栏线没有随外观正确切换。");
+                if(divider.Opacity!=(appearance.Style=="soft"||highContrast?1:0))throw new InvalidOperationException("分栏线没有随外观正确切换。");
             if(!PaneDivider.IsHitTestVisible||!PreviewHeightDivider.IsHitTestVisible||PaneDivider.ActualWidth<=0||PreviewHeightDivider.ActualHeight<=0)
                 throw new InvalidOperationException("隐藏分栏线破坏了拖动区域。");
         }

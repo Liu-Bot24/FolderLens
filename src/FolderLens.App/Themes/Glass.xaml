@@ -20,6 +20,7 @@
   <Thickness x:Key="AppearanceTreeMargin">6,3,6,3</Thickness>
   <Thickness x:Key="AppearancePreviewMargin">6,3,6,3</Thickness>
   <Thickness x:Key="AppearanceBrowserMargin">2,3,6,3</Thickness>
+  <Thickness x:Key="AppearanceToolbarBorder">0</Thickness>
   <Thickness x:Key="AppearancePreviewPadding">10,8</Thickness>
   <Thickness x:Key="AppearancePreviewActionsMargin">0,3,0,4</Thickness>
   <Thickness x:Key="AppearancePreviewHeaderMargin">0,0,0,3</Thickness>
@@ -98,15 +99,16 @@
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Light">
       <x:Double x:Key="AppearanceAuroraOpacity">1</x:Double>
-      <Color x:Key="AppearanceAuroraPrimaryColor">#66818CF8</Color>
-      <Color x:Key="AppearanceAuroraPrimaryFadeColor">#00818CF8</Color>
-      <Color x:Key="AppearanceAuroraSecondaryColor">#4D2DD4BF</Color>
-      <Color x:Key="AppearanceAuroraSecondaryFadeColor">#002DD4BF</Color>
-      <Color x:Key="AppearanceAuroraTertiaryColor">#40E879F9</Color>
-      <Color x:Key="AppearanceAuroraTertiaryFadeColor">#00E879F9</Color>
-      <SolidColorBrush x:Key="BrowserChromeBrush" Color="#ECEFF7" />
-      <AcrylicBrush x:Key="BrowserSurfaceBrush" TintColor="#FFFFFF" TintOpacity="0.55" TintLuminosityOpacity="0.85" FallbackColor="#F7F8FC" />
-      <AcrylicBrush x:Key="AppearanceSidebarBrush" TintColor="#FFFFFF" TintOpacity="0.55" TintLuminosityOpacity="0.85" FallbackColor="#F7F8FC" />
+      <Color x:Key="AppearanceAuroraPrimaryColor">#8C6366F1</Color>
+      <Color x:Key="AppearanceAuroraPrimaryFadeColor">#006366F1</Color>
+      <Color x:Key="AppearanceAuroraSecondaryColor">#7314B8A6</Color>
+      <Color x:Key="AppearanceAuroraSecondaryFadeColor">#0014B8A6</Color>
+      <Color x:Key="AppearanceAuroraTertiaryColor">#59D946EF</Color>
+      <Color x:Key="AppearanceAuroraTertiaryFadeColor">#00D946EF</Color>
+      <SolidColorBrush x:Key="BrowserChromeBrush" Color="#E4E8F4" />
+      <StaticResource x:Key="ShellBackgroundBrush" ResourceKey="BrowserChromeBrush" />
+      <AcrylicBrush x:Key="BrowserSurfaceBrush" TintColor="#FFFFFF" TintOpacity="0.35" TintLuminosityOpacity="0.6" FallbackColor="#F4F5FB" />
+      <AcrylicBrush x:Key="AppearanceSidebarBrush" TintColor="#FFFFFF" TintOpacity="0.35" TintLuminosityOpacity="0.6" FallbackColor="#F4F5FB" />
       <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#241A2550" />
       <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="#1A1A2550" />
@@ -120,9 +122,9 @@
       <SolidColorBrush x:Key="ScopeFillBrush" Color="#263651E0" />
       <SolidColorBrush x:Key="BrowserWarningBrush" Color="#7A5600" />
       <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#1A2033" />
-      <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#465070" />
-      <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#555F7D" />
-      <SolidColorBrush x:Key="AppearancePathBrush" Color="#555F7D" />
+      <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#3A4362" />
+      <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#3E4766" />
+      <SolidColorBrush x:Key="AppearancePathBrush" Color="#3E4766" />
       <SolidColorBrush x:Key="AppearanceFilterBrush" Color="#4A33B8" />
       <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#A6FFFFFF" />
       <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#E6FFFFFF" />
@@ -139,6 +141,11 @@
       <SolidColorBrush x:Key="GridViewItemHoverBrush" Color="#141A2033" />
       <SolidColorBrush x:Key="GridViewItemSelectedFillBrush" Color="#1F3651E0" />
       <SolidColorBrush x:Key="TextControlFocusedBrush" Color="#FFFFFF" />
+      <StaticResource x:Key="ViewSwitcherTrackBrush" ResourceKey="ControlFillColorDefaultBrush" />
+      <Color x:Key="ViewSwitcherOffColor">#A6FFFFFF</Color>
+      <Color x:Key="ViewSwitcherOffHoverColor">#E6FFFFFF</Color>
+      <Color x:Key="ViewSwitcherOnColor">#3651E0</Color>
+      <Color x:Key="ViewSwitcherOnTextColor">#FFFFFF</Color>
       <Color x:Key="BrowserDetailsSelectedColor">#D6DEFA</Color>
       <Color x:Key="BrowserDetailsHoverColor">#C9D4F7</Color>
       <Color x:Key="BrowserDetailsPressedColor">#BCCAF4</Color>
@@ -215,6 +222,7 @@
       <Color x:Key="AppearanceAuroraTertiaryColor">#4D8B5CF6</Color>
       <Color x:Key="AppearanceAuroraTertiaryFadeColor">#008B5CF6</Color>
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#0A0F1E" />
+      <StaticResource x:Key="ShellBackgroundBrush" ResourceKey="BrowserChromeBrush" />
       <AcrylicBrush x:Key="BrowserSurfaceBrush" TintColor="#141A2E" TintOpacity="0.62" TintLuminosityOpacity="0.85" FallbackColor="#161C2E" />
       <AcrylicBrush x:Key="AppearanceSidebarBrush" TintColor="#141A2E" TintOpacity="0.62" TintLuminosityOpacity="0.85" FallbackColor="#161C2E" />
       <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
@@ -249,6 +257,11 @@
       <SolidColorBrush x:Key="GridViewItemHoverBrush" Color="#14FFFFFF" />
       <SolidColorBrush x:Key="GridViewItemSelectedFillBrush" Color="#298AA8FF" />
       <SolidColorBrush x:Key="TextControlFocusedBrush" Color="#66000000" />
+      <StaticResource x:Key="ViewSwitcherTrackBrush" ResourceKey="ControlFillColorDefaultBrush" />
+      <Color x:Key="ViewSwitcherOffColor">#14FFFFFF</Color>
+      <Color x:Key="ViewSwitcherOffHoverColor">#21FFFFFF</Color>
+      <Color x:Key="ViewSwitcherOnColor">#8AA8FF</Color>
+      <Color x:Key="ViewSwitcherOnTextColor">#0B1020</Color>
       <Color x:Key="BrowserDetailsSelectedColor">#34508F</Color>
       <Color x:Key="BrowserDetailsHoverColor">#3D5CA3</Color>
       <Color x:Key="BrowserDetailsPressedColor">#4566B0</Color>
@@ -321,6 +334,8 @@
       <Thickness x:Key="AppearancePaneBorder">1</Thickness>
       <Thickness x:Key="AppearanceThumbnailBorder">1</Thickness>
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="{ThemeResource SystemColorWindowColor}" />
+      <SolidColorBrush x:Key="ShellBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+      <SolidColorBrush x:Key="ViewSwitcherTrackBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="BrowserInsetBrush" Color="{ThemeResource SystemColorWindowColor}" />
       <SolidColorBrush x:Key="ThumbnailMatBrush" Color="{ThemeResource SystemColorWindowColor}" />

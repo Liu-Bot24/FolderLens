@@ -59,7 +59,7 @@ public sealed partial class MainWindow
     private Border ViewerPanel(UIElement content,HorizontalAlignment horizontal,VerticalAlignment vertical)
     {
         var border=new Border{Child=content,Style=(Style)Shell.Resources["ViewerPanelStyle"],HorizontalAlignment=horizontal,VerticalAlignment=vertical,Visibility=Visibility.Collapsed};
-        Grid.SetRow(border,0);Grid.SetRowSpan(border,4);Shell.Children.Add(border);return border;
+        Grid.SetRow(border,0);Grid.SetRowSpan(border,5);Shell.Children.Add(border);return border;
     }
     private static Button AddViewerButton(Panel panel,string label,RoutedEventHandler action){var button=new Button{Content=label};ToolTipService.SetToolTip(button,label);button.Click+=action;panel.Children.Add(button);return button;}
     private static void AddAnimationMirror(Panel panel,Button source,RoutedEventHandler action)
@@ -142,10 +142,10 @@ public sealed partial class MainWindow
     }
     private void SetViewerInformation(string title,string[] sections)
     {
-        if(!GlassAppearanceActive||accessibility.HighContrast)
+        object? muted=null;
+        if(!GlassAppearanceActive||accessibility.HighContrast||Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries.TryGetValue("Dark",out var dark)&&dark is ResourceDictionary darkColors&&!darkColors.TryGetValue("TextFillColorSecondaryBrush",out muted))
         {viewerInformation!.Text=title+"\n\n"+string.Join("\n\n",sections);return;}
         // Glass: same text, set as a title plus "label：value" rows with muted labels.
-        var muted=(Microsoft.UI.Xaml.Media.Brush)((ResourceDictionary)Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries["Dark"])["TextFillColorSecondaryBrush"];
         var inlines=viewerInformation!.Inlines;inlines.Clear();
         inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=title,FontSize=15,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold});
         foreach(string section in sections)
@@ -157,7 +157,7 @@ public sealed partial class MainWindow
                 int colon=line.IndexOf('：');
                 if(colon>0&&colon<line.Length-1)
                 {
-                    inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line[..(colon+1)],Foreground=muted});
+                    inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line[..(colon+1)],Foreground=muted as Microsoft.UI.Xaml.Media.Brush});
                     inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line[(colon+1)..]});
                 }
                 else inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line});
@@ -166,7 +166,7 @@ public sealed partial class MainWindow
     }
     private void SetFullScreenChrome(bool enabled)
     {
-        MainMenu.Visibility=AddressToolbar.Visibility=Status.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
+        AppTitleBar.Visibility=MainMenu.Visibility=AddressToolbar.Visibility=Status.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         PreviewHeader.Visibility=PreviewActions.Visibility=PreviewExtras.Visibility=enabled?Visibility.Collapsed:Visibility.Visible;
         if(enabled)
         {

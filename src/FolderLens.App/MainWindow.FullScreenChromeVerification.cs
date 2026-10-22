@@ -73,7 +73,7 @@ public sealed partial class MainWindow
             bool fills=Shell.ActualWidth>0&&Shell.ActualHeight>0&&Math.Abs(bounds.Left)<.5&&Math.Abs(bounds.Top)<.5
                 &&Math.Abs(bounds.Right-Shell.ActualWidth)<.5&&Math.Abs(bounds.Bottom-Shell.ActualHeight)<.5;
             bool square=PreviewPane.CornerRadius==new CornerRadius(0);
-            bool chromeHidden=MainMenu.Visibility==Visibility.Collapsed&&AddressToolbar.Visibility==Visibility.Collapsed
+            bool chromeHidden=AppTitleBar.Visibility==Visibility.Collapsed&&MainMenu.Visibility==Visibility.Collapsed&&AddressToolbar.Visibility==Visibility.Collapsed
                 &&Status.Visibility==Visibility.Collapsed&&PreviewHeader.Visibility==Visibility.Collapsed
                 &&PreviewActions.Visibility==Visibility.Collapsed&&PreviewExtras.Visibility==Visibility.Collapsed;
             samples.Add(new{name,fills,square,chromeHidden,left=bounds.Left,top=bounds.Top,rightGap=Shell.ActualWidth-bounds.Right,bottomGap=Shell.ActualHeight-bounds.Bottom});

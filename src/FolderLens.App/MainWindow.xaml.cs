@@ -93,6 +93,7 @@ public sealed partial class MainWindow : Window
         StartStartupMeasurements();
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory,"Assets","FolderLens.ico"));
+        InitializeWindowChrome();
         InitializeDesktop();
         ObserveThumbnailViewport(FilesGrid);ObserveThumbnailViewport(FilesList);
         InitializeBrowserEmptyState();
