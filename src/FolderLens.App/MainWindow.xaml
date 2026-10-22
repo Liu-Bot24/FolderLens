@@ -4,9 +4,11 @@
       <ResourceDictionary>
       <local:NavigationNodeConverter x:Key="NavigationNodeConverter" />
       <Style x:Key="ViewerPanelStyle" TargetType="Border">
-        <Setter Property="Background" Value="{ThemeResource BrowserSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{ThemeResource AppearanceChromeLineBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Background" Value="{ThemeResource ViewerOverlayBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ViewerOverlayBorderBrush}" />
+        <Setter Property="BorderThickness" Value="{ThemeResource ViewerOverlayBorderThickness}" />
+        <Setter Property="CornerRadius" Value="{ThemeResource ViewerOverlayRadius}" />
+        <Setter Property="Margin" Value="{ThemeResource ViewerOverlayMargin}" />
       </Style>
       <Style x:Key="NavigationButtonStyle" TargetType="Button">
         <Setter Property="MinWidth" Value="32" /><Setter Property="MinHeight" Value="32" />
@@ -15,7 +17,7 @@
       </Style>
       <DataTemplate x:Key="Card" x:DataType="local:FileRow">
         <StackPanel Width="{x:Bind CardWidth, Mode=OneWay}" Spacing="4" Padding="4,4,4,6">
-          <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearanceThumbnailBorder}" CornerRadius="6">
+          <Border Height="{x:Bind ThumbnailHeight, Mode=OneWay}" Background="{ThemeResource ThumbnailMatBrush}" BorderBrush="{ThemeResource BrowserLineBrush}" BorderThickness="{ThemeResource AppearanceThumbnailBorder}" CornerRadius="{ThemeResource AppearanceThumbnailRadius}">
             <Grid>
               <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
               <TextBlock Text="{x:Bind ThumbnailStatus, Mode=OneWay}" Visibility="{x:Bind ThumbnailStatusVisibility, Mode=OneWay}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" Margin="8" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False" />
@@ -32,14 +34,14 @@
                 <FontIcon Glyph="&#xE783;" FontSize="22" Foreground="{ThemeResource BrowserWarningBrush}" />
                 <TextBlock Text="{x:Bind ThumbnailErrorLabel, Mode=OneWay}" FontSize="11" />
               </StackPanel>
-              <Border Visibility="{x:Bind VideoBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="4" Padding="4,4" CornerRadius="4" Background="{ThemeResource MediaBadgeBackgroundBrush}" ToolTipService.ToolTip="{x:Bind VideoDescription, Mode=OneWay}" AutomationProperties.Name="{x:Bind VideoDescription, Mode=OneWay}">
+              <Border Visibility="{x:Bind VideoBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="4" Padding="4,4" CornerRadius="{ThemeResource AppearanceBadgeRadius}" Background="{ThemeResource MediaBadgeBackgroundBrush}" BorderBrush="{ThemeResource MediaBadgeBorderBrush}" BorderThickness="{ThemeResource MediaBadgeBorderThickness}" ToolTipService.ToolTip="{x:Bind VideoDescription, Mode=OneWay}" AutomationProperties.Name="{x:Bind VideoDescription, Mode=OneWay}">
                 <Grid ColumnSpacing="4"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                   <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xE768;" FontSize="10" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
                   <TextBlock x:Name="VideoTypeLabel" Grid.Column="1" Text="视频" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource MediaBadgeForegroundBrush}" />
                   <TextBlock x:Name="VideoDurationLabel" Grid.Column="2" Text="{x:Bind VideoDurationText, Mode=OneWay}" FontSize="10" TextAlignment="Right" Foreground="{ThemeResource MediaBadgeForegroundBrush}" TextTrimming="CharacterEllipsis" />
                 </Grid>
               </Border>
-              <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Width="28" Height="28" MinWidth="0" MinHeight="0" Padding="5" CornerRadius="4" BorderThickness="1" Opacity="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" PointerEntered="QuickCollectPointerEntered" PointerExited="QuickCollectPointerExited" GotFocus="QuickCollectFocusChanged" LostFocus="QuickCollectFocusChanged" Unloaded="QuickCollectUnloaded" Click="QuickCollectClicked" DoubleTapped="QuickCollectDoubleTapped" IsEnabled="{x:Bind QuickCollectEnabled, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind CollectionHint, Mode=OneWay}" AutomationProperties.Name="{x:Bind CollectionHint, Mode=OneWay}">
+              <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Width="28" Height="28" MinWidth="0" MinHeight="0" Padding="5" CornerRadius="{ThemeResource AppearanceBadgeRadius}" BorderThickness="1" Opacity="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" PointerEntered="QuickCollectPointerEntered" PointerExited="QuickCollectPointerExited" GotFocus="QuickCollectFocusChanged" LostFocus="QuickCollectFocusChanged" Unloaded="QuickCollectUnloaded" Click="QuickCollectClicked" DoubleTapped="QuickCollectDoubleTapped" IsEnabled="{x:Bind QuickCollectEnabled, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind CollectionHint, Mode=OneWay}" AutomationProperties.Name="{x:Bind CollectionHint, Mode=OneWay}">
                 <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="{x:Bind CollectionGlyph, Mode=OneWay}" FontSize="16" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
               </Button>
             </Grid>
@@ -86,7 +88,7 @@
         <Setter Property="CornerRadius" Value="{ThemeResource AppearanceSidebarRadius}" />
         <Setter Property="Margin" Value="{ThemeResource AppearancePreviewMargin}" />
         <Setter Property="Padding" Value="{ThemeResource AppearancePreviewPadding}" />
-        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="BorderThickness" Value="{ThemeResource AppearancePreviewBorder}" />
       </Style>
       <Style TargetType="Button">
         <Setter Property="ToolTipService.ToolTip" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
@@ -124,6 +126,12 @@
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
+    <!-- Decoration only: transparent unless the active appearance supplies colours. -->
+    <Grid x:Name="AppearanceBackdrop" Grid.RowSpan="4" IsHitTestVisible="False" Opacity="{ThemeResource AppearanceAuroraOpacity}">
+      <Rectangle><Rectangle.Fill><RadialGradientBrush Center="0.06,-0.04" GradientOrigin="0.06,-0.04" RadiusX="0.62" RadiusY="0.72"><GradientStop Color="{ThemeResource AppearanceAuroraPrimaryColor}" Offset="0" /><GradientStop Color="{ThemeResource AppearanceAuroraPrimaryFadeColor}" Offset="1" /></RadialGradientBrush></Rectangle.Fill></Rectangle>
+      <Rectangle><Rectangle.Fill><RadialGradientBrush Center="1.04,1.04" GradientOrigin="1.04,1.04" RadiusX="0.58" RadiusY="0.72"><GradientStop Color="{ThemeResource AppearanceAuroraSecondaryColor}" Offset="0" /><GradientStop Color="{ThemeResource AppearanceAuroraSecondaryFadeColor}" Offset="1" /></RadialGradientBrush></Rectangle.Fill></Rectangle>
+      <Rectangle><Rectangle.Fill><RadialGradientBrush Center="0.66,0.06" GradientOrigin="0.66,0.06" RadiusX="0.5" RadiusY="0.6"><GradientStop Color="{ThemeResource AppearanceAuroraTertiaryColor}" Offset="0" /><GradientStop Color="{ThemeResource AppearanceAuroraTertiaryFadeColor}" Offset="1" /></RadialGradientBrush></Rectangle.Fill></Rectangle>
+    </Grid>
     <MenuBar Padding="0" x:Name="MainMenu">
       <MenuBarItem Title="文件">
         <MenuFlyoutItem Text="打开文件夹…" Tag="PickRoot" Click="PickRoot" />
@@ -144,6 +152,7 @@
         <MenuFlyoutSubItem Text="主题">
           <RadioMenuFlyoutItem x:Name="NativeAppearance" Text="原生" Tag="native" GroupName="Appearance" IsChecked="True" Click="ChooseAppearance" />
           <RadioMenuFlyoutItem x:Name="SoftAppearance" Text="柔和" Tag="soft" GroupName="Appearance" Click="ChooseAppearance" />
+          <RadioMenuFlyoutItem x:Name="GlassAppearance" Text="琉璃" Tag="glass" GroupName="Appearance" Click="ChooseAppearance" />
         </MenuFlyoutSubItem>
         <MenuFlyoutSeparator />
         <MenuFlyoutItem Text="窗口预览 / 返回列表" Tag="TogglePreview" Click="TogglePreview" />
@@ -223,7 +232,7 @@
         <ColumnDefinition Width="6" />
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
-      <Grid x:Name="TreePane" Background="{ThemeResource AppearanceSidebarBrush}" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearanceTreeMargin}">
+      <Grid x:Name="TreePane" Background="{ThemeResource AppearanceSidebarBrush}" BorderBrush="{ThemeResource AppearancePaneRimBrush}" BorderThickness="{ThemeResource AppearanceSidebarBorder}" CornerRadius="{ThemeResource AppearanceSidebarRadius}" Margin="{ThemeResource AppearanceTreeMargin}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
@@ -245,7 +254,7 @@
       <local:ResizeDivider x:Name="PaneDivider" Grid.Column="1" Grid.RowSpan="3" Background="Transparent" PointerPressed="StartPaneResize" PointerMoved="ResizePane" PointerReleased="EndPaneResize" ToolTipService.ToolTip="左右拖动调整侧栏宽度">
         <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Width="1" HorizontalAlignment="Center" Background="{ThemeResource DividerStrokeColorDefaultBrush}" IsHitTestVisible="False" />
       </local:ResizeDivider>
-      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="{ThemeResource AppearancePaneBorder}" CornerRadius="{ThemeResource AppearancePanelRadius}" Margin="{ThemeResource AppearanceBrowserMargin}">
+      <Grid x:Name="BrowserPane" Grid.Column="2" Grid.RowSpan="3" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource AppearancePaneRimBrush}" BorderThickness="{ThemeResource AppearancePaneBorder}" CornerRadius="{ThemeResource AppearancePanelRadius}" Margin="{ThemeResource AppearanceBrowserMargin}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -367,7 +376,7 @@
         </Grid>
         <TextBlock x:Name="ActiveFilterSummary" Margin="8,4" Foreground="{ThemeResource AppearanceFilterBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
-        <Border x:Name="CurrentFolderHeader" Grid.Row="2" Visibility="Collapsed" Height="60" Padding="10,6" Background="{ThemeResource BrowserSurfaceBrush}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,0,0,1" AutomationProperties.AutomationId="CurrentFolderHeader">
+        <Border x:Name="CurrentFolderHeader" Grid.Row="2" Visibility="Collapsed" Height="60" Padding="10,6" Background="{ThemeResource BrowserInsetBrush}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,0,0,1" AutomationProperties.AutomationId="CurrentFolderHeader">
           <Grid ColumnSpacing="8" RightTapped="FolderGroupContext">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
             <Button x:Name="CurrentFolderToggle" Click="ToggleFolderGroup" VerticalAlignment="Center" Padding="6" ToolTipService.ToolTip="{Binding ToggleLabel}" AutomationProperties.Name="{Binding ToggleLabel}"><FontIcon Glyph="{Binding ToggleGlyph}" FontSize="12" /></Button>
@@ -417,7 +426,7 @@
             <Button x:Name="BrowserEmptyOpen" Content="打开文件夹" Click="PickRoot" HorizontalAlignment="Center" Margin="0,8,0,0" ToolTipService.ToolTip="选择要浏览的文件夹（Ctrl+O）" />
           </StackPanel>
         </ScrollViewer>
-        <Grid x:Name="BrowserStatusBar" Grid.Row="4" Background="{ThemeResource BrowserSurfaceBrush}" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0">
+        <Grid x:Name="BrowserStatusBar" Grid.Row="4" Background="{ThemeResource BrowserInsetBrush}" Padding="10,0" ColumnSpacing="10" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" BorderThickness="0,1,0,0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -431,7 +440,7 @@
       <local:VerticalResizeDivider x:Name="PreviewHeightDivider" Grid.Row="1" Background="Transparent" PointerPressed="StartPreviewResize" PointerMoved="ResizePreview" PointerReleased="EndPreviewResize" PointerCaptureLost="PreviewResizeLost" DoubleTapped="ResetPreviewSplit" ToolTipService.ToolTip="上下拖动调整目录与预览高度；双击恢复默认" AutomationProperties.Name="调整目录与预览高度">
         <Border Opacity="{ThemeResource AppearanceDividerOpacity}" Height="1" VerticalAlignment="Center" Background="{ThemeResource BrowserLineBrush}" />
       </local:VerticalResizeDivider>
-      <Grid x:Name="PreviewPane" Style="{StaticResource PreviewPaneStyle}" BorderBrush="{ThemeResource AppearanceChromeLineBrush}" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
+      <Grid x:Name="PreviewPane" Style="{StaticResource PreviewPaneStyle}" BorderBrush="{ThemeResource AppearancePaneRimBrush}" Background="{ThemeResource AppearanceSidebarBrush}" Grid.Row="2">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -460,7 +469,7 @@
           <Button x:Name="VideoExternalOpen" Content="外部播放" Width="Auto" Padding="8,2" Visibility="Collapsed" Click="ExternalOpen" ToolTipService.ToolTip="使用设置中的外部播放器打开视频" />
         </StackPanel>
         </ScrollViewer>
-        <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="#20242B">
+        <local:ViewerSurface x:Name="PreviewSurface" Grid.Row="2" Background="{ThemeResource ViewerSurfaceBrush}">
           <canvas:CanvasControl x:Name="ImageCanvas" Draw="DrawImage" IsHitTestVisible="False" AutomationProperties.AutomationId="ImageCanvas" xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml" />
           <local:CursorInputSurface x:Name="ImageInput" Background="Transparent" Visibility="{Binding Visibility, ElementName=ImageCanvas}" PointerWheelChanged="ViewerWheel" PointerPressed="ViewerPointerDown" PointerMoved="ViewerPointerMove" PointerReleased="ViewerPointerUp" AutomationProperties.Name="图片浏览区域" />
           <ScrollViewer x:Name="TextScroll" Visibility="Collapsed" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" HorizontalScrollBarVisibility="Auto">
@@ -473,9 +482,7 @@
           </ScrollViewer>
           <ContentControl x:Name="MarkdownHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
           <ContentControl x:Name="VideoHost" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" PointerWheelChanged="ViewerWheel" />
-          <Button x:Name="VideoPosterPlay" MinWidth="0" MinHeight="0" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" Click="PlayVideo" AutomationProperties.Name="播放视频" ToolTipService.ToolTip="点击播放视频">
-            <Button.Template><ControlTemplate TargetType="Button"><Grid Background="Transparent"><Viewbox HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="56" MaxHeight="56"><Border Width="56" Height="56" CornerRadius="28" Background="#B820242B"><FontIcon Glyph="&#xE768;" FontSize="24" Foreground="White" /></Border></Viewbox></Grid></ControlTemplate></Button.Template>
-          </Button>
+          <Button x:Name="VideoPosterPlay" MinWidth="0" MinHeight="0" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" Click="PlayVideo" Style="{ThemeResource VideoPosterPlayStyle}" AutomationProperties.Name="播放视频" ToolTipService.ToolTip="点击播放视频" />
         </local:ViewerSurface>
         <StackPanel Grid.Row="3" Spacing="3" Margin="0,3,0,0" x:Name="PreviewExtras">
           <Button x:Name="CopyPreviewPathButton" Tag="path" Click="CopyPreviewLabel" Visibility="Collapsed" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0" MinHeight="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="点击复制完整文件路径" AutomationProperties.Name="复制完整文件路径"><TextBlock x:Name="PreviewFilePath" FontSize="{Binding FontSize, ElementName=FileTitle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.Name="文件路径" /></Button>

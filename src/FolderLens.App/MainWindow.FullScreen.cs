@@ -27,6 +27,7 @@ public sealed partial class MainWindow
     private long viewerModeRevision;
     private readonly List<(Button Button,ViewerAction Action)> viewerActionButtons=[];
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? viewerIdleTimer;
+    private readonly Windows.UI.ViewManagement.AccessibilitySettings accessibility=new();
 
     private void InitializeFullScreen()
     {
@@ -53,6 +54,7 @@ public sealed partial class MainWindow
         InitializeGroupNotice();
         viewerIdleTimer=DispatcherQueue.CreateTimer();viewerIdleTimer.Interval=TimeSpan.FromMilliseconds(1600);viewerIdleTimer.IsRepeating=false;
         viewerIdleTimer.Tick+=(_,_)=>{if(fullScreen&&!viewerPanelsVisible)PreviewSurface.SetCursorHidden(true);};
+        ApplyViewerOverlayAppearance();
     }
     private Border ViewerPanel(UIElement content,HorizontalAlignment horizontal,VerticalAlignment vertical)
     {
@@ -71,14 +73,20 @@ public sealed partial class MainWindow
     }
     private void ViewerPointerMoved(object sender,PointerRoutedEventArgs e)
     {
-        if(!fullScreen)return;PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();var p=e.GetCurrentPoint(Shell).Position;
-        bool top=p.Y<=5||(viewerTop!.Visibility==Visibility.Visible&&p.Y<=viewerTop.ActualHeight+6);
-        bool bottom=p.Y>=Shell.ActualHeight-5||(viewerBottom!.Visibility==Visibility.Visible&&p.Y>=Shell.ActualHeight-viewerBottom.ActualHeight-6);
-        bool left=p.X<=5||(viewerLeft!.Visibility==Visibility.Visible&&p.X<=viewerLeft.ActualWidth+6&&Math.Abs(p.Y-Shell.ActualHeight/2)<=viewerLeft.ActualHeight/2+6);
-        bool right=p.X>=Shell.ActualWidth-5||(viewerRight!.Visibility==Visibility.Visible&&p.X>=Shell.ActualWidth-viewerRight.ActualWidth-6&&Math.Abs(p.Y-Shell.ActualHeight/2)<=viewerRight.ActualHeight/2+6);
+        if(!fullScreen)return;PreviewSurface.SetCursorHidden(false);viewerIdleTimer?.Stop();
+        var (top,bottom,left,right)=ViewerPanelZones(e.GetCurrentPoint(Shell).Position);
         viewerTop!.Visibility=top?Visibility.Visible:Visibility.Collapsed;viewerBottom!.Visibility=bottom?Visibility.Visible:Visibility.Collapsed;viewerLeft!.Visibility=left?Visibility.Visible:Visibility.Collapsed;viewerRight!.Visibility=right?Visibility.Visible:Visibility.Collapsed;
         if(top&&!viewerPanelsVisible&&selected is not null&&viewerStrip is not null){viewerStrip.SelectedItem=selected;viewerStrip.ScrollIntoView(selected);}
         viewerPanelsVisible=top||bottom||left||right;if(!viewerPanelsVisible)viewerIdleTimer?.Start();
+    }
+    private (bool Top,bool Bottom,bool Left,bool Right) ViewerPanelZones(Point p)
+    {
+        // Floating appearances inset the panels; the inset counts as part of the panel.
+        bool top=p.Y<=5||(viewerTop!.Visibility==Visibility.Visible&&p.Y<=viewerTop.ActualHeight+viewerTop.Margin.Top+6);
+        bool bottom=p.Y>=Shell.ActualHeight-5||(viewerBottom!.Visibility==Visibility.Visible&&p.Y>=Shell.ActualHeight-viewerBottom.ActualHeight-viewerBottom.Margin.Bottom-6);
+        bool left=p.X<=5||(viewerLeft!.Visibility==Visibility.Visible&&p.X<=viewerLeft.ActualWidth+viewerLeft.Margin.Left+6&&Math.Abs(p.Y-Shell.ActualHeight/2)<=viewerLeft.ActualHeight/2+6);
+        bool right=p.X>=Shell.ActualWidth-5||(viewerRight!.Visibility==Visibility.Visible&&p.X>=Shell.ActualWidth-viewerRight.ActualWidth-viewerRight.Margin.Right-6&&Math.Abs(p.Y-Shell.ActualHeight/2)<=viewerRight.ActualHeight/2+6);
+        return (top,bottom,left,right);
     }
     private void UpdateViewerLockToggle()
     {
@@ -130,7 +138,31 @@ public sealed partial class MainWindow
         string help=video?"视频预览\n滚轮 / ← → / PageUp、PageDown：切换文件\n单击画面：播放 / 暂停\n外部播放：使用已配置的播放器\nEsc：返回列表\nF11：全屏 / 窗口查看"
             :$"滚轮：{(EffectiveViewerWheelBehavior()=="next"?"切换图片":EffectiveViewerWheelBehavior()=="pan"?"平移阅读":"缩放")}\n短击：100% / 适应屏幕\n按住：{(viewerPressZoom.UsesWholeImage(immersive||fullScreen)?"整图临时放大":"局部放大镜")} · {viewerPressZoom.Percent}%\n放大后拖动：平移\n双击 / Esc：返回列表\nF11：全屏 / 窗口查看\n锁定缩放：{(viewerSizing==ViewerSizing.Locked?"已开启":"已关闭")}";
         string exif=selected.Kind=="image"&&selectedProperties?.EntryId==selected.Item?.EntryId&&selectedProperties?.Version==selected.Item?.Version?FormatViewerExif(selectedProperties?.Details):"";
-        if(viewerInformation is not null)viewerInformation.Text=$"{selected.Name}\n\n{selected.Detail}\n\n{selected.RelativePath}\n\n{QualityLabel.Text}{(exif.Length>0?"\n\n"+exif:"")}\n\n{help}";
+        if(viewerInformation is not null)SetViewerInformation(selected.Name,exif.Length>0?[selected.Detail,selected.RelativePath,QualityLabel.Text,exif,help]:[selected.Detail,selected.RelativePath,QualityLabel.Text,help]);
+    }
+    private void SetViewerInformation(string title,string[] sections)
+    {
+        if(!GlassAppearanceActive||accessibility.HighContrast)
+        {viewerInformation!.Text=title+"\n\n"+string.Join("\n\n",sections);return;}
+        // Glass: same text, set as a title plus "label：value" rows with muted labels.
+        var muted=(Microsoft.UI.Xaml.Media.Brush)((ResourceDictionary)Application.Current.Resources.MergedDictionaries[1].ThemeDictionaries["Dark"])["TextFillColorSecondaryBrush"];
+        var inlines=viewerInformation!.Inlines;inlines.Clear();
+        inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=title,FontSize=15,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold});
+        foreach(string section in sections)
+        {
+            inlines.Add(new Microsoft.UI.Xaml.Documents.LineBreak());
+            foreach(string line in section.Split('\n'))
+            {
+                inlines.Add(new Microsoft.UI.Xaml.Documents.LineBreak());
+                int colon=line.IndexOf('：');
+                if(colon>0&&colon<line.Length-1)
+                {
+                    inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line[..(colon+1)],Foreground=muted});
+                    inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line[(colon+1)..]});
+                }
+                else inlines.Add(new Microsoft.UI.Xaml.Documents.Run{Text=line});
+            }
+        }
     }
     private void SetFullScreenChrome(bool enabled)
     {

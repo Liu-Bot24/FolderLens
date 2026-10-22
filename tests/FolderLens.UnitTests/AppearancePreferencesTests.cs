@@ -8,8 +8,10 @@ public sealed class AppearancePreferencesTests
 {
     [Theory]
     [InlineData("soft","soft")]
+    [InlineData("glass","glass")]
     [InlineData("native","native")]
     [InlineData("unrecognized","native")]
+    [InlineData("Glass","native")]
     [InlineData(null,"native")]
     public void UnrecognizedStylesFallBackToTheExistingAppearance(string? input,string expected)
         =>Assert.Equal(expected,new AppearancePreferences(input!).Normalize().Style);
@@ -22,6 +24,8 @@ public sealed class AppearancePreferencesTests
         Assert.Equal("native",new AppearancePreferences().Style);
         await settings.Save("appearance.json",new AppearancePreferences("soft"));
         Assert.Equal("soft",(await settings.Load<AppearancePreferences>("appearance.json"))!.Normalize().Style);
+        await settings.Save("appearance.json",new AppearancePreferences("glass"));
+        Assert.Equal("glass",(await settings.Load<AppearancePreferences>("appearance.json"))!.Normalize().Style);
         await settings.Save("appearance.json",new AppearancePreferences("native"));
         Assert.Equal("native",(await settings.Load<AppearancePreferences>("appearance.json"))!.Normalize().Style);
     }

@@ -155,7 +155,9 @@ public sealed partial class MainWindow
                     var bounds=button.TransformToVisual(PreviewPane).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));
                     if(bounds.Width<28||bounds.Height<28)errors.Add($"{width}: 预览按钮过小 ({bounds.Width},{bounds.Height})");
                     var scroller=(ScrollViewer)PreviewActions.Parent;
-                    scroller.ChangeView(Math.Clamp(scroller.HorizontalOffset+bounds.X-10,0,scroller.ScrollableWidth),null,null,true);
+                    // Measure from the scroller itself: pane padding and borders vary by appearance.
+                    var inScroller=button.TransformToVisual(scroller).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));
+                    scroller.ChangeView(Math.Clamp(scroller.HorizontalOffset+inScroller.X,0,scroller.ScrollableWidth),null,null,true);
                     Shell.UpdateLayout();await Task.Delay(30);
                     var reachable=button.TransformToVisual(scroller).TransformBounds(new(0,0,button.ActualWidth,button.ActualHeight));
                     if(reachable.X<-.5||reachable.Right>scroller.ActualWidth+.5)errors.Add($"{width}: 水平滚动后预览按钮仍不可见");

@@ -20,6 +20,26 @@
   <Thickness x:Key="AppearancePreviewMargin">0</Thickness>
   <Thickness x:Key="AppearanceBrowserMargin">2,0,8,0</Thickness>
   <x:Double x:Key="AppearanceDividerOpacity">1</x:Double>
+  <Thickness x:Key="AppearanceSidebarBorder">0</Thickness>
+  <Thickness x:Key="AppearancePreviewBorder">0,1,0,0</Thickness>
+  <CornerRadius x:Key="AppearanceThumbnailRadius">6</CornerRadius>
+  <CornerRadius x:Key="AppearanceBadgeRadius">4</CornerRadius>
+  <Thickness x:Key="MediaBadgeBorderThickness">0</Thickness>
+  <SolidColorBrush x:Key="MediaBadgeBorderBrush" Color="Transparent" />
+  <SolidColorBrush x:Key="ViewerSurfaceBrush" Color="#20242B" />
+  <Thickness x:Key="ViewerOverlayBorderThickness">1</Thickness>
+  <CornerRadius x:Key="ViewerOverlayRadius">0</CornerRadius>
+  <Thickness x:Key="ViewerOverlayMargin">0</Thickness>
+  <x:Double x:Key="AppearanceAuroraOpacity">0</x:Double>
+  <Color x:Key="AppearanceAuroraPrimaryColor">Transparent</Color>
+  <Color x:Key="AppearanceAuroraPrimaryFadeColor">Transparent</Color>
+  <Color x:Key="AppearanceAuroraSecondaryColor">Transparent</Color>
+  <Color x:Key="AppearanceAuroraSecondaryFadeColor">Transparent</Color>
+  <Color x:Key="AppearanceAuroraTertiaryColor">Transparent</Color>
+  <Color x:Key="AppearanceAuroraTertiaryFadeColor">Transparent</Color>
+  <Style x:Key="VideoPosterPlayStyle" TargetType="Button">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Grid Background="Transparent"><Viewbox HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="56" MaxHeight="56"><Border Width="56" Height="56" CornerRadius="28" Background="#B820242B"><FontIcon Glyph="&#xE768;" FontSize="24" Foreground="White" /></Border></Viewbox></Grid></ControlTemplate></Setter.Value></Setter>
+  </Style>
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Light">
       <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
@@ -37,6 +57,10 @@
       <Color x:Key="BrowserDetailsHoverColor">#BDD9FA</Color>
       <Color x:Key="BrowserDetailsPressedColor">#A9CCF5</Color>
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="#F3F4F6" />
+      <StaticResource x:Key="BrowserInsetBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="AppearancePaneRimBrush" ResourceKey="AppearanceChromeLineBrush" />
+      <StaticResource x:Key="ViewerOverlayBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="ViewerOverlayBorderBrush" ResourceKey="AppearanceChromeLineBrush" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Dark">
       <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
@@ -54,6 +78,10 @@
       <Color x:Key="BrowserDetailsHoverColor">#205E94</Color>
       <Color x:Key="BrowserDetailsPressedColor">#2469A3</Color>
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="#202124" />
+      <StaticResource x:Key="BrowserInsetBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="AppearancePaneRimBrush" ResourceKey="AppearanceChromeLineBrush" />
+      <StaticResource x:Key="ViewerOverlayBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="ViewerOverlayBorderBrush" ResourceKey="AppearanceChromeLineBrush" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="HighContrast">
       <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
@@ -68,6 +96,10 @@
       <SolidColorBrush x:Key="BrowserWarningBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="AppearanceFilterBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="{ThemeResource SystemColorWindowColor}" />
+      <StaticResource x:Key="BrowserInsetBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="AppearancePaneRimBrush" ResourceKey="AppearanceChromeLineBrush" />
+      <StaticResource x:Key="ViewerOverlayBrush" ResourceKey="BrowserSurfaceBrush" />
+      <StaticResource x:Key="ViewerOverlayBorderBrush" ResourceKey="AppearanceChromeLineBrush" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

@@ -56,6 +56,7 @@ public sealed partial class MainWindow
         {
             var arguments=Environment.GetCommandLineArgs();int gallery=Array.IndexOf(arguments,"--verify-gallery");
             if(arguments.Contains("--verify-soft"))ApplyAppearance(new("soft"));
+            if(arguments.Contains("--verify-glass"))ApplyAppearance(new("glass"));
             int bitmapAssets=Array.IndexOf(arguments,"--verify-bitmap-assets");
             if(bitmapAssets>=0){await VerifyBitmapAssets(arguments[bitmapAssets+1],report);return;}
             int switching=Array.IndexOf(arguments,"--verify-image-switch");

@@ -4,5 +4,6 @@ public sealed record AppearancePreferences(string Style="native")
 {
     public const string Native="native";
     public const string Soft="soft";
-    public AppearancePreferences Normalize()=>new(Style==Soft?Soft:Native);
+    public const string Glass="glass";
+    public AppearancePreferences Normalize()=>new(Style is Soft or Glass?Style:Native);
 }

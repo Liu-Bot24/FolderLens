@@ -1059,7 +1059,8 @@ public sealed partial class MainWindow : Window
     }
     private void DrawImage(CanvasControl sender,CanvasDrawEventArgs args)
     {
-        args.DrawingSession.Clear(Microsoft.UI.ColorHelper.FromArgb(255,32,36,43));if(fitBitmap is null || sourceWidth<=0)return;
+        // Match the surface behind the canvas, which follows the active appearance.
+        args.DrawingSession.Clear(PreviewSurface.Background is Microsoft.UI.Xaml.Media.SolidColorBrush surface?surface.Color:Microsoft.UI.ColorHelper.FromArgb(255,32,36,43));if(fitBitmap is null || sourceWidth<=0)return;
         double scale=EffectiveScale();Vector2 origin=new((float)((sender.ActualWidth-sourceWidth*scale)/2)+pan.X,(float)((sender.ActualHeight-sourceHeight*scale)/2)+pan.Y);
         var center=new Vector2((float)sender.ActualWidth/2,(float)sender.ActualHeight/2);args.DrawingSession.Transform=Matrix3x2.CreateRotation(rotation*(float)Math.PI/2,center);
         args.DrawingSession.DrawImage(fitBitmap,new Rect(origin.X,origin.Y,sourceWidth*scale,sourceHeight*scale));
