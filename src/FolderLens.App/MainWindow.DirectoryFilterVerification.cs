@@ -30,7 +30,7 @@ public sealed partial class MainWindow
         var section=(Expander)editor.Children[0];
         if(section.Header as string!="文件夹筛选")throw new InvalidOperationException("文件夹筛选没有放在更多条件的首位。");
         var rules=(StackPanel)((StackPanel)section.Content).Children[0];
-        var pattern=rules.Children.OfType<TextBox>().Single();pattern.Text="仅预览";
+        var pattern=rules.Children.OfType<TextBox>().Single(box=>box.Header as string=="名称或规则");pattern.Text="仅预览";
         void Invoke(string label)=>((IInvokeProvider)new ButtonAutomationPeer(rules.Children.OfType<Button>().Single(b=>b.Content as string==label)).GetPattern(PatternInterface.Invoke)).Invoke();
         Invoke("添加规则");await Task.Delay(50);
         var list=rules.Children.OfType<ListView>().Single();
@@ -102,7 +102,7 @@ public sealed partial class MainWindow
         if(!rejected||!ReferenceEquals(prior,advanced))throw new InvalidOperationException("超长隐藏路径污染了当前筛选。");
         var ruleEditor=new DirectoryRuleEditor([new("exclude","name","equals","cache",Enabled:false),new("exclude","name","equals","cache")],()=>Task.FromResult<string?>(null),(_,_)=>throw new NotSupportedException(),lifetime.Token);
         var ruleList=ruleEditor.View.Children.OfType<ListView>().Single();((CheckBox)ruleList.Items[1]).IsChecked=false;
-        ruleEditor.View.Children.OfType<TextBox>().Single().Text="another";
+        ruleEditor.View.Children.OfType<TextBox>().Single(box=>box.Header as string=="名称或规则").Text="another";
         ((IInvokeProvider)new ButtonAutomationPeer(ruleEditor.View.Children.OfType<Button>().Single(b=>b.Content as string=="添加规则")).GetPattern(PatternInterface.Invoke)).Invoke();
         ((CheckBox)ruleList.Items[1]).IsChecked=true;
         if(ruleEditor.Read()[0].Enabled||!ruleEditor.Read()[1].Enabled)throw new InvalidOperationException("重复规则的勾选修改了其他行。");
