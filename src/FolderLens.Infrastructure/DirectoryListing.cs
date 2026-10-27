@@ -1,3 +1,4 @@
+using FolderLens.Core;
 using Microsoft.Data.Sqlite;
 
 namespace FolderLens.Infrastructure;
@@ -23,6 +24,18 @@ public sealed class DirectoryListing : IAsyncDisposable,IDisposable
             command.CommandText="SELECT path FROM Rows WHERE ordinal >= $start ORDER BY ordinal LIMIT 128";command.Parameters.AddWithValue("$start",start);
             using var reader=command.ExecuteReader();var paths=new List<string>(PageSize);
             while(reader.Read()){cancellation.ThrowIfCancellationRequested();paths.Add(reader.GetString(0));}return paths;
+        }
+    },cancellation);
+    // One connection for the whole list; the tree shows every child anyway.
+    public Task<IReadOnlyList<string>> ReadAll(CancellationToken cancellation=default)=>Task.Run<IReadOnlyList<string>>(()=>
+    {
+        lock(gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed,this);cancellation.ThrowIfCancellationRequested();
+            using var db=Open(file,true);using var command=db.CreateCommand();
+            command.CommandText="SELECT path FROM Rows ORDER BY ordinal";
+            using var reader=command.ExecuteReader();var paths=new List<string>((int)Math.Min(Count,1<<20));
+            while(reader.Read()){if(paths.Count%1024==0)cancellation.ThrowIfCancellationRequested();paths.Add(reader.GetString(0));}return paths;
         }
     },cancellation);
     public Task<long?> Find(string path,CancellationToken cancellation=default)=>Task.Run<long?>(()=>
@@ -70,19 +83,19 @@ public sealed class DirectoryListing : IAsyncDisposable,IDisposable
             {
                 CheckBudget();
                 db=Open(file);
-                using(var setup=db.CreateCommand()){setup.CommandText="PRAGMA page_size=4096; PRAGMA max_page_count=32768; PRAGMA cache_size=-2048; PRAGMA temp_store=FILE; CREATE TABLE Pending(path TEXT PRIMARY KEY COLLATE BINARY) WITHOUT ROWID;";setup.ExecuteNonQuery();}
-                transaction=db.BeginTransaction();insert=db.CreateCommand();insert.Transaction=transaction;insert.CommandText="INSERT INTO Pending(path) VALUES($path)";insert.Parameters.Add("$path",SqliteType.Text);
+                using(var setup=db.CreateCommand()){setup.CommandText="PRAGMA page_size=4096; PRAGMA max_page_count=32768; PRAGMA cache_size=-2048; PRAGMA temp_store=FILE; CREATE TABLE Pending(path TEXT PRIMARY KEY COLLATE BINARY,sort_key BLOB NOT NULL) WITHOUT ROWID;";setup.ExecuteNonQuery();}
+                transaction=db.BeginTransaction();insert=db.CreateCommand();insert.Transaction=transaction;insert.CommandText="INSERT INTO Pending(path,sort_key) VALUES($path,$key)";insert.Parameters.Add("$path",SqliteType.Text);insert.Parameters.Add("$key",SqliteType.Blob);
             }
             catch{db?.Dispose();lease.Delete();throw;}
         }
         internal void Add(string path)
         {
-            cancellation.ThrowIfCancellationRequested();if(count%128==0)CheckBudget();insert.Parameters[0].Value=path;insert.ExecuteNonQuery();count++;
+            cancellation.ThrowIfCancellationRequested();if(count%128==0)CheckBudget();insert.Parameters[0].Value=path;insert.Parameters[1].Value=NaturalOrder.Key(Path.GetFileName(path.TrimEnd('\\','/')));insert.ExecuteNonQuery();count++;
         }
         internal DirectoryListing Complete()
         {
             cancellation.ThrowIfCancellationRequested();using var command=db.CreateCommand();command.Transaction=transaction;
-            command.CommandText="CREATE TABLE Rows(ordinal INTEGER PRIMARY KEY,path TEXT UNIQUE COLLATE BINARY NOT NULL); INSERT INTO Rows SELECT ROW_NUMBER() OVER(ORDER BY path COLLATE BINARY)-1,path FROM Pending; DROP TABLE Pending;";
+            command.CommandText="CREATE TABLE Rows(ordinal INTEGER PRIMARY KEY,path TEXT UNIQUE COLLATE BINARY NOT NULL); INSERT INTO Rows SELECT ROW_NUMBER() OVER(ORDER BY sort_key,path COLLATE BINARY)-1,path FROM Pending; DROP TABLE Pending;";
             using var interrupt=cancellation.Register(()=>SQLitePCL.raw.sqlite3_interrupt(db.Handle));command.ExecuteNonQuery();cancellation.ThrowIfCancellationRequested();transaction.Commit();CheckBudget();published=true;return new(lease,count);
         }
         private void CheckBudget()

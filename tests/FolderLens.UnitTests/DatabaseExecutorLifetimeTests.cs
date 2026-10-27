@@ -28,4 +28,20 @@ public sealed class DatabaseExecutorLifetimeTests
         await using var reopened=new DatabaseExecutor(path);
         Assert.Equal(1L,await reopened.Execute(c=>{using var command=c.CreateCommand();command.CommandText="SELECT 1";return (long)command.ExecuteScalar()!;}));
     }
+    [Fact]
+    public async Task FailingDiagnosticsCallbackDoesNotStopTheDatabaseThread()
+    {
+        string path=Path.Combine(Path.GetTempPath(),"FolderLens-db-measure",Guid.NewGuid().ToString("N"),"test.sqlite");
+        await using var db=new DatabaseExecutor(path);
+        int owner=await db.Execute(_=>Environment.CurrentManagedThreadId);
+        var previous=DatabaseExecutor.OperationMeasured;
+        // Only this executor's thread observes the failing callback.
+        DatabaseExecutor.OperationMeasured=(_,_)=>{if(Environment.CurrentManagedThreadId==owner)throw new InvalidOperationException("diagnostic sink failed");previous?.Invoke("",0);};
+        try
+        {
+            Assert.Equal(1,await db.Execute(_=>1).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(2,await db.Execute(_=>2).WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally{DatabaseExecutor.OperationMeasured=previous;}
+    }
 }

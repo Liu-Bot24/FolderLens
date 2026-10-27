@@ -19,7 +19,19 @@ public sealed class SettingsTests
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));var settings=new AtomicSettings(directory);
         await settings.Save("views.json",new[]{"old"});await settings.Save("views.json",new[]{"new"});Assert.Equal(new[]{"new"},await settings.Load<string[]>("views.json"));Assert.Contains("old",await File.ReadAllTextAsync(Path.Combine(directory,"views.json.bak")));
-        await File.WriteAllTextAsync(Path.Combine(directory,"views.json"),"not-json");await Assert.ThrowsAsync<System.Text.Json.JsonException>(()=>settings.Load<string[]>("views.json"));Assert.True(File.Exists(Path.Combine(directory,"views.json.bak")));
+        // A corrupted current revision falls back to the previous complete one.
+        await File.WriteAllTextAsync(Path.Combine(directory,"views.json"),"not-json");Assert.Equal(new[]{"old"},await settings.Load<string[]>("views.json"));Assert.True(File.Exists(Path.Combine(directory,"views.json.bak")));
+        // With no readable revision, corruption is still reported.
+        await File.WriteAllTextAsync(Path.Combine(directory,"views.json.bak"),"also-not-json");await Assert.ThrowsAsync<System.Text.Json.JsonException>(()=>settings.Load<string[]>("views.json"));
+        File.Delete(Path.Combine(directory,"views.json.bak"));await Assert.ThrowsAsync<System.Text.Json.JsonException>(()=>settings.Load<string[]>("views.json"));
+    }
+    [Fact] public async Task UpdateOfCorruptedSettingsStartsFromPreviousRevision()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"FolderLens-tests",Guid.NewGuid().ToString("N"));var settings=new AtomicSettings(directory);
+        await settings.Save("views.json",new Dictionary<string,string>{{"a","1"}});await settings.Save("views.json",new Dictionary<string,string>{{"a","1"},{"b","2"}});
+        await File.WriteAllTextAsync(Path.Combine(directory,"views.json"),"{\"a\":");
+        await settings.Update<Dictionary<string,string>>("views.json",latest=>{latest!["c"]="3";return latest;});
+        Assert.Equal(new Dictionary<string,string>{{"a","1"},{"c","3"}},await settings.Load<Dictionary<string,string>>("views.json"));
     }
     [Fact] public void AllocationFailureIsUnknown()
     {

@@ -282,16 +282,50 @@ public sealed class WorkerClient : IAsyncDisposable
         }
         catch{await Stop().ConfigureAwait(false);throw;}
     }
+    internal TimeSpan StopTimeout {get;set;}=TimeSpan.FromSeconds(5);
+    internal Func<Process,TimeSpan,Task<bool>>? WaitForExitOverride {get;set;}
+    private Task? lateRetirement;
+    internal Task LateRetirement=>lateRetirement??Task.CompletedTask;
     private async Task Stop()
     {
         pipe?.Dispose();pipe=null;job?.Dispose();job=null;
-        if(process is not null)
-        {
-            if(!process.HasExited){process.Kill(entireProcessTree:true);await process.WaitForExitAsync().ConfigureAwait(false);}process.Dispose();process=null;
-        }
+        var exiting=process;process=null;
         var retired=temporarySession;temporarySession=null;
-        if(retired is not null)LastTemporaryCleanup=await Task.Run(()=>WorkerTemporaryFiles.ReleaseExited(retired)).ConfigureAwait(false);
         producedAssets.Clear();currentPath=null;currentInput=null;currentInputFile=null;taskDirectory=null;
+        if(exiting is not null)
+        {
+            if(!exiting.HasExited)
+            {
+                try{exiting.Kill(entireProcessTree:true);}
+                catch(InvalidOperationException) when(exiting.HasExited){}
+            }
+            bool exited=await (WaitForExitOverride?.Invoke(exiting,StopTimeout)??WaitForExit(exiting,StopTimeout)).ConfigureAwait(false);
+            if(!exited)
+            {
+                // A process stuck in kernel I/O (for example a dropped network share)
+                // must not block this client forever. Its temporary directory stays
+                // owned until it really exits; a fresh instance uses its own directory.
+                lateRetirement=RetireAfterExit(exiting,retired);
+                return;
+            }
+            exiting.Dispose();
+        }
+        if(retired is not null)LastTemporaryCleanup=await Task.Run(()=>WorkerTemporaryFiles.ReleaseExited(retired)).ConfigureAwait(false);
+    }
+    private static async Task<bool> WaitForExit(Process process,TimeSpan timeout)
+    {
+        try{await process.WaitForExitAsync().WaitAsync(timeout).ConfigureAwait(false);return true;}
+        catch(TimeoutException){return false;}
+    }
+    private async Task RetireAfterExit(Process exiting,WorkerTemporaryFiles.Session? retired)
+    {
+        try
+        {
+            await exiting.WaitForExitAsync().ConfigureAwait(false);
+            if(retired is not null)LastTemporaryCleanup=await Task.Run(()=>WorkerTemporaryFiles.ReleaseExited(retired)).ConfigureAwait(false);
+        }
+        catch(Exception error) when(error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException){}
+        finally{exiting.Dispose();}
     }
     public ValueTask DisposeAsync()
     {lock(disposalSync)return new(disposalTask??=DisposeCore());}

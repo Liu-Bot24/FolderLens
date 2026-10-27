@@ -204,14 +204,10 @@ public sealed partial class MainWindow
                 :await FolderChildren.Read(folder.Path,TreeListingDirectory,cancellation);
             if(verifyTreeListingLoadedBarrier is {} loadedBarrier)await loadedBarrier(folder,indexed,cancellation);
             if(Stale())return;
-            // The listing is disk-backed: read it page by page off the UI thread and
+            // The listing is disk-backed: read it in one pass off the UI thread and
             // keep only the names. Every child is shown; there is no tree paging.
-            paths=new List<string>((int)Math.Min(candidate.Count,4096));
-            for(long start=0;start<candidate.Count;start+=DirectoryListing.PageSize)
-            {
-                paths.AddRange(await candidate.ReadPage(start,cancellation));
-                if(Stale())return;
-            }
+            paths=[..await candidate.ReadAll(cancellation)];
+            if(Stale())return;
         }
         finally{if(candidate is not null)await candidate.DisposeAsync();treeListingSlots.Release();}
         await ApplyTreeChildren(node,indexed?folder:folder with{CatalogRoot=null},paths,Stale);

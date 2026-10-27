@@ -7,8 +7,9 @@ namespace FolderLens.Infrastructure;
 public sealed class DatabaseExecutor : IAsyncDisposable
 {
     public static Action<string,double>? OperationMeasured {get;set;}
-    private readonly Channel<Action<SqliteConnection>> queue = Channel.CreateBounded<Action<SqliteConnection>>(new BoundedChannelOptions(32) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
-    private readonly Channel<Action<SqliteConnection>> foregroundQueue = Channel.CreateBounded<Action<SqliteConnection>>(new BoundedChannelOptions(8) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+    private sealed record WorkItem(Action<SqliteConnection> Run,Action<Exception> Fail);
+    private readonly Channel<WorkItem> queue = Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(32) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+    private readonly Channel<WorkItem> foregroundQueue = Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(8) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly SemaphoreSlim queued = new(0);
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -29,7 +30,7 @@ public sealed class DatabaseExecutor : IAsyncDisposable
                 while(true)
                 {
                     queued.Wait();
-                    if(foregroundQueue.Reader.TryRead(out var action)||queue.Reader.TryRead(out action))action(connection);
+                    if(foregroundQueue.Reader.TryRead(out var item)||queue.Reader.TryRead(out item))item.Run(connection);
                     else if(foregroundQueue.Reader.Completion.IsCompleted&&queue.Reader.Completion.IsCompleted)break;
                 }
             }
@@ -37,7 +38,13 @@ public sealed class DatabaseExecutor : IAsyncDisposable
             // Do not release owners or let a replacement reopen until that has finished.
             stopped.TrySetResult();
         }
-        catch (Exception ex) { ready.TrySetException(ex); stopped.TrySetException(ex); queue.Writer.TryComplete(ex); foregroundQueue.Writer.TryComplete(ex); }
+        catch (Exception ex)
+        {
+            ready.TrySetException(ex); queue.Writer.TryComplete(ex); foregroundQueue.Writer.TryComplete(ex);
+            // Requests accepted before the thread failed must not wait forever.
+            while(foregroundQueue.Reader.TryRead(out var pending)||queue.Reader.TryRead(out pending))pending.Fail(ex);
+            stopped.TrySetException(ex);
+        }
     }
     internal static SqliteConnection Open(string path)
     {
@@ -58,7 +65,7 @@ public sealed class DatabaseExecutor : IAsyncDisposable
     {
         await ready.Task.WaitAsync(cancellation).ConfigureAwait(false);
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await (foreground?foregroundQueue:queue).Writer.WriteAsync(connection =>
+        await (foreground?foregroundQueue:queue).Writer.WriteAsync(new(connection =>
         {
             if (cancellation.IsCancellationRequested) { completion.TrySetCanceled(cancellation); return; }
             using var registration = cancellation.Register(() => SQLitePCL.raw.sqlite3_interrupt(connection.Handle));
@@ -66,8 +73,14 @@ public sealed class DatabaseExecutor : IAsyncDisposable
             try { var result = action(connection); if(cancellation.IsCancellationRequested){if(result is IDisposable disposable)disposable.Dispose();cancellation.ThrowIfCancellationRequested();} completion.TrySetResult(result); }
             catch (Exception) when (cancellation.IsCancellationRequested) { completion.TrySetCanceled(cancellation); }
             catch (Exception ex) { completion.TrySetException(ex); }
-            finally { measured?.Invoke(action.Method.DeclaringType?.FullName+"."+action.Method.Name,System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds); }
-        }, cancellation).ConfigureAwait(false);
+            finally
+            {
+                // Diagnostics must never terminate the only database thread.
+                if(measured is not null)
+                    try{measured(action.Method.DeclaringType?.FullName+"."+action.Method.Name,System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);}
+                    catch(Exception){}
+            }
+        }, error => completion.TrySetException(error)), cancellation).ConfigureAwait(false);
         queued.Release();
         return await completion.Task.ConfigureAwait(false);
     }

@@ -173,6 +173,24 @@ public sealed class WorkerTests
         var after=await worker.Request(input,"fullTile",context,new(),CancellationToken.None);Assert.Equal(before.Message.WorkerInstanceId,after.Message.WorkerInstanceId);await worker.ReleaseAsset(after);
         await Assert.ThrowsAsync<InvalidDataException>(()=>worker.Request(input,"capabilities",context,new(),CancellationToken.None));
     }
+    // A killed worker that does not exit (stuck in kernel I/O) must not block the
+    // client: the cancelled request returns and the next request uses a new instance.
+    [Fact] public async Task WorkerThatDoesNotExitAfterKillDoesNotBlockLaterRequests()
+    {
+        string root=ProjectRoot(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-stuck-exit",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        string input=Path.Combine(root,"artifacts","m0","formats","synthetic.jpeg");var context=new RequestContext("root",1,1,1,1,1);
+        await using var worker=new WorkerClient(WorkerExecutable(root),directory){StopTimeout=TimeSpan.FromMilliseconds(200)};
+        var first=await worker.Request(input,"fit",context,new(64,64),CancellationToken.None);await worker.ReleaseAsset(first);int waits=0;
+        worker.WaitForExitOverride=(_,timeout)=>{Interlocked.Increment(ref waits);return Task.Delay(timeout).ContinueWith(_=>false);};
+        worker.BeforeResponseRead=(_,token)=>Task.Delay(Timeout.Infinite,token);
+        using var cancel=new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>worker.Request(input,"fit",context,new(64,64),cancel.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(1,waits);worker.BeforeResponseRead=null;worker.WaitForExitOverride=null;
+        var next=await worker.Request(input,"fit",context,new(64,64),CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.NotEqual(first.Message.WorkerInstanceId,next.Message.WorkerInstanceId);await worker.ReleaseAsset(next);
+        // The retired instance is still cleaned up once it really exits.
+        await worker.LateRetirement.WaitAsync(TimeSpan.FromSeconds(10));
+    }
     [Fact] public async Task IndexedSourceStampCannotBeReassignedToChangedImage()
     {
         string root=ProjectRoot(),directory=Path.Combine(Path.GetTempPath(),"FolderLens-source-stamp",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);

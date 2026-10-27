@@ -5,18 +5,24 @@ namespace FolderLens.Infrastructure;
 public sealed class AtomicSettings(string directory)
 {
     private readonly SemaphoreSlim gate=new(1,1);
+    // File I/O runs on the thread pool; callers are often on the UI thread.
     public async Task Save<T>(string name,T value,CancellationToken cancellation=default)
     {
         if(Path.GetFileName(name)!=name)throw new ArgumentException("Invalid settings filename.");
         await gate.WaitAsync(cancellation);
-        try{await SaveCore(name,value,cancellation);}
+        try{await Task.Run(()=>SaveCore(name,value,cancellation),cancellation);}
         finally{gate.Release();}
     }
     public async Task Update<T>(string name,Func<T?,T> update,CancellationToken cancellation=default)
     {
         if(Path.GetFileName(name)!=name)throw new ArgumentException("Invalid settings filename.");
         await gate.WaitAsync(cancellation);
-        try{await SaveCore(name,update(await LoadCore<T>(name,cancellation)),cancellation);}
+        try
+        {
+            var latest=await Task.Run(()=>LoadCore<T>(name,cancellation),cancellation);
+            var next=update(latest);
+            await Task.Run(()=>SaveCore(name,next,cancellation),cancellation);
+        }
         finally{gate.Release();}
     }
     private async Task SaveCore<T>(string name,T value,CancellationToken cancellation)
@@ -35,12 +41,24 @@ public sealed class AtomicSettings(string directory)
     {
         if(Path.GetFileName(name)!=name)throw new ArgumentException("Invalid settings filename.");
         await gate.WaitAsync(cancellation);
-        try{return await LoadCore<T>(name,cancellation);}
+        try{return await Task.Run(()=>LoadCore<T>(name,cancellation),cancellation);}
         finally{gate.Release();}
     }
     private async Task<T?> LoadCore<T>(string name,CancellationToken cancellation)
     {
         string path=Path.Combine(directory,name);if(!File.Exists(path))return default;
+        try{return await Read<T>(path,cancellation);}
+        catch(JsonException) when(File.Exists(path+".bak"))
+        {
+            // A torn or corrupted current revision falls back to the previous
+            // complete revision. If that is unreadable too, report the original.
+            try{return await Read<T>(path+".bak",cancellation);}
+            catch(JsonException){}
+            throw;
+        }
+    }
+    private static async Task<T?> Read<T>(string path,CancellationToken cancellation)
+    {
         await using var stream=File.OpenRead(path);if(stream.Length>8*1024*1024)throw new InvalidDataException("设置文件超过允许大小。");
         return await JsonSerializer.DeserializeAsync<T>(stream,cancellationToken:cancellation);
     }

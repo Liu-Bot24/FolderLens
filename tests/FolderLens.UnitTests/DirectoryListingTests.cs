@@ -25,6 +25,17 @@ public sealed class DirectoryListingTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>listing.ReadPage(0,cancelled.Token));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>listing.ReadPage(-1));
     }
+    // Siblings follow the browser's natural order: case-insensitive, numeric runs by value.
+    [Fact] public async Task SiblingsUseNaturalCaseInsensitiveOrder()
+    {
+        string directory=Path.Combine(Path.GetTempPath(),"FolderLens-listing-tests",Guid.NewGuid().ToString("N"));
+        string[] names=["Zoo","img10","apple","img2","Img3","照片"];
+        await using var listing=DirectoryListing.Create(directory,names.Select(name=>Path.Combine(@"C:\parent",name)),CancellationToken.None);
+        var expected=new[]{"apple","img2","Img3","img10","Zoo","照片"}.Select(name=>Path.Combine(@"C:\parent",name)).ToArray();
+        Assert.Equal(expected,await listing.ReadAll());
+        Assert.Equal(expected,await listing.ReadPage(0));
+        Assert.Equal(1,await listing.Find(Path.Combine(@"C:\parent","img2")));
+    }
     [Fact] public async Task RecoveryPreservesLiveListingAndDeletesAbandonedOwnedFiles()
     {
         string directory=Path.Combine(Path.GetTempPath(),"FolderLens-listing-tests",Guid.NewGuid().ToString("N"));
