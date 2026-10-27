@@ -66,10 +66,17 @@ public sealed partial class MainWindow
 
     private void InitializeWindowChrome()
     {
-        ExtendsContentIntoTitleBar=true;SetTitleBar(AppTitleBar);
+        SetContentInTitleBar(true);
         Shell.ActualThemeChanged+=(_,_)=>UpdateCaptionButtons();
         ApplyWindowMaterial(Application.Current.Resources.MergedDictionaries[1]);
-        UpdateCaptionButtons();
+    }
+
+    // The full-screen presenter keeps an extended title bar's one-pixel top
+    // inset, which shows the window background as a line across the screen.
+    private void SetContentInTitleBar(bool extend)
+    {
+        ExtendsContentIntoTitleBar=extend;
+        if(extend){SetTitleBar(AppTitleBar);UpdateCaptionButtons();}
     }
 
     // Native sits on Mica and Soft on desktop acrylic, both behind a transparent

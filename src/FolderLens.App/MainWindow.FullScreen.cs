@@ -192,7 +192,7 @@ public sealed partial class MainWindow
         if(selected is null&&results?.Count>0){if(DetailsMode.IsChecked==true)FilesList.SelectedIndex=0;else FilesGrid.SelectedIndex=0;}
         if(selected is null)return;
         wasMaximized=AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p&&p.State==Microsoft.UI.Windowing.OverlappedPresenterState.Maximized;
-        fullScreen=true;var entering=SetImmersive(true);SetFullScreenChrome(true);AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);FocusIfForeground(ImageCanvas,FocusState.Programmatic);
+        fullScreen=true;var entering=SetImmersive(true);SetFullScreenChrome(true);SetContentInTitleBar(false);AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);FocusIfForeground(ImageCanvas,FocusState.Programmatic);
         await entering;if(revision!=viewerModeRevision||!fullScreen)return;ApplyViewerSizing();
         await RefreshFullScreenFit(revision);
     }
@@ -207,7 +207,7 @@ public sealed partial class MainWindow
     private async Task LeaveFullScreen(bool toBrowser=true)
     {
         ++viewerModeRevision;ResetViewerGesture();slideShow=false;slideTimer?.Stop();fullScreen=false;SetFullScreenChrome(false);
-        AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+        AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);SetContentInTitleBar(true);
         if(wasMaximized)
         {
             if(WindowFocus.IsForeground(this)&&AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter p)p.Maximize();
