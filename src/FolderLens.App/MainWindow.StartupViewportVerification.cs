@@ -36,11 +36,20 @@ public sealed partial class MainWindow
         try{await WaitUntil(()=>!browserMovementPending&&scroll.VerticalOffset<=1,TimeSpan.FromSeconds(4));}
         finally{report["afterLateLayout"]=new{interactionUnchanged=interaction==browserInteractionVersion,selected=selected is not null,browserMovementPending,browserContentProtected,keepBrowserStart,offset=scroll.VerticalOffset,displaced};}
         if(interaction!=browserInteractionVersion||selected is not null)throw new InvalidOperationException("Untouched fixture acquired user input or selection.");
-        report["beforeAppendScan"]=new{rootMatches=string.Equals(root,source,StringComparison.Ordinal),epoch,filterEpoch=submittedBrowserFilter?.ObservedRootEpoch,displayed=resultHandle?.Count};
+        // RestoreSavedView returns before the restored root's own scan ends. The app
+        // never runs two scans of one root together (Reconcile waits on scanTask);
+        // overlapping ones reconcile away each other's rows, so the append scan waits too.
+        if(scanTask is not null)await scanTask;if(queryBusy)await queryCompletion;
+        var scanBefore=scanTask;
+        report["beforeAppendScan"]=new{rootMatches=string.Equals(root,source,StringComparison.Ordinal),epoch,filterEpoch=submittedBrowserFilter?.ObservedRootEpoch,displayed=resultHandle?.Count,
+            monitorAlive=monitor is not null,backgroundScans=backgroundScans.Count,scan=scanTask?.Status.ToString()};
         await File.WriteAllBytesAsync(Path.Combine(source,"A","zz-first.png"),sample);
         var appended=await new DirectoryIndexer(catalog!,ScanWorkerClient.FindExecutable(ScanWorkerDirectory)).Scan(rootId,source,epoch,true,[],null,lifetime.Token);
+        bool appScanStarted=!ReferenceEquals(scanBefore,scanTask);
         await RefreshQuery(preserveViewport:true,scanPreview:true);
-        report["appendScan"]=new{appended.Files,appended.State,appended.Errors,epoch,filterEpoch=submittedBrowserFilter?.ObservedRootEpoch,displayed=resultHandle?.Count,queryBusy};
+        long missing=await catalog!.Read(c=>{using var q=c.CreateCommand();q.CommandText="SELECT count(*) FROM Files WHERE root_id=$r AND entry_state<>'present'";q.Parameters.AddWithValue("$r",rootId);return (long)q.ExecuteScalar()!;},lifetime.Token);
+        report["appendScan"]=new{appended.Files,appended.State,appended.Errors,epoch,filterEpoch=submittedBrowserFilter?.ObservedRootEpoch,displayed=resultHandle?.Count,queryBusy,
+            appScanStarted,appScan=scanTask?.Status.ToString(),monitorAlive=monitor is not null,notPresent=missing};
         await WaitUntil(()=>scroll.VerticalOffset<=1,TimeSpan.FromSeconds(3));
         // Use the same owned/rebindable row read as the browser. A queued scan
         // publication can retire a raw session ID while a direct ReadPage awaits.
