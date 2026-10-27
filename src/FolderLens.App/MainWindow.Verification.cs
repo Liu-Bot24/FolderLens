@@ -261,6 +261,9 @@ public sealed partial class MainWindow
             try
             {
                 bool resetBaseline=Environment.GetCommandLineArgs().Contains("--verify-refresh-reset");
+                // --verify-refresh-reset is a negative control: it drives the explicit full
+                // refresh, which rebinds the list, to prove the check below detects that.
+                if(resetBaseline)report["negativeControl"]="Expected FAIL: explicit full refresh replaces ItemsSource; scan updates are covered by --verify-refresh.";
                 for(int iteration=0;iteration<4;iteration++){await RefreshQuery(scanPreview:!resetBaseline);await Task.Delay(100);}
                 await FillCurrentMetadata();await Task.Delay(100);
                 if(!ReferenceEquals(sourceObject,FilesGrid.ItemsSource))throw new InvalidOperationException("元数据完成时替换了列表 ItemsSource。");
@@ -540,7 +543,9 @@ public sealed partial class MainWindow
             await WaitUntil(()=>visible.Any(item=>item.Thumbnail is not null&&FilesGrid.ContainerFromItem(item) is not null),TimeSpan.FromSeconds(20));
             var initial=visible.Where(item=>item.Thumbnail is not null&&FilesGrid.ContainerFromItem(item) is not null).OrderBy(item=>item.Ordinal).ToArray();
             var old=initial[0];
-            var last=(FileRow)results![results.Count-1]!;FilesGrid.ScrollIntoView(last,ScrollIntoViewAlignment.Leading);
+            // An untouched folder is held at its start; scrolling to the end is
+            // user movement, as the wheel/scrollbar input path declares it.
+            var last=(FileRow)results![results.Count-1]!;AcceptBrowserInteraction(changesViewport:true);FilesGrid.ScrollIntoView(last,ScrollIntoViewAlignment.Leading);
             report["scrollTargetOrdinal"]=last.Ordinal;report["scrollTargetCount"]=results.Count;
             try{await WaitUntil(()=>initial.Any(item=>FilesGrid.ContainerFromItem(item) is null)&&FilesGrid.ContainerFromItem(last) is not null,TimeSpan.FromSeconds(10));}
             finally

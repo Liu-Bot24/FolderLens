@@ -47,11 +47,16 @@ public sealed partial class MainWindow
             }
         });
         folderGrouping=new(true);UpdateGroupingButton();
-        int switches=0,whileScanning=0,publications=0;
+        int switches=0,whileScanning=0,publications=0,ticks=0;
         verifyPublicationDuration=_=>publications++;
         var timer=DispatcherQueue.CreateTimer();timer.Interval=TimeSpan.FromMilliseconds(35);
         timer.Tick+=(_,_)=>
         {
+            // A view switch is viewport movement: background publication waits for
+            // 180 ms of quiet. Switch in bursts of four with ~280 ms pauses, as a
+            // person does, so scan batches publish between bursts. Stop once the
+            // scan is over and enough switches are covered.
+            if(ticks++%12>=4||switches>=100&&scanTask is {IsCompleted:true})return;
             var option=DetailsMode.IsChecked==true?ThumbnailMode:DetailsMode;
             ((IToggleProvider)new ToggleButtonAutomationPeer(option).GetPattern(PatternInterface.Toggle)).Toggle();
             switches++;if(scanTask is {IsCompleted:false})whileScanning++;
@@ -66,6 +71,11 @@ public sealed partial class MainWindow
             if(ActiveBrowser.Items.Count!=expected||browserGroups?.Sum(g=>g.Info.Count)!=expected)throw new InvalidOperationException("扫描后文件或分组数量错误。");
             report["files"]=expected;report["switches"]=switches;report["switchesDuringScan"]=whileScanning;report["publications"]=publications;report["status"]="PASS";
         }
-        finally{timer.Stop();verifyPublicationDuration=null;}
+        finally
+        {
+            timer.Stop();verifyPublicationDuration=null;
+            report["observed"]=new{results=results?.Count,items=ActiveBrowser.Items.Count,groups=browserGroups?.Sum(g=>g.Info.Count),switches,whileScanning,publications,
+                scan=scanTask?.Status.ToString(),queryBusy,automaticQueryPending,viewportPublicationPending,browserMovementPending,summary=ResultSummary.Text};
+        }
     }
 }
