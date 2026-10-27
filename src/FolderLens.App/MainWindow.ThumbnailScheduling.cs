@@ -41,7 +41,21 @@ public sealed partial class MainWindow
         if(ReferenceEquals(sender,FindScrollViewer(ActiveBrowser))&&browserMovementPending)ContinueBrowserMovement();
         QueueBrowserOffset();QueueThumbnailViewport();
     }
-    private bool HasThumbnailViewport(FileRow row)=>visibleContainers.Any(pair=>ReferenceEquals(pair.Value,row)&&IsThumbnailInViewport(pair.Key.View,row));
+    // visibleConsumerCounts mirrors visibleContainers, so rows without a realized
+    // container are rejected without scanning every container.
+    private bool HasThumbnailViewport(FileRow row)=>visibleConsumerCounts.ContainsKey(row)&&visibleContainers.Any(pair=>ReferenceEquals(pair.Value,row)&&IsThumbnailInViewport(pair.Key.View,row));
+    /// <summary>The realized (view, row) pairs inside a shown viewport, evaluated once per
+    /// dispatch pass: each view's ancestor visibility is walked once, not once per row.</summary>
+    private List<KeyValuePair<(ListViewBase View,DependencyObject Container),FileRow>> ThumbnailViewportPairs()
+    {
+        var shown=new Dictionary<ListViewBase,bool>();var pairs=new List<KeyValuePair<(ListViewBase View,DependencyObject Container),FileRow>>();
+        foreach(var pair in visibleContainers)
+        {
+            if(!shown.TryGetValue(pair.Key.View,out bool visible))shown[pair.Key.View]=visible=IsBrowserViewShown(pair.Key.View);
+            if(visible&&IsRowInVisibleRange(pair.Key.View,pair.Value))pairs.Add(pair);
+        }
+        return pairs;
+    }
     private void QueueThumbnailViewport()
     {
         if(closing||thumbnailDispatchQueued)return;
@@ -52,13 +66,13 @@ public sealed partial class MainWindow
             if(closing||updatingBrowser)return;
             UpdateCurrentFolderHeader();
             foreach(var view in thumbnailViews.ToArray())ObserveThumbnailViewport(view);
+            var inView=ThumbnailViewportPairs();var inViewRows=inView.Select(pair=>pair.Value).ToHashSet();
             foreach(var pair in thumbnailRequests.ToArray())
                 // Do not kill a decoder on every wheel tick. Retire queued work;
                 // an in-flight image completes and the next admission uses the new view.
-                if(!IsDecodingThumbnail(pair.Key)&&!HasThumbnailViewport(pair.Key))pair.Value.Cancel();
-            foreach(var pair in propertyCancellations.ToArray())if(!HasThumbnailViewport(pair.Key))pair.Value.Cancel();
-            var demanded=visibleContainers.Where(pair=>IsThumbnailInViewport(pair.Key.View,pair.Value))
-                .GroupBy(pair=>pair.Value).Select(group=>group.First()).OrderBy(pair=>pair.Value.Ordinal).ToArray();
+                if(!IsDecodingThumbnail(pair.Key)&&!inViewRows.Contains(pair.Key))pair.Value.Cancel();
+            foreach(var pair in propertyCancellations.ToArray())if(!inViewRows.Contains(pair.Key))pair.Value.Cancel();
+            var demanded=inView.GroupBy(pair=>pair.Value).Select(group=>group.First()).OrderBy(pair=>pair.Value.Ordinal).ToArray();
             foreach(var pair in demanded)
             {
                 if(thumbnailRequests.Count+propertyRequests.Count>=1024)break;

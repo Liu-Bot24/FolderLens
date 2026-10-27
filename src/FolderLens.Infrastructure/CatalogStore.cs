@@ -216,7 +216,9 @@ public sealed partial class CatalogStore : IAsyncDisposable
 
     public Task<long?> FindOrdinal(string snapshotId,string relativePath,CancellationToken cancellation=default)=>sessionComparisonReader.Execute<long?>(c=>
     {
-        using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND (snapshot_relative_path=$path OR lens_location(source_root_path,snapshot_relative_path,'sensitive')=$path) ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
+        // A combined location always ends with its relative path, so the suffix test
+        // rejects almost every row in SQL before the managed lens_location callback runs.
+        using var cmd=c.CreateCommand();cmd.CommandText="SELECT ordinal FROM ResultItems WHERE session_id=$id AND (snapshot_relative_path=$path OR (length(snapshot_relative_path)<=length($path) AND substr($path,length($path)-length(snapshot_relative_path)+1)=replace(snapshot_relative_path,'/',char(92)) AND lens_location(source_root_path,snapshot_relative_path,'sensitive')=$path)) ORDER BY ordinal LIMIT 1";cmd.Parameters.AddWithValue("$id",snapshotId);cmd.Parameters.AddWithValue("$path",relativePath.Replace('/','\\'));object? value=cmd.ExecuteScalar();return value is long ordinal?ordinal:null;
     },cancellation);
 
     internal static void RegisterFunctions(SqliteConnection connection)
@@ -331,13 +333,15 @@ public sealed partial class CatalogStore : IAsyncDisposable
                 string scope=filter.DirectoryScope.Replace('/','\\');
                 dirs.Parameters.AddWithValue("$scope",scope);dirs.Parameters.AddWithValue("$prefix",scope+"\\");
                 using var rows=dirs.ExecuteReader();SqliteTransaction? write=null;int batch=0;
+                // One prepared statement for every directory row.
+                using var insert=session.CreateCommand();insert.CommandText="INSERT INTO ResultDirectories VALUES($id,$dir,$parent,$path)";
+                insert.Parameters.AddWithValue("$id",id);var directory=insert.Parameters.Add("$dir",SqliteType.Text);var parent=insert.Parameters.Add("$parent",SqliteType.Text);var path=insert.Parameters.Add("$path",SqliteType.Text);
                 try
                 {
                     while(rows.Read())
                     {
                         stop.Token.ThrowIfCancellationRequested();write??=session.BeginTransaction();
-                        using var insert=session.CreateCommand();insert.Transaction=write;insert.CommandText="INSERT INTO ResultDirectories VALUES($id,$dir,$parent,$path)";
-                        insert.Parameters.AddWithValue("$id",id);insert.Parameters.AddWithValue("$dir",rows.GetString(0));insert.Parameters.AddWithValue("$parent",rows.GetValue(1));insert.Parameters.AddWithValue("$path",rows.GetString(2));insert.ExecuteNonQuery();
+                        insert.Transaction=write;directory.Value=rows.GetString(0);parent.Value=rows.GetValue(1);path.Value=rows.GetString(2);insert.ExecuteNonQuery();
                         if(++batch%512==0){write.Commit();write.Dispose();write=null;}
                     }
                     write?.Commit();

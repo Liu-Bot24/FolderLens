@@ -87,19 +87,51 @@ public sealed class WorkerClient : IAsyncDisposable
     private WorkerTemporaryFiles.Session? temporarySession;
     public WorkerTemporaryCleanup? LastTemporaryCleanup {get;private set;}
 
+    /// <summary>Local file that remembers the identity for unchanged component stamps,
+    /// so a normal launch does not re-hash the whole decoder directory.</summary>
+    public string? ProviderIdentityCachePath {get;set;}
     public async Task<string> GetProviderIdentity(CancellationToken cancellation)
     {
         await identityGate.WaitAsync(cancellation).ConfigureAwait(false);
-        try{return providerIdentity??=await Task.Run(()=>ComputeProviderIdentity(executable,cancellation),cancellation).ConfigureAwait(false);}
+        try{return providerIdentity??=await Task.Run(()=>ComputeProviderIdentity(executable,cancellation,stampCache:ProviderIdentityCachePath),cancellation).ConfigureAwait(false);}
         finally{identityGate.Release();}
     }
-    internal static string ComputeProviderIdentity(string executable,CancellationToken cancellation,Action<int>? readObserved=null)
+    private sealed record ProviderIdentityStamp(string Stamps,string Identity);
+    internal static string ComputeProviderIdentity(string executable,CancellationToken cancellation,Action<int>? readObserved=null,string? stampCache=null)
     {
         cancellation.ThrowIfCancellationRequested();using var background=new BackgroundThreadScope();
         string directory=Path.GetDirectoryName(Path.GetFullPath(executable))!;
         var enumeration=new EnumerationOptions{RecurseSubdirectories=true,AttributesToSkip=FileAttributes.ReparsePoint,IgnoreInaccessible=false,MaxRecursionDepth=8};
         string[] files=Directory.EnumerateFiles(directory,"*",enumeration).Select(p=>{cancellation.ThrowIfCancellationRequested();return p;}).Where(p=>Path.GetExtension(p).Equals(".dll",StringComparison.OrdinalIgnoreCase)||Path.GetFileName(p).Equals("policy.xml",StringComparison.OrdinalIgnoreCase)||Path.GetExtension(p).Equals(".icc",StringComparison.OrdinalIgnoreCase)).Append(Path.GetFullPath(executable)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4097).Order(StringComparer.Ordinal).ToArray();
         if(files.Length>4096)throw new IOException("工作进程组件超过版本校验文件预算。");
+        string? stamps=null;
+        if(stampCache is not null)
+        {
+            // Any replaced component changes its size, write time or creation time.
+            var text=new StringBuilder(WorkerProtocol.BuildId).Append('\n').Append(directory).Append('\n');
+            foreach(string path in files){var info=new FileInfo(path);text.Append(Path.GetRelativePath(directory,path)).Append('|').Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('|').Append(info.CreationTimeUtc.Ticks).Append('\n');}
+            stamps="sha256:"+Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+            try
+            {
+                if(File.Exists(stampCache)&&new FileInfo(stampCache).Length<4096&&JsonSerializer.Deserialize<ProviderIdentityStamp>(File.ReadAllBytes(stampCache)) is {} cached&&cached.Stamps==stamps&&cached.Identity?.StartsWith("sha256:",StringComparison.Ordinal)==true)return cached.Identity;
+            }
+            catch(Exception error) when(error is IOException or UnauthorizedAccessException or JsonException){}
+        }
+        string identity=HashProviderFiles(directory,files,cancellation,readObserved);
+        if(stampCache is not null)
+        {
+            string temporary=stampCache+"."+Guid.NewGuid().ToString("N")+".tmp";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(stampCache))!);
+                File.WriteAllBytes(temporary,JsonSerializer.SerializeToUtf8Bytes(new ProviderIdentityStamp(stamps!,identity)));File.Move(temporary,stampCache,true);
+            }
+            catch(Exception error) when(error is IOException or UnauthorizedAccessException){try{File.Delete(temporary);}catch(Exception cleanup) when(cleanup is IOException or UnauthorizedAccessException){}}
+        }
+        return identity;
+    }
+    private static string HashProviderFiles(string directory,string[] files,CancellationToken cancellation,Action<int>? readObserved)
+    {
         using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);byte[] buffer=new byte[128*1024];
         hash.AppendData(Encoding.UTF8.GetBytes(WorkerProtocol.BuildId));
         foreach(string path in files)

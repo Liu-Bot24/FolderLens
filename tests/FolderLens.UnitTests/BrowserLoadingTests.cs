@@ -14,6 +14,17 @@ public sealed class BrowserLoadingTests
     [InlineData(0,false,false)]
     public void FirstBatchWaitsForUsefulCountButSmallCompletedFoldersAreShown(int count,bool scanning,bool deferred)
         =>Assert.Equal(deferred,ScanPreviewRefresh.DeferFirstBatch(count,scanning));
+    [Theory]
+    [InlineData(0,2)]      // cheap refresh: unchanged two-second cadence
+    [InlineData(600,2)]
+    [InlineData(1000,3)]   // costly refresh waits three times its cost
+    [InlineData(10000,8)]  // capped
+    public void ScanPreviewIntervalGrowsOnlyForCostlyRefreshes(int costMilliseconds,int expectedSeconds)
+    {
+        var refresh=new ScanPreviewRefresh();refresh.Complete(TimeSpan.FromSeconds(10),TimeSpan.FromMilliseconds(costMilliseconds));
+        Assert.False(refresh.TryBegin(100,true,false,false,TimeSpan.FromSeconds(10+expectedSeconds)-TimeSpan.FromMilliseconds(1)));
+        Assert.True(refresh.TryBegin(100,true,false,false,TimeSpan.FromSeconds(10+expectedSeconds)));
+    }
     [Fact]
     public async Task SubsequentScanBatchPublishesWithoutManualRefreshButViewerKeepsItsSequence()
     {

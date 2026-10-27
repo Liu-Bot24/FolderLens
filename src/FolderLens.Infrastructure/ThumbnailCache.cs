@@ -64,6 +64,9 @@ public sealed class ThumbnailCache : IAsyncDisposable
     private readonly LinkedList<(string Key,byte[] Bytes)> recent=[];
     private readonly Dictionary<string,int> leases=[];
     private readonly HashSet<string> rejected=[];
+    // Hits only refresh LRU order. They are written in batches, and always before
+    // any eviction decision or shutdown, instead of one transaction per hit.
+    private readonly Dictionary<string,long> pendingAccess=[];
     private readonly object leaseGate=new();
     private long bytes,entries,memoryBytes,hits,misses,stores,evictions,otherDiskBytes;
     private DateTime lastMaintenance=DateTime.MinValue;
@@ -152,13 +155,16 @@ public sealed class ThumbnailCache : IAsyncDisposable
             string name=Path.GetFileName(file);
             if(name.Length==102&&name[65]=='.'&&name.AsSpan(1,64).ToString().All(Uri.IsHexDigit)&&Guid.TryParseExact(name.Substring(66,32),"N",out _))DeleteOwned(file);
         }
-        using var query=c.CreateCommand();query.CommandText="SELECT 1 FROM ThumbnailItems WHERE cache_key=$key";var key=query.Parameters.Add("$key",SqliteType.Text);
-        foreach(string file in Directory.EnumerateFiles(directory,"*",SearchOption.TopDirectoryOnly).Where(p=>Path.GetExtension(p) is ".png" or ".thumb"))
+        var known=new HashSet<string>(StringComparer.Ordinal);
+        using(var query=c.CreateCommand()){query.CommandText="SELECT cache_key FROM ThumbnailItems";using var rows=query.ExecuteReader();while(rows.Read())known.Add(rows.GetString(0));}
+        long total=0;
+        foreach(var file in new DirectoryInfo(directory).EnumerateFiles("*",SearchOption.TopDirectoryOnly))
         {
-            cancellation.ThrowIfCancellationRequested();string hash=Path.GetFileNameWithoutExtension(file);if(hash.Length!=64||!hash.All(Uri.IsHexDigit))continue;
-            key.Value=hash;if(query.ExecuteScalar() is null)DeleteOwned(file);
+            cancellation.ThrowIfCancellationRequested();string hash=Path.GetFileNameWithoutExtension(file.Name);
+            if(file.Extension is ".png" or ".thumb"&&hash.Length==64&&hash.All(Uri.IsHexDigit)&&!known.Contains(hash)){DeleteOwned(file.FullName);continue;}
+            total+=file.Length;
         }
-        otherDiskBytes=Math.Max(0,Directory.EnumerateFiles(directory).Sum(p=>new FileInfo(p).Length)-bytes-IndexBytes());
+        otherDiskBytes=Math.Max(0,total-bytes-IndexBytes());
     }
     private string AssetPath(string hash)
     {
@@ -175,6 +181,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
         Maintain(c);
         using var cmd=c.CreateCommand();cmd.CommandText="SELECT byte_count,last_access FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);
         long size,last;using(var row=cmd.ExecuteReader()){if(!row.Read()){misses++;return null;}size=row.GetInt64(0);last=row.GetInt64(1);}
+        if(pendingAccess.TryGetValue(hash,out long pending))last=Math.Max(last,pending);
         if(rejected.Contains(hash)){Remove(c,hash,size);misses++;return null;}
         if(last<DateTime.UtcNow.Subtract(options.MaxAge).Ticks&&!IsLeased(hash)){Remove(c,hash,size);misses++;return null;}
         string path=AssetPath(hash);SafeFileHandle? pin=null;
@@ -213,11 +220,14 @@ public sealed class ThumbnailCache : IAsyncDisposable
             bool recorded=false,moved=false;
             try
             {
-                using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None,64*1024,FileOptions.WriteThrough))
+                // The cache is rebuildable: no per-thumbnail disk flush on the shared index
+                // thread. Content lost to a power failure is rejected by length/header
+                // checks or by the WIC decode failure path, which invalidates the entry.
+                using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None,64*1024))
                 {
                     byte[] buffer=new byte[64*1024];int count;long copied=0;
                     while((count=source.Read(buffer))>0){cancellation.ThrowIfCancellationRequested();copied=checked(copied+count);if(copied>size)throw new InvalidDataException("缩略图在缓存过程中发生变化。");output.Write(buffer,0,count);}
-                    if(copied!=size)throw new InvalidDataException("缩略图在缓存过程中发生变化。");output.Flush(true);
+                    if(copied!=size)throw new InvalidDataException("缩略图在缓存过程中发生变化。");
                 }
                 cancellation.ThrowIfCancellationRequested();
                 if(File.Exists(target))DeleteOwned(target);File.Move(temporary,target);moved=true;
@@ -245,7 +255,19 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private void UpdateAccess(SqliteConnection c,string hash)
     {
-        using var cmd=c.CreateCommand();cmd.CommandText="UPDATE ThumbnailItems SET last_access=$now WHERE cache_key=$key";cmd.Parameters.AddWithValue("$now",DateTime.UtcNow.Ticks);cmd.Parameters.AddWithValue("$key",hash);cmd.ExecuteNonQuery();BoundJournal(c);
+        pendingAccess[hash]=DateTime.UtcNow.Ticks;if(pendingAccess.Count>=256)FlushAccess(c);
+    }
+    private void FlushAccess(SqliteConnection c)
+    {
+        if(pendingAccess.Count==0)return;
+        using(var transaction=c.BeginTransaction())
+        {
+            using var cmd=c.CreateCommand();cmd.Transaction=transaction;cmd.CommandText="UPDATE ThumbnailItems SET last_access=max(last_access,$now) WHERE cache_key=$key";
+            var now=cmd.Parameters.Add("$now",SqliteType.Integer);var key=cmd.Parameters.Add("$key",SqliteType.Text);
+            foreach(var (hash,ticks) in pendingAccess){now.Value=ticks;key.Value=hash;cmd.ExecuteNonQuery();}
+            transaction.Commit();
+        }
+        pendingAccess.Clear();BoundJournal(c);
     }
     private bool IsLeased(string hash){lock(leaseGate)return leases.ContainsKey(hash);}
     private int ActiveLeases(){lock(leaseGate)return leases.Values.Sum();}
@@ -256,11 +278,12 @@ public sealed class ThumbnailCache : IAsyncDisposable
         try{string path=AssetPath(hash);if(File.Exists(path))DeleteOwned(path);}
         catch(IOException){return false;}catch(Win32Exception){return false;}
         using var cmd=c.CreateCommand();cmd.CommandText="DELETE FROM ThumbnailItems WHERE cache_key=$key";cmd.Parameters.AddWithValue("$key",hash);
-        if(cmd.ExecuteNonQuery()!=0){bytes-=size;entries--;evictions++;}rejected.Remove(hash);RemoveMemory(hash);BoundJournal(c);return true;
+        if(cmd.ExecuteNonQuery()!=0){bytes-=size;entries--;evictions++;}pendingAccess.Remove(hash);rejected.Remove(hash);RemoveMemory(hash);BoundJournal(c);return true;
     }
     private void EnsureRoom(SqliteConnection c,long incoming,CancellationToken cancellation)
     {
         if(options.DiskEntries<1)throw new ArgumentException("缩略图数量预算无效。");
+        FlushAccess(c);
         while(entries>=options.DiskEntries)
         {
             using var oldest=c.CreateCommand();oldest.CommandText="SELECT cache_key,byte_count FROM ThumbnailItems ORDER BY last_access,cache_key";
@@ -294,6 +317,7 @@ public sealed class ThumbnailCache : IAsyncDisposable
     }
     private ThumbnailCacheCleanup TrimCore(SqliteConnection c,bool clear,long incoming,CancellationToken cancellation)
     {
+        FlushAccess(c);
         long removed=0,removedBytes=0;long cutoff=DateTime.UtcNow.Subtract(options.MaxAge).Ticks;long target=options.DiskBytes-IndexBytes()-otherDiskBytes-Math.Min(8L<<20,options.DiskBytes/8)-incoming;
         long afterTime=-1;string afterKey="";
         while(true)
@@ -405,7 +429,13 @@ public sealed class ThumbnailCache : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await initialization.WaitAsync().ConfigureAwait(false);
-        try{if(disposed)return;disposed=true;WorkerResources.Shared.MemoryPressure-=OnMemoryPressure;if(executor is not null)await executor.DisposeAsync().ConfigureAwait(false);memory.Clear();recent.Clear();memoryBytes=0;ownerLock?.Dispose();ownerLock=null;foreach(var pin in directoryPins)pin.Dispose();directoryPins.Clear();}
+        try
+        {
+            if(disposed)return;
+            if(executor is not null)
+                try{await executor.Execute(c=>{FlushAccess(c);return true;}).ConfigureAwait(false);}
+                catch(Exception error) when(error is SqliteException or IOException or System.Threading.Channels.ChannelClosedException){/* LRU order only; shutdown continues. */}
+            disposed=true;WorkerResources.Shared.MemoryPressure-=OnMemoryPressure;if(executor is not null)await executor.DisposeAsync().ConfigureAwait(false);memory.Clear();recent.Clear();memoryBytes=0;ownerLock?.Dispose();ownerLock=null;foreach(var pin in directoryPins)pin.Dispose();directoryPins.Clear();}
         finally{initialization.Release();}
     }
     [StructLayout(LayoutKind.Sequential)]private struct FileInformation{public uint Attributes;public System.Runtime.InteropServices.ComTypes.FILETIME Creation,Access,Write;public uint Volume,SizeHigh,SizeLow,NumberOfLinks,IndexHigh,IndexLow;}

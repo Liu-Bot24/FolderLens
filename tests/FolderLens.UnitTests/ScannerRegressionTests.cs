@@ -398,6 +398,20 @@ public sealed class ScannerRegressionTests
         Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
         Task<Dictionary<string,(string Id,long PathRevision,string? Physical)>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id,path_revision,physical_identity FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,(string,long,string?)>();while(rows.Read())result.Add(rows.GetString(0),(rows.GetString(1),rows.GetInt64(2),rows.IsDBNull(3)?null:rows.GetString(3)));return result;});
     }
+    [Fact] public async Task DirtyReconciliationOfSeveralScopesSharesWorkersAndUpdatesEach()
+    {
+        string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(Path.Combine(source,"left"));Directory.CreateDirectory(Path.Combine(source,"right"));Directory.CreateDirectory(Path.Combine(source,"other"));
+        File.WriteAllText(Path.Combine(source,"left","a.jpg"),"old");File.WriteAllText(Path.Combine(source,"right","b.jpg"),"old");File.WriteAllText(Path.Combine(source,"other","c.jpg"),"unchanged");
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);var scanner=new DirectoryIndexer(catalog,Worker());await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        var dirty=new ScanDirtyDirectories(catalog);await dirty.Mark("root",epoch,[new("left","Changed"),new("right","Changed")]);Assert.Equal(2,(await dirty.Read("root",epoch)).Count);
+        File.WriteAllText(Path.Combine(source,"left","a.jpg"),"changed");File.WriteAllText(Path.Combine(source,"right","b.jpg"),"changed");File.WriteAllText(Path.Combine(source,"right","new.jpg"),"added");
+        var result=await scanner.ReconcileDirty("root",source,epoch,true,[],null,CancellationToken.None);
+        Assert.Equal("ready",result.State);Assert.Equal(2,result.Directories);Assert.Empty(await dirty.Read("root",epoch,includeDeferred:true));
+        var versions=await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,file_version FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var map=new Dictionary<string,long>();while(rows.Read())map.Add(rows.GetString(0),rows.GetInt64(1));return map;});
+        Assert.Equal(2,versions[@"left\a.jpg"]);Assert.Equal(2,versions[@"right\b.jpg"]);Assert.Equal(1,versions[@"other\c.jpg"]);Assert.True(versions.ContainsKey(@"right\new.jpg"));
+        // A later single scan on the same indexer uses its own workers again.
+        Assert.Equal("ready",(await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None)).State);
+    }
     [Fact] public async Task DirtyReconciliationIsScopedAndCannotAcknowledgeNewerEvents()
     {
         string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(Path.Combine(source,"left","deep"));Directory.CreateDirectory(Path.Combine(source,"right"));File.WriteAllText(Path.Combine(source,"left","a.jpg"),"old");File.WriteAllText(Path.Combine(source,"right","b.jpg"),"unchanged");

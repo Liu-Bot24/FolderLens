@@ -29,8 +29,12 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
     public TimeSpan RenameLookupTime { get; private set; }
     public TimeSpan BatchWriteTime { get; private set; }
     public static string StablePathId(string rootId,string relative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rootId+"\0"+relative)));
-    public async Task<ScanProgress> Scan(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,
+    public Task<ScanProgress> Scan(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,
         IProgress<ScanProgress>? progress,CancellationToken cancellation,bool forceRefresh=false,string? scopeRelative=null,bool descendants=true,bool preserveRootState=false)
+        =>ScanCore(rootId,root,epoch,recursive,exclusions,progress,cancellation,forceRefresh,scopeRelative,descendants,preserveRootState,null);
+    private async Task<ScanProgress> ScanCore(string rootId,string root,long epoch,bool recursive,ExclusionSpec[] exclusions,
+        IProgress<ScanProgress>? progress,CancellationToken cancellation,bool forceRefresh,string? scopeRelative,bool descendants,bool preserveRootState,
+        (ScanWorkerClient Worker,ScanWorkerClient Probe)? shared)
     {
         if(preserveRootState&&(scopeRelative is null||descendants))throw new ArgumentException("保留扫描状态的核对必须限定为单层目录。");
         root=PathRules.ValidateSource(root);
@@ -40,8 +44,11 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 throw new ArgumentException("扫描排除必须是根目录内的相对路径。");
         string? executable=scanWorkerExecutable??ScanWorkerClient.FindExecutable();
         if(executable is null && RequiresIsolation(root))throw new NotSupportedException("目录扫描工作进程缺失，无法安全扫描远程或可移动磁盘。");
-        await using var worker=executable is null?null:new ScanWorkerClient(executable);
-        await using var probe=executable is null?null:new ScanWorkerClient(executable);
+        // A reconcile pass shares one worker pair across its scopes. Each scan ends
+        // with every cursor closed or the worker stopped, so no state carries over.
+        await using var ownedWorker=shared is null&&executable is not null?new ScanWorkerClient(executable):null;
+        await using var ownedProbe=shared is null&&executable is not null?new ScanWorkerClient(executable):null;
+        var worker=shared?.Worker??ownedWorker;var probe=shared?.Probe??ownedProbe;
         var renames=new ScanRenames(catalog,probe,PathProbeOverride);
         var dirtyStore=new ScanDirtyDirectories(catalog);
         IReadOnlyList<DirtyScanScope> captured=[];
@@ -261,6 +268,10 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         // Capture a finite batch. Revisions arriving during this pass belong to the
         // next pass; acknowledgement must not erase them or chase them forever.
         var pending=await dirty.Read(rootId,epoch,cancellation).ConfigureAwait(false);
+        string? executable=pending.Count>1?scanWorkerExecutable??ScanWorkerClient.FindExecutable():null;
+        await using var sharedWorker=executable is null?null:new ScanWorkerClient(executable);
+        await using var sharedProbe=executable is null?null:new ScanWorkerClient(executable);
+        (ScanWorkerClient,ScanWorkerClient)? shared=sharedWorker is null?null:(sharedWorker,sharedProbe!);
         {
             foreach(var scope in pending)
             {
@@ -269,7 +280,7 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 if(currentPath is null){await dirty.Acknowledge(rootId,epoch,scope,cancellation).ConfigureAwait(false);continue;}
                 try
                 {
-                    var result=await Scan(rootId,root,epoch,recursive,exclusions,progress,cancellation,scopeRelative:currentPath,descendants:scope.Subtree).ConfigureAwait(false);
+                    var result=await ScanCore(rootId,root,epoch,recursive,exclusions,progress,cancellation,false,currentPath,scope.Subtree,false,shared).ConfigureAwait(false);
                     files+=result.Files;directories+=result.Directories;errors+=result.Errors;
                     if(result.BudgetLimited)return new(files,directories,errors,"partial"){BudgetLimited=true};
                     if(result.State=="cancelled")return new(files,directories,errors,"cancelled");

@@ -64,6 +64,10 @@ public sealed class MediaMetadataQueryTests
         Assert.True(await catalog.ApplyMediaMetadata(id,1,"benchmark",1,metadata,"fixture"));
         var snapshot=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=["video"],VideoCodecs=["h264"],AudioCodecs=["aac"],FrameRate=new(29.97,29.98),Ranges=new(){["width"]=new(1920,1920),["durationMs"]=new(1234,1234)}},1,1);
         Assert.Equal(1,snapshot.Count);Assert.Equal(0,await catalog.FindOrdinal(snapshot.Id,"file1.jpg"));Assert.Null(await catalog.FindOrdinal(snapshot.Id,"missing.jpg"));
+        // Absolute locations still resolve; a same-suffix path under another root does not.
+        string root=Path.Combine(Path.GetTempPath(),"FolderLens-synthetic-fixture");
+        Assert.Equal(0,await catalog.FindOrdinal(snapshot.Id,Path.Combine(root,"file1.jpg")));Assert.Equal(0,await catalog.FindOrdinal(snapshot.Id,Path.Combine(root,"file1.jpg").Replace('\\','/')));
+        Assert.Null(await catalog.FindOrdinal(snapshot.Id,Path.Combine(root+"-other","file1.jpg")));Assert.Null(await catalog.FindOrdinal(snapshot.Id,Path.Combine(root,"xfile1.jpg")));
         Assert.False(await catalog.MarkMetadataFailure(id,1,"benchmark",2,["media"],"Timeout",false));
         Assert.True(await catalog.ApplyMediaMetadata(id,1,"benchmark",1,new(null,null,null,null,"aac",null,false,null){FormatId="aac"},"fixture"));
         var unknown=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=["audio"],Ranges=new(){["durationMs"]=new(0,0)}},1,2);

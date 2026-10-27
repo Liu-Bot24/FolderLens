@@ -7,10 +7,15 @@ namespace FolderLens.App;
 
 public sealed partial class MainWindow
 {
-    private bool IsThumbnailInViewport(ListViewBase view,FileRow row)
+    private bool IsThumbnailInViewport(ListViewBase view,FileRow row)=>IsBrowserViewShown(view)&&IsRowInVisibleRange(view,row);
+    private static bool IsBrowserViewShown(ListViewBase view)
     {
         for(DependencyObject? node=view;node is not null;node=VisualTreeHelper.GetParent(node))
             if(node is UIElement{Visibility:Visibility.Collapsed})return false;
+        return true;
+    }
+    private static bool IsRowInVisibleRange(ListViewBase view,FileRow row)
+    {
         if(view.ContainerFromItem(row) is not {} container)return false;
         // The realized container belongs to this control's current projection:
         // collapsed grid groups and the complete filmstrip have different indices.

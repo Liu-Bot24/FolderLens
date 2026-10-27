@@ -36,6 +36,28 @@ public sealed class ThumbnailCacheTests
             Assert.Null(await reopened.TryGet(key with{EntryId="recent"}));Assert.Equal(2,(await reopened.GetStatistics()).DiskEntries);
         }
     }
+    [Fact]
+    public async Task BatchedHitsStillDecideEvictionAndSurviveRestart()
+    {
+        string directory=Temp();Directory.CreateDirectory(directory);string source=Path.Combine(directory,"source.png"),owned=Path.Combine(directory,"owned");await File.WriteAllBytesAsync(source,Png);
+        var a=new ThumbnailCacheKey("a",1,1,10,256,"v1");var b=a with{EntryId="b"};var c=a with{EntryId="c"};var d=a with{EntryId="d"};
+        var options=new ThumbnailCacheOptions{MinimumFreeBytes=0,DiskEntries=2};
+        await using(var cache=new ThumbnailCache(owned,options))
+        {
+            await cache.Initialize();using(await cache.Store(a,source)){}using(await cache.Store(b,source)){}
+            await Task.Delay(20);using(await cache.TryGet(a)){}
+            // The pending hit on "a" must be applied before choosing the eviction victim.
+            using(await cache.Store(c,source)){}
+            Assert.Null(await cache.TryGet(b));using(var kept=await cache.TryGet(a))Assert.NotNull(kept);
+            await Task.Delay(20);using(await cache.TryGet(c)){}using(await cache.TryGet(a)){}
+        }
+        // Hits recorded only in memory are persisted on shutdown: "c" is now the oldest.
+        await using(var reopened=new ThumbnailCache(owned,options))
+        {
+            await reopened.Initialize();using(await reopened.Store(d,source)){}
+            Assert.Null(await reopened.TryGet(c));using(var kept=await reopened.TryGet(a))Assert.NotNull(kept);
+        }
+    }
     private static string Temp()=>Path.Combine(Path.GetTempPath(),"FolderLens-cache-tests",Guid.NewGuid().ToString("N"));
     private static readonly byte[] Png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1uoAAAAASUVORK5CYII=");
     [Fact]
@@ -87,6 +109,9 @@ public sealed class ThumbnailCacheTests
         var key=new ThumbnailCacheKey("entry0",1,1,10,256,"v1");for(int i=0;i<8;i++)using(await cache.Store(key with{EntryId="entry"+i},source)){}
         Assert.Null(await cache.TryGet(key));using(var newest=await cache.TryGet(key with{EntryId="entry7"}))Assert.NotNull(newest);
         Assert.True((await cache.GetStatistics()).TotalDiskBytes<=1<<20);
+        // Hit times are written lazily (always before eviction). Persist them before
+        // aging every row out-of-band, or the later write would correctly keep entry7.
+        await cache.Trim();
         await using(var index=new DatabaseExecutor(Path.Combine(owned,"index.sqlite")))await index.Execute(c=>{using var cmd=c.CreateCommand();cmd.CommandText="UPDATE ThumbnailItems SET last_access=1";return cmd.ExecuteNonQuery();});
         var trim=await cache.Trim();Assert.True(trim.RemovedEntries>0);Assert.Equal(0,(await cache.GetStatistics()).DiskEntries);
     }

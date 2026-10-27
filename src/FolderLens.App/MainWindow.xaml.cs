@@ -144,9 +144,14 @@ public sealed partial class MainWindow : Window
                 var extra=new WorkerClient(worker,Path.Combine(RuntimeDataDirectory,"temp","thumbnails-"+(i+1)),WorkerPriority.Visible);
                 extraThumbnailWorkers.Add(extra);thumbnailPool.Enqueue(extra);
             }
-            thumbnailCache=new(Path.Combine(dataDirectory,"cache","thumbnails"));await thumbnailCache.Initialize(lifetime.Token);
+            // The decoder identity is read in parallel with opening the thumbnail cache.
+            thumbnailWorker.ProviderIdentityCachePath=Path.Combine(dataDirectory,"cache","provider-identity.json");
+            var identity=thumbnailWorker.GetProviderIdentity(lifetime.Token);
+            thumbnailCache=new(Path.Combine(dataDirectory,"cache","thumbnails"));
+            try{await thumbnailCache.Initialize(lifetime.Token);}
+            catch{_=identity.ContinueWith(task=>_=task.Exception,TaskScheduler.Default);throw;}
             StartupStage("workersAndCache");
-            providerIdentity=await thumbnailWorker.GetProviderIdentity(lifetime.Token);
+            providerIdentity=await identity;
             StartupStage("providerIdentity");
             capabilityTask=ReadRuntimeCapabilities();
             string contentExecutable=Path.Combine(AppContext.BaseDirectory,"content-worker","FolderLens.Content.Worker.exe");var contentRoot=new DirectoryInfo(AppContext.BaseDirectory);while(contentRoot is not null&&!File.Exists(Path.Combine(contentRoot.FullName,"FolderLens.slnx")))contentRoot=contentRoot.Parent;if(!deployedVerification&&!File.Exists(contentExecutable)&&contentRoot is not null)contentExecutable=Path.Combine(contentRoot.FullName,"src","FolderLens.Content.Worker","bin","Release","net10.0-windows10.0.26100.0","win-x64","FolderLens.Content.Worker.exe");contentWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","markdown"));textThumbnailWorker=new(contentExecutable,Path.Combine(RuntimeDataDirectory,"temp","text-thumbnails"),WorkerPriority.Visible);
@@ -511,6 +516,8 @@ public sealed partial class MainWindow : Window
         if(!scanPreview)CancelPendingSearch();
         using var operation=browserWork.Enter();if(operation is null||closing||catalog is null||string.IsNullOrEmpty(rootId)||replacingRoot)return;
         if(!browserRootReady)return;
+        // Database cost only (snapshot through change matching); waiting on input is excluded.
+        TimeSpan snapshotCost=default;
         FilterSpec filter;
         if(scanPreview)
         {
@@ -562,7 +569,7 @@ public sealed partial class MainWindow : Window
                 if(!IsCurrent()||closing)return;
                 if(verifyFirstPageBarrier is not null)await verifyFirstPageBarrier(queryToken);
             }
-            queryPhase="createSnapshot";var handle=await catalog.CreateSnapshot(filter,epoch,gen,queryToken);
+            queryPhase="createSnapshot";long snapshotStarted=Stopwatch.GetTimestamp();var handle=await catalog.CreateSnapshot(filter,epoch,gen,queryToken);
             if(!IsCurrent() || closing){await catalog.ReleaseSnapshot(handle.Id);return;}
             // The most recently built candidate is not necessarily the one displayed.
             // Hold a real lease until replacement/close, including across discarded builds.
@@ -593,6 +600,7 @@ public sealed partial class MainWindow : Window
                 if(!IsCurrent()||closing)return;
                 previousPath=BrowserPath(selected);restoreSelectionRequest=browserSelectionRequest;
             }
+            snapshotCost=Stopwatch.GetElapsedTime(snapshotStarted);
             // All preparation branches can await database work. A wheel/drag
             // arriving during first-page matching must postpone publication too.
             if(!IsCurrent()||closing||PreviewInterrupted())return;
@@ -757,7 +765,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 if(candidateLease is not null)await catalog.ReleaseSnapshot(candidateLease);
-                if(IsCurrent()){queryBusy=false;if(!closing)UpdateViewerInformation();if(scanPreview){scanPreviewRefresh.Complete(Stopwatch.GetElapsedTime(0));if(!published&&!failed&&resultHandle is not null)ResultSummary.Text=previousSummary;}UpdateBrowserEmptyState();
+                if(IsCurrent()){queryBusy=false;if(!closing)UpdateViewerInformation();if(scanPreview){scanPreviewRefresh.Complete(Stopwatch.GetElapsedTime(0),snapshotCost);if(!published&&!failed&&resultHandle is not null)ResultSummary.Text=previousSummary;}UpdateBrowserEmptyState();
                     if(automaticQueryPending&&!closing){automaticQueryPending=false;await RefreshQuery(scanPreview:true);}}
             }
             finally{completion.TrySetResult();}
