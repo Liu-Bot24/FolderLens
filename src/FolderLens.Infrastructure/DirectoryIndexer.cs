@@ -54,8 +54,11 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         IReadOnlyList<DirtyScanScope> captured=[];
         string scanId=Guid.NewGuid().ToString("N");long files=0,dirs=0,errors=0;bool allowCloud=false,incomplete=false,initialized=false,rootMissing=false;string availability="online",outcome="failed";
         var cursors=new List<DirectoryCursor>();
+        var rootGate=catalog.RootScanGate(rootId);bool gateHeld=false;
         try
         {
+        // A later scan of the same root waits; cancellation while waiting is a cancelled scan.
+        await rootGate.WaitAsync(cancellation).ConfigureAwait(false);gateHeld=true;
         await catalog.Write(c=>
         {
             using var t=c.BeginTransaction();EnsureEpoch(c,t,rootId,epoch);
@@ -246,6 +249,8 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
         {catalog.MarkBrowsingBudgetReached();outcome="partial";errors++;}
         finally
         {
+            try
+            {
             foreach(var cursor in cursors)await cursor.Packets.DisposeAsync().ConfigureAwait(false);
             if(initialized)await catalog.Write(c=>
             {
@@ -258,6 +263,9 @@ public sealed class DirectoryIndexer(CatalogStore catalog,string? scanWorkerExec
                 Execute(c,t,"DELETE FROM ScanOwners WHERE scan_id=$scan",("$scan",scanId));
                 Execute(c,t,"UPDATE SchemaInfo SET catalog_revision=catalog_revision+1");t.Commit();return true;
             }).ConfigureAwait(false);
+            }
+            // Release only after the terminal state is written, so the next scan of this root starts from it.
+            finally{if(gateHeld)rootGate.Release();}
         }
         var result=new ScanProgress(files,dirs,errors,rootMissing?"missing":outcome){BudgetLimited=catalog.BrowsingBudgetReached};progress?.Report(result);return result;
     }

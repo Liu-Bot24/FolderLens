@@ -47,6 +47,10 @@ public sealed partial class CatalogStore : IAsyncDisposable
     private readonly string? playlistPath;
     private readonly SnapshotLimits limits;
     private readonly SemaphoreSlim snapshotGate = new(1,1);
+    // Each scan reconciles away rows it did not stamp itself, so two scans of one
+    // root must never overlap. Scans of different roots stay concurrent.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string,SemaphoreSlim> rootScanGates = new(StringComparer.Ordinal);
+    internal SemaphoreSlim RootScanGate(string rootId)=>rootScanGates.GetOrAdd(rootId,_=>new SemaphoreSlim(1,1));
     private string? activeSessionId;
     private int snapshotActive;
     private int snapshotUnderPressure;

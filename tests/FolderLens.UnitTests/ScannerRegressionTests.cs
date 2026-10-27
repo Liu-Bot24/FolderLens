@@ -412,6 +412,31 @@ public sealed class ScannerRegressionTests
         for(int i=0;i<6;i++)Assert.Equal(before[$"photo-{i}.jpg"],after[$"renamed-{i}.jpg"]);
         Task<Dictionary<string,string>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,string>();while(rows.Read())result.Add(rows.GetString(0),rows.GetString(1));return result;});
     }
+    [Fact] public async Task OverlappingScansOfOneRootWaitInsteadOfReconcilingAwayRows()
+    {
+        string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(Path.Combine(source,"A"));
+        for(int i=0;i<40;i++)File.WriteAllText(Path.Combine(source,"A",$"image-{i:D2}.jpg"),$"content {i}");
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);
+        await new DirectoryIndexer(catalog,Worker()).Scan("root",source,epoch,true,[],null,CancellationToken.None);
+        File.WriteAllText(Path.Combine(source,"A","zz-new.jpg"),"appended");
+        // Hold the first scan inside a packet of A; a second scan of the root must not start meanwhile.
+        var blocked=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var release=new TaskCompletionSource();
+        var first=new DirectoryIndexer(catalog,Worker()){PacketReceived=(_,packet)=>{if(packet.Entries.Any(e=>!e.Directory)&&blocked.TrySetResult())release.Task.Wait();}};
+        var firstScan=Task.Run(()=>first.Scan("root",source,epoch,true,[],null,CancellationToken.None));
+        await blocked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        int secondPackets=0;var second=new DirectoryIndexer(catalog,Worker()){PacketReceived=(_,_)=>Interlocked.Increment(ref secondPackets)};
+        var secondScan=Task.Run(()=>second.Scan("root",source,epoch,true,[],null,CancellationToken.None));
+        using(var waitingCancelled=new CancellationTokenSource(TimeSpan.FromMilliseconds(300)))
+            Assert.Equal("cancelled",(await new DirectoryIndexer(catalog,Worker()).Scan("root",source,epoch,true,[],null,waitingCancelled.Token)).State);
+        await Task.Delay(200);
+        Assert.Equal(0,Volatile.Read(ref secondPackets));Assert.False(secondScan.IsCompleted);
+        release.SetResult();
+        Assert.Equal("ready",(await firstScan.WaitAsync(TimeSpan.FromSeconds(30))).State);
+        Assert.Equal("ready",(await secondScan.WaitAsync(TimeSpan.FromSeconds(30))).State);
+        Assert.True(Volatile.Read(ref secondPackets)>0);
+        Assert.Equal(41L,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files WHERE root_id='root' AND entry_state='present'";return (long)cmd.ExecuteScalar()!;}));
+        Assert.Equal(0L,await catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT count(*) FROM Files WHERE root_id='root' AND entry_state<>'present'";return (long)cmd.ExecuteScalar()!;}));
+    }
     [Fact] public async Task DirtyReconciliationOfSeveralScopesSharesWorkersAndUpdatesEach()
     {
         string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(Path.Combine(source,"left"));Directory.CreateDirectory(Path.Combine(source,"right"));Directory.CreateDirectory(Path.Combine(source,"other"));
