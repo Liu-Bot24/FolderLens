@@ -398,6 +398,20 @@ public sealed class ScannerRegressionTests
         Assert.Equal(0,(await catalog.ReadCollections()).Single().Count);
         Task<Dictionary<string,(string Id,long PathRevision,string? Physical)>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id,path_revision,physical_identity FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,(string,long,string?)>();while(rows.Read())result.Add(rows.GetString(0),(rows.GetString(1),rows.GetInt64(2),rows.IsDBNull(3)?null:rows.GetString(3)));return result;});
     }
+    [Fact] public async Task SeveralRenamesInOnePacketEachKeepTheirIdentity()
+    {
+        // Rename lookups for a packet share one writer turn; every entry still resolves separately.
+        string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(source);
+        for(int i=0;i<6;i++)File.WriteAllText(Path.Combine(source,$"photo-{i}.jpg"),$"content {i}");
+        File.WriteAllText(Path.Combine(source,"kept.jpg"),"kept");
+        await using var catalog=new CatalogStore(Path.Combine(fixture,"data"));await catalog.Initialize();long epoch=await catalog.OpenRoot("root",source);var scanner=new DirectoryIndexer(catalog,Worker());
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);var before=await Entries();
+        for(int i=0;i<6;i++)File.Move(Path.Combine(source,$"photo-{i}.jpg"),Path.Combine(source,$"renamed-{i}.jpg"));
+        await scanner.Scan("root",source,epoch,true,[],null,CancellationToken.None);var after=await Entries();
+        Assert.Equal(7,after.Count);Assert.Equal(before["kept.jpg"],after["kept.jpg"]);
+        for(int i=0;i<6;i++)Assert.Equal(before[$"photo-{i}.jpg"],after[$"renamed-{i}.jpg"]);
+        Task<Dictionary<string,string>> Entries()=>catalog.Read(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT relative_path,entry_id FROM Files WHERE root_id='root' AND entry_state='present'";using var rows=cmd.ExecuteReader();var result=new Dictionary<string,string>();while(rows.Read())result.Add(rows.GetString(0),rows.GetString(1));return result;});
+    }
     [Fact] public async Task DirtyReconciliationOfSeveralScopesSharesWorkersAndUpdatesEach()
     {
         string fixture=Fixture(),source=Path.Combine(fixture,"source");Directory.CreateDirectory(Path.Combine(source,"left"));Directory.CreateDirectory(Path.Combine(source,"right"));Directory.CreateDirectory(Path.Combine(source,"other"));

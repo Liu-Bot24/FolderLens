@@ -50,6 +50,7 @@ public sealed class DirectoryListing : IAsyncDisposable,IDisposable
     public ValueTask DisposeAsync()=>new(Task.Run(Dispose));
     private static SqliteConnection Open(string file,bool readOnly=false)
     {
+        SqliteRuntime.EnsureConfigured();
         var db=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=file,Pooling=false,Mode=readOnly?SqliteOpenMode.ReadOnly:SqliteOpenMode.ReadWriteCreate}.ToString());
         try{db.Open();return db;}catch{db.Dispose();throw;}
     }

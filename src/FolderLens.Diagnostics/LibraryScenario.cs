@@ -34,6 +34,8 @@ internal static class LibraryScenario
             Console.WriteLine($"Read-only directory enumeration: {enumeratedFiles} files, {enumeratedDirectories} directories, {enumerationMs:F1}ms.");
         }
         await using var catalog=new CatalogStore(data);await catalog.Initialize(token);
+        // Profile the catalog layout the app browses with (BrowsingSessionStorage).
+        if(scanProfile)await catalog.Write(c=>{CompactBrowsingCatalog.Configure(c,maximumBytes:null);return true;},token);
         var existing=await catalog.Read(c=>{using var q=c.CreateCommand();q.CommandText="SELECT root_id,root_epoch,scan_state FROM Roots WHERE display_path=$path";q.Parameters.AddWithValue("$path",source);using var r=q.ExecuteReader();return r.Read()?(Id:r.GetString(0),Epoch:r.GetInt64(1),State:r.GetString(2)):(Id:"real-library",Epoch:0L,State:"new");},token);
         long epoch=existing.Epoch==0?await catalog.OpenRoot(existing.Id,source,token):existing.Epoch;string rootId=existing.Id;double? scanMs=null;
         var timer=Stopwatch.StartNew();

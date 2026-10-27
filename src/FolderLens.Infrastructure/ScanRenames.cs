@@ -17,26 +17,47 @@ internal sealed class ScanRenames(CatalogStore catalog,ScanWorkerClient? probe,F
     public async Task<Dictionary<string,ScanRename>> Find(string rootId,string root,string parentId,string relative,ScanEntry[] entries,CancellationToken cancellation)
     {
         var result=new Dictionary<string,ScanRename>(StringComparer.Ordinal);
-        foreach(var item in entries)
+        var lookups=entries.Where(item=>item.PhysicalIdentity is not null&&item.SkipReason is null).ToArray();
+        if(lookups.Length==0)return result;
+        string PathOf(ScanEntry item)=>relative.Length==0?item.Name:Path.Combine(relative,item.Name);
+        // These bounded identity lookups are part of the scanner's write pipeline.
+        // The general reader builds entire snapshots; queuing here would stop file
+        // discovery behind every background view rebuild. No filesystem I/O runs here.
+        // One writer turn covers the packet (at most 128 entries) instead of one per entry.
+        var found=await catalog.Write(c=>
         {
-            if(item.PhysicalIdentity is not {} identity||item.SkipReason is not null)continue;
-            string path=relative.Length==0?item.Name:Path.Combine(relative,item.Name);
-            // These bounded identity lookups are part of the scanner's write pipeline.
-            // The general reader builds entire snapshots; queuing here would stop file
-            // discovery behind every background view rebuild. No filesystem I/O runs here.
-            var candidates=await catalog.Write(c=>
+            var commands=new Dictionary<string,SqliteCommand>(StringComparer.Ordinal);
+            SqliteCommand Command(string sql,string path,string identity)
             {
-                using var current=c.CreateCommand();current.CommandText=item.Directory?"SELECT d.directory_id FROM Directories d JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id WHERE d.root_id=$r AND d.canonical_key=$p AND i.physical_identity=$identity":"SELECT entry_id FROM Files WHERE root_id=$r AND canonical_key=$p AND physical_identity=$identity";
-                current.Parameters.AddWithValue("$r",rootId);current.Parameters.AddWithValue("$p",path);current.Parameters.AddWithValue("$identity",identity);
-                if(current.ExecuteScalar() is not null)return new List<ScanRename>();
-                using var find=c.CreateCommand();find.CommandText=item.Directory?
-                    "SELECT d.directory_id,d.relative_path FROM Directories d JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id WHERE d.root_id=$r AND i.physical_identity=$identity LIMIT 129":
-                    "SELECT entry_id,relative_path FROM Files WHERE root_id=$r AND physical_identity=$identity LIMIT 129";
-                find.Parameters.AddWithValue("$r",rootId);find.Parameters.AddWithValue("$identity",identity);
-                using var rows=find.ExecuteReader();var matches=new List<ScanRename>();while(rows.Read())matches.Add(new(rows.GetString(0),rows.GetString(1),identity,item.Directory));return matches;
-            },cancellation).ConfigureAwait(false);
+                if(!commands.TryGetValue(sql,out var command))
+                {
+                    command=c.CreateCommand();command.CommandText=sql;command.Parameters.AddWithValue("$r",rootId);
+                    command.Parameters.Add("$p",SqliteType.Text);command.Parameters.Add("$identity",SqliteType.Text);commands.Add(sql,command);
+                }
+                command.Parameters["$p"].Value=path;command.Parameters["$identity"].Value=identity;return command;
+            }
+            try
+            {
+                var candidates=new List<ScanRename>[lookups.Length];
+                for(int index=0;index<lookups.Length;index++)
+                {
+                    var item=lookups[index];string path=PathOf(item),identity=item.PhysicalIdentity!;candidates[index]=[];
+                    if(Command(item.Directory?"SELECT d.directory_id FROM Directories d JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id WHERE d.root_id=$r AND d.canonical_key=$p AND i.physical_identity=$identity":"SELECT entry_id FROM Files WHERE root_id=$r AND canonical_key=$p AND physical_identity=$identity",path,identity).ExecuteScalar() is not null)continue;
+                    using var rows=Command(item.Directory?
+                        "SELECT d.directory_id,d.relative_path FROM Directories d JOIN ScanDirectoryIdentities i ON i.directory_id=d.directory_id WHERE d.root_id=$r AND i.physical_identity=$identity LIMIT 129":
+                        "SELECT entry_id,relative_path FROM Files WHERE root_id=$r AND physical_identity=$identity LIMIT 129",path,identity).ExecuteReader();
+                    while(rows.Read())candidates[index].Add(new(rows.GetString(0),rows.GetString(1),identity,item.Directory));
+                }
+                return candidates;
+            }
+            finally{foreach(var command in commands.Values)command.Dispose();}
+        },cancellation).ConfigureAwait(false);
+        string? parentMode=null;
+        for(int index=0;index<lookups.Length;index++)
+        {
+            var item=lookups[index];var candidates=found[index];string path=PathOf(item),identity=item.PhysicalIdentity!;
             if(candidates.Count is 0 or >128)continue;
-            string parentMode=await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT case_mode FROM Directories WHERE directory_id=$id";cmd.Parameters.AddWithValue("$id",parentId);return cmd.ExecuteScalar() as string??"unknown";},cancellation).ConfigureAwait(false);
+            parentMode??=await catalog.Write(c=>{using var cmd=c.CreateCommand();cmd.CommandText="SELECT case_mode FROM Directories WHERE directory_id=$id";cmd.Parameters.AddWithValue("$id",parentId);return cmd.ExecuteScalar() as string??"unknown";},cancellation).ConfigureAwait(false);
             ScanRename? match=null;bool ambiguous=false;
             foreach(var old in candidates)
             {

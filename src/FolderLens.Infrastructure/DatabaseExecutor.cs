@@ -48,6 +48,7 @@ public sealed class DatabaseExecutor : IAsyncDisposable
     }
     internal static SqliteConnection Open(string path)
     {
+        SqliteRuntime.EnsureConfigured();
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
         try
         {

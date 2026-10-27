@@ -56,6 +56,20 @@ public sealed class QueryLifecycleTests
     }
 
     [Fact]
+    public async Task LargeSnapshotBatchesNeedSessionHeadroomAndStayContiguous()
+    {
+        // Large commits are allowed only when their worst-case WAL growth fits the budget.
+        Assert.Equal(CatalogStore.LargeSnapshotBatchRows,CatalogStore.SnapshotBatchLimit(64L<<20,1L<<30,4096));
+        Assert.Equal(CatalogStore.SnapshotBatchRows,CatalogStore.SnapshotBatchLimit((1L<<30)-(16L<<20),1L<<30,4096));
+        Assert.Equal(CatalogStore.SnapshotBatchRows,CatalogStore.SnapshotBatchLimit(0,262144,4096));
+        string directory=Temp();await using var catalog=new CatalogStore(directory);await catalog.Initialize();await catalog.SeedBenchmark(5000);
+        Assert.Equal((long)CatalogStore.CatalogAutoCheckpointPages,await catalog.Write(c=>Scalar(c,"PRAGMA wal_autocheckpoint")));
+        var handle=await catalog.CreateSnapshot(new FilterSpec{RootId="benchmark",Kinds=[]},1,1);Assert.Equal(5000,handle.Count);
+        Assert.Equal(new[]{0L,4999L,5000L},await Sessions(directory,c=>new[]{Scalar(c,"SELECT min(ordinal) FROM ResultItems"),Scalar(c,"SELECT max(ordinal) FROM ResultItems"),Scalar(c,"SELECT count(*) FROM ResultItems")}));
+        Assert.Equal(4999L,(await catalog.ReadPage(handle.Id,4999,1)).Single().Ordinal);
+    }
+
+    [Fact]
     public async Task CancellationInterruptsRunningSqlAndExecutorRemainsUsable()
     {
         await using var catalog=new CatalogStore(Temp());await catalog.Initialize();

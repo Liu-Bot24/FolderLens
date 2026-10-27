@@ -182,8 +182,9 @@ public sealed class WorkerTests
         await using var worker=new WorkerClient(WorkerExecutable(root),directory){StopTimeout=TimeSpan.FromMilliseconds(200)};
         var first=await worker.Request(input,"fit",context,new(64,64),CancellationToken.None);await worker.ReleaseAsset(first);int waits=0;
         worker.WaitForExitOverride=(_,timeout)=>{Interlocked.Increment(ref waits);return Task.Delay(timeout).ContinueWith(_=>false);};
-        worker.BeforeResponseRead=(_,token)=>Task.Delay(Timeout.Infinite,token);
-        using var cancel=new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        // Cancel only once the request is waiting on the worker, even under load.
+        using var cancel=new CancellationTokenSource();
+        worker.BeforeResponseRead=(_,token)=>{cancel.CancelAfter(TimeSpan.FromMilliseconds(100));return Task.Delay(Timeout.Infinite,token);};
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>worker.Request(input,"fit",context,new(64,64),cancel.Token).WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Equal(1,waits);worker.BeforeResponseRead=null;worker.WaitForExitOverride=null;
         var next=await worker.Request(input,"fit",context,new(64,64),CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));

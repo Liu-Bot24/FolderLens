@@ -63,6 +63,14 @@ public sealed partial class CatalogStore : IAsyncDisposable
         // Batch admission must observe WAL growth even if the deadline timer
         // has not been scheduled yet. An idle WAL file must not pause writers.
         || Volatile.Read(ref snapshotActive) != 0 && FileBytes(catalogPath+"-wal") >= limits.CatalogWalBytes*3/4;
+    internal const int CatalogAutoCheckpointPages=8192;
+    // Each snapshot row dirties at most its table page plus one random leaf in
+    // each of two indexes. Commit large batches only while that worst case fits.
+    internal const int SnapshotBatchRows=512,LargeSnapshotBatchRows=2048;
+    // Random entry/directory index leaves dominate session WAL writes; fewer,
+    // larger commits rewrite them less often. The 1 MiB row-byte cap still applies.
+    internal static int SnapshotBatchLimit(long usedBytes,long budgetBytes,long pageSize)=>
+        usedBytes+LargeSnapshotBatchRows*3L*pageSize+(2L<<20)<=budgetBytes?LargeSnapshotBatchRows:SnapshotBatchRows;
     public CatalogStore(string dataDirectory) : this(dataDirectory, new SnapshotLimits()) { }
     public CatalogStore(string dataDirectory, SnapshotLimits limits,string? playlistPath=null)
     {
@@ -83,6 +91,11 @@ public sealed partial class CatalogStore : IAsyncDisposable
         await writer.Execute(c=>InitializeSchema(c,"catalog",cancellation,progress),cancellation);
         await writer.Execute(c=>Execute(c,ReadBindingSchema),cancellation);
         await writer.Execute(InitializeCollectionRevision,cancellation);
+        // Scan batches dirty hundreds of random index pages each. A 4 MiB
+        // automatic checkpoint ran (and synced) after nearly every batch;
+        // 32 MiB stays far below the snapshot WAL budget. Attached playlists
+        // keep synchronous=FULL, so their durability does not depend on this.
+        await writer.Execute(c=>Execute(c,$"PRAGMA wal_autocheckpoint={CatalogAutoCheckpointPages}"),cancellation);
         if(playlistPath is not null){await writer.Execute(c=>InitializePlaylist(c,playlistPath),cancellation);await RecoverCompletedFileOperation();}
         await sessionReader.Execute(c=>InitializeSchema(c,"sessions",cancellation,progress),cancellation);
         await sessionReader.Execute(c=>Execute(c,"UPDATE ResultSessions SET active_leases=0; UPDATE ResultSessions SET state='failed',error_code='Interrupted',completed_utc_ticks=$now WHERE state='building'",("$now",DateTime.UtcNow.Ticks)),cancellation);
@@ -299,7 +312,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
         PruneSessions(session,limits.HistoryCount);
         // SQLite's page limit includes the freelist, so deleted histories are reused.
         // Reserve bounded WAL/shm headroom separately from the main database budget.
-        long reserve=Math.Min(16L<<20,limits.SessionDiskBytes/4),maxPages=(limits.SessionDiskBytes-reserve)/Scalar(session,"PRAGMA page_size");
+        long reserve=Math.Min(16L<<20,limits.SessionDiskBytes/4),pageSize=Scalar(session,"PRAGMA page_size"),maxPages=(limits.SessionDiskBytes-reserve)/pageSize;
         long actualPages=Scalar(session,$"PRAGMA max_page_count={maxPages}");
         if(actualPages>maxPages || SessionBytes()>limits.SessionDiskBytes)throw new IOException("结果会话空间不足；活动会话已保留。");
         string id=Guid.NewGuid().ToString("N");long count=0,matched=0,pending=0,unresolvable=0;
@@ -357,15 +370,17 @@ public sealed partial class CatalogStore : IAsyncDisposable
             foreach(string key in new[]{"$id","$ordinal","$entry","$version","$pathrev","$dir","$path","$bytes","$allocated","$physical","$kind","$group","$sourceId","$sourcePath","$sourceEpoch","$location","$binding"})add.Parameters.Add(new SqliteParameter(key,DBNull.Value));
             string? previousGroup=null;
             using var scan=c.CreateCommand();scan.Transaction=readTransaction;scan.CommandText="SELECT scan_state FROM Roots WHERE root_id=$root";scan.Parameters.AddWithValue("$root",filter.RootId);string scanState=scan.ExecuteScalar()?.ToString()??"unknown";
-            add.Prepare();SqliteTransaction? transaction=null;long batchBytes=0;
+            add.Prepare();SqliteTransaction? transaction=null;long batchBytes=0;int batchRows=0,batchLimit=SnapshotBatchRows;
             void CommitBatch()
             {
                 if(transaction is null)return;
                 using var progress=session.CreateCommand();progress.Transaction=transaction;progress.CommandText="UPDATE ResultSessions SET committed_count=$n,pending_count=$pending,unresolvable_count=$failed WHERE session_id=$id";
                 progress.Parameters.AddWithValue("$n",count);progress.Parameters.AddWithValue("$pending",pending);progress.Parameters.AddWithValue("$failed",unresolvable);progress.Parameters.AddWithValue("$id",id);progress.ExecuteNonQuery();
-                stop.Token.ThrowIfCancellationRequested();transaction.Commit();transaction.Dispose();transaction=null;batchBytes=0;
+                stop.Token.ThrowIfCancellationRequested();transaction.Commit();transaction.Dispose();transaction=null;batchBytes=0;batchRows=0;
                 if(FileBytes(sessionPath+"-wal")>reserve/2)Checkpoint(session,sessionPath,true);
-                if(SessionBytes()>limits.SessionDiskBytes){Interlocked.CompareExchange(ref resourceFault,3,0);stop.Cancel();}
+                long used=SessionBytes();
+                if(used>limits.SessionDiskBytes){Interlocked.CompareExchange(ref resourceFault,3,0);stop.Cancel();}
+                batchLimit=SnapshotBatchLimit(used,limits.SessionDiskBytes,pageSize);
                 stop.Token.ThrowIfCancellationRequested();
             }
             try
@@ -388,7 +403,7 @@ public sealed partial class CatalogStore : IAsyncDisposable
                         group.Parameters.AddWithValue("$session",id);group.Parameters.AddWithValue("$group",previousGroup);group.Parameters.AddWithValue("$path",source.GetString(11));group.Parameters.AddWithValue("$bytes",source.GetInt64(12));group.Parameters.AddWithValue("$matches",source.GetInt64(13));group.Parameters.AddWithValue("$start",count);group.Parameters.AddWithValue("$state",scanState);group.Parameters.AddWithValue("$scope",filter.Grouping.CapacityScope);group.ExecuteNonQuery();
                     }
                     add.ExecuteNonQuery();count++;batchBytes+=System.Text.Encoding.UTF8.GetByteCount(source.GetString(4))+256;
-                    if(count%512==0 || batchBytes>=1<<20)CommitBatch();
+                    if(++batchRows>=batchLimit || batchBytes>=1<<20)CommitBatch();
                 }
                 CommitBatch();
             }
