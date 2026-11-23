@@ -109,7 +109,7 @@
       <StaticResource x:Key="ShellBackgroundBrush" ResourceKey="BrowserChromeBrush" />
       <AcrylicBrush x:Key="BrowserSurfaceBrush" TintColor="#FFFFFF" TintOpacity="0.35" TintLuminosityOpacity="0.6" FallbackColor="#F4F5FB" />
       <AcrylicBrush x:Key="AppearanceSidebarBrush" TintColor="#FFFFFF" TintOpacity="0.35" TintLuminosityOpacity="0.6" FallbackColor="#F4F5FB" />
-      <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="BrowserInsetBrush" Color="#F4F5FB" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#241A2550" />
       <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="#1A1A2550" />
       <LinearGradientBrush x:Key="AppearancePaneRimBrush" StartPoint="0,0" EndPoint="0,1">
@@ -206,7 +206,7 @@
       <StaticResource x:Key="GridViewItemSelectedBorderBrush" ResourceKey="AccentFillColorDefaultBrush" />
       <StaticResource x:Key="GridViewItemSelectedPointerOverBorderBrush" ResourceKey="AccentFillColorSecondaryBrush" />
       <StaticResource x:Key="GridViewItemSelectedPressedBorderBrush" ResourceKey="AccentFillColorTertiaryBrush" />
-      <StaticResource x:Key="GridViewItemSelectedInnerBorderBrush" ResourceKey="BrowserInsetBrush" />
+      <SolidColorBrush x:Key="GridViewItemSelectedInnerBorderBrush" Color="Transparent" />
       <StaticResource x:Key="GridViewItemCheckBoxSelectedBrush" ResourceKey="AccentFillColorDefaultBrush" />
       <StaticResource x:Key="GridViewItemBackgroundPointerOver" ResourceKey="GridViewItemHoverBrush" />
       <StaticResource x:Key="GridViewItemBackgroundSelected" ResourceKey="GridViewItemSelectedFillBrush" />
@@ -225,7 +225,7 @@
       <StaticResource x:Key="ShellBackgroundBrush" ResourceKey="BrowserChromeBrush" />
       <AcrylicBrush x:Key="BrowserSurfaceBrush" TintColor="#141A2E" TintOpacity="0.62" TintLuminosityOpacity="0.85" FallbackColor="#161C2E" />
       <AcrylicBrush x:Key="AppearanceSidebarBrush" TintColor="#141A2E" TintOpacity="0.62" TintLuminosityOpacity="0.85" FallbackColor="#161C2E" />
-      <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="BrowserInsetBrush" Color="#161C2E" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#26FFFFFF" />
       <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="#1FFFFFFF" />
       <LinearGradientBrush x:Key="AppearancePaneRimBrush" StartPoint="0,0" EndPoint="0,1">
@@ -320,7 +320,7 @@
       <StaticResource x:Key="GridViewItemSelectedBorderBrush" ResourceKey="AccentFillColorDefaultBrush" />
       <StaticResource x:Key="GridViewItemSelectedPointerOverBorderBrush" ResourceKey="AccentFillColorSecondaryBrush" />
       <StaticResource x:Key="GridViewItemSelectedPressedBorderBrush" ResourceKey="AccentFillColorTertiaryBrush" />
-      <StaticResource x:Key="GridViewItemSelectedInnerBorderBrush" ResourceKey="BrowserInsetBrush" />
+      <SolidColorBrush x:Key="GridViewItemSelectedInnerBorderBrush" Color="Transparent" />
       <StaticResource x:Key="GridViewItemCheckBoxSelectedBrush" ResourceKey="AccentFillColorDefaultBrush" />
       <StaticResource x:Key="GridViewItemBackgroundPointerOver" ResourceKey="GridViewItemHoverBrush" />
       <StaticResource x:Key="GridViewItemBackgroundSelected" ResourceKey="GridViewItemSelectedFillBrush" />

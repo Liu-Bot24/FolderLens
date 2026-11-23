@@ -51,7 +51,7 @@
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#F3F3F3" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#B3FFFFFF" />
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="Transparent" />
-      <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="BrowserInsetBrush" Color="#FBFBFB" />
       <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#E5E5E5" />
       <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="#14000000" />
@@ -78,7 +78,7 @@
       <SolidColorBrush x:Key="BrowserChromeBrush" Color="#202020" />
       <SolidColorBrush x:Key="BrowserSurfaceBrush" Color="#4C3A3A3A" />
       <SolidColorBrush x:Key="AppearanceSidebarBrush" Color="Transparent" />
-      <SolidColorBrush x:Key="BrowserInsetBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="BrowserInsetBrush" Color="#282828" />
       <SolidColorBrush x:Key="AppearancePathBrush" Color="{ThemeResource TextFillColorSecondary}" />
       <SolidColorBrush x:Key="BrowserLineBrush" Color="#3D3D3D" />
       <SolidColorBrush x:Key="AppearanceChromeLineBrush" Color="#1AFFFFFF" />
